@@ -656,10 +656,16 @@ export const conversationTurn = z.object({
   messages: z.array(message),
   fileChanges: z.array(turnFileChange).optional(),
   fileChangeState: z.enum(["applied", "undone"]).optional(),
+  fileChangeRevision: z.number().int().positive().optional(),
 });
 export type ConversationTurn = z.infer<typeof conversationTurn>;
 
+export const turnFileChangeActionRequest = z.object({
+  expectedRevision: z.number().int().positive(),
+});
+
 export const turnFileChangeActionResponse = z.object({
+  revision: z.number().int().positive(),
   state: z.enum(["applied", "undone"]),
 });
 export type TurnFileChangeActionResponse = z.infer<typeof turnFileChangeActionResponse>;

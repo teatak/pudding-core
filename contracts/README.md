@@ -5,6 +5,48 @@ The Go daemon embeds it through this package; desktop generates `web/contracts/`
 `api.ts` and `events.ts` are the TypeScript/Zod client validation definitions for the REST and SSE protocol.
 Server structs and lifecycle semantics remain owned by core; verify both sides when changing a wire field.
 
+Semantic rename (`builtin_code_rename`) returns `ok: false` with
+`reason: "rename_conflict"` when its saved-file snapshots or returned LSP
+versions no longer match. Clients should explain that changes were preserved
+and ask the user/model to inspect current code before a fresh request; do not
+retry the same coordinates automatically. The first rename response discovers
+targets only. Core then captures and synchronizes those files, recomputes the
+edits, validates versions and contents, and keeps the original snapshots
+through patch preparation and the patch writer's stale-content checks. A newly
+introduced target during recomputation is a conflict, not an unchecked write.
+This adds a tool-result reason within the existing opaque result body; REST/SSE
+schemas, handshake version and database schema are unchanged. It does not
+serialize unrelated external filesystem writers across OS rename syscalls.
+
+Protocol 37 requires `{ expectedRevision }` for turn file undo/redo
+(`POST /sessions/:id/turns/:turnID/file-changes/undo` and `/redo`). Read it from
+`ConversationTurn.fileChangeRevision` alongside `fileChangeState`. A successful
+response returns `{ state, revision }`. Revisions are positive safe integers,
+strictly increasing for each turn; treat them as opaque comparison values.
+Missing or invalid revisions return `400 turn_file_changes_invalid_revision`.
+An obsolete revision, incompatible state, running turn or changed file returns
+`409 turn_file_changes_conflict` without replaying the files. The version check
+runs inside the replay lock before any filesystem changes and again in the
+state update's compare-and-swap. An old undo cannot undo a later redo cycle.
+
+Clients must reconcile uncertain responses by GETting that specific turn and
+updating its cached state/revision. If this read also fails, retain the attempt
+and offer a read-only status retry, including across component remounts. Do not
+automatically resend a write or interpret every 409 as success. After a
+successful read, a new explicit action uses the newly reviewed revision. Late
+GET/list/SSE/action responses must not replace a newer file-change revision.
+This is state reconciliation, not a durable success receipt: a GET shows the
+current cycle, not proof of which caller performed an earlier write.
+
+The existing `turn_file_change_states.updated_at` provides the revision, updated
+to `max(previous + 1, now)` even within one millisecond or after clock rollback;
+schema remains 49 and existing turn snapshots require no migration. Existing
+file snapshot checks, rollback and authorization remain in force. Filesystem
+changes and the database state are not a crash-atomic transaction; this does not
+add recovery for daemon termination between those steps or serialize external
+filesystem writers. The new handshake prevents older clients from sending
+unguarded replay requests.
+
 Protocol 36 adds optional `clientRequestID` and `expectedRevision` to Git commit
 and branch creation (`POST /sessions/:id/project/git/commit` and `/branches`).
 Available Git status responses include an opaque `revision` covering HEAD,

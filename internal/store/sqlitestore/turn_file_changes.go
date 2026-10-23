@@ -150,30 +150,27 @@ func turnFileChangeReversible(change *store.TurnFileChange) bool {
 	return valid(change.OldType, change.OldDigest) && valid(change.NewType, change.NewDigest)
 }
 
-func turnFileChangeStateForTurnTx(ctx context.Context, tx *sql.Tx, sessionID, turnID string) (store.TurnFileChangeState, error) {
+// updated_at also serves as a strictly increasing revision for replay state.
+// Existing databases already have this value; no snapshot migration is needed.
+func turnFileChangeStateForTurnTx(ctx context.Context, tx *sql.Tx, sessionID, turnID string) (store.TurnFileChangeState, int64, error) {
 	var state string
-	if err := tx.QueryRowContext(ctx, `SELECT state FROM turn_file_change_states WHERE session_id=? AND turn_id=?`, sessionID, turnID).Scan(&state); errors.Is(err, sql.ErrNoRows) {
-		return "", nil
+	var revision int64
+	if err := tx.QueryRowContext(ctx, `SELECT state,updated_at FROM turn_file_change_states WHERE session_id=? AND turn_id=?`, sessionID, turnID).Scan(&state, &revision); errors.Is(err, sql.ErrNoRows) {
+		return "", 0, nil
 	} else if err != nil {
-		return "", err
+		return "", 0, err
 	}
-	return store.TurnFileChangeState(state), nil
+	return store.TurnFileChangeState(state), revision, nil
 }
 
-func (s *Store) UpdateTurnFileChangeState(ctx context.Context, sessionID, turnID string, expected, next store.TurnFileChangeState) error {
+func (s *Store) UpdateTurnFileChangeState(ctx context.Context, sessionID, turnID string, expected, next store.TurnFileChangeState, expectedRevision int64) (int64, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	result, err := s.db.ExecContext(ctx, `UPDATE turn_file_change_states SET state=?,updated_at=? WHERE session_id=? AND turn_id=? AND state=?`,
-		next, unixMS(time.Now()), sessionID, turnID, expected)
-	if err != nil {
-		return err
+	var revision int64
+	err := s.db.QueryRowContext(ctx, `UPDATE turn_file_change_states SET state=?,updated_at=MAX(updated_at+1,?) WHERE session_id=? AND turn_id=? AND state=? AND updated_at=? RETURNING updated_at`,
+		next, unixMS(time.Now()), sessionID, turnID, expected, expectedRevision).Scan(&revision)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, store.ErrTurnFileChangeConflict
 	}
-	changed, err := result.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if changed != 1 {
-		return store.ErrTurnFileChangeConflict
-	}
-	return nil
+	return revision, err
 }

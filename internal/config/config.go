@@ -24,6 +24,8 @@ const (
 )
 
 const (
+	SettingToolResultCoolingEnabled    = "tool_result_cooling_enabled"
+	SettingToolResultCoolingKeepTurns  = "tool_result_cooling_keep_turns"
 	SettingCompactTailInputTurns       = "compact_tail_input_turns"
 	SettingCompactAutoThresholdPercent = "compact_auto_threshold_percent"
 	SettingShowCompactSummary          = "show_compact_summary"
@@ -37,6 +39,7 @@ const (
 )
 
 const (
+	DefaultToolResultCoolingKeepTurns  = 2
 	DefaultCompactTailInputTurns       = 2
 	DefaultCompactAutoThresholdPercent = 80
 	DefaultEditorFontFamily            = "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace"
@@ -271,8 +274,10 @@ type settingsYAML struct {
 }
 
 type compactSettingsYAML struct {
-	TailInputTurns       int  `yaml:"tail_input_turns,omitempty"`
-	AutoThresholdPercent *int `yaml:"auto_threshold_percent,omitempty"`
+	ToolResultCoolingEnabled   *bool `yaml:"tool_result_cooling_enabled,omitempty"`
+	ToolResultCoolingKeepTurns *int  `yaml:"tool_result_cooling_keep_turns,omitempty"`
+	TailInputTurns             int   `yaml:"tail_input_turns,omitempty"`
+	AutoThresholdPercent       *int  `yaml:"auto_threshold_percent,omitempty"`
 }
 
 type displaySettingsYAML struct {
@@ -359,6 +364,8 @@ func defaultSettingsYAML() settingsYAML {
 
 func (s settingsYAML) asMap() map[string]string {
 	return map[string]string{
+		SettingToolResultCoolingEnabled:    formatBoolSetting(s.Compact.ToolResultCoolingEnabled == nil || *s.Compact.ToolResultCoolingEnabled),
+		SettingToolResultCoolingKeepTurns:  strconv.Itoa(s.toolResultCoolingKeepTurns()),
 		SettingCompactTailInputTurns:       strconv.Itoa(s.compactTailInputTurns()),
 		SettingCompactAutoThresholdPercent: strconv.Itoa(s.compactAutoThresholdPercent()),
 		SettingShowCompactSummary:          formatBoolSetting(s.showCompactSummary()),
@@ -374,6 +381,18 @@ func (s settingsYAML) asMap() map[string]string {
 
 func (s *settingsYAML) set(key, raw string) error {
 	switch key {
+	case SettingToolResultCoolingEnabled:
+		v, err := parseBoolSetting(raw)
+		if err != nil {
+			return err
+		}
+		s.Compact.ToolResultCoolingEnabled = &v
+	case SettingToolResultCoolingKeepTurns:
+		n, err := parseIntSetting(raw, 0, 50)
+		if err != nil {
+			return err
+		}
+		s.Compact.ToolResultCoolingKeepTurns = &n
 	case SettingCompactTailInputTurns:
 		n, err := parseIntSetting(raw, 1, 50)
 		if err != nil {
@@ -438,6 +457,13 @@ func (s *settingsYAML) set(key, raw string) error {
 		return fmt.Errorf("%w %q", ErrInvalidSetting, key)
 	}
 	return nil
+}
+
+func (s settingsYAML) toolResultCoolingKeepTurns() int {
+	if s.Compact.ToolResultCoolingKeepTurns != nil {
+		return *s.Compact.ToolResultCoolingKeepTurns
+	}
+	return DefaultToolResultCoolingKeepTurns
 }
 
 func (s settingsYAML) compactTailInputTurns() int {

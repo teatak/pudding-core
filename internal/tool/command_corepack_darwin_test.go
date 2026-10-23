@@ -54,14 +54,17 @@ func TestMacOSCommandSandboxCorepackColdCacheHonorsVersionSelection(t *testing.T
 		result := runMacOSSandboxTestCommand(t, newPlatformCommandRunner(home), commandSpec{
 			Executable: corepack, Args: []string{"pnpm", "store", "path"}, CWD: project, Env: env, ProjectDirs: []string{project},
 		})
-		if result.exitCode == 0 || !strings.Contains(result.stderr, "Network access disabled") || strings.Contains(result.stderr, "/latest") || !strings.Contains(result.stderr, "/pnpm-") || !strings.Contains(result.stderr, ".tgz") {
-			t.Fatalf("cold cache selected latest instead of a known version: pin=%q exit=%d stderr=%q", pin, result.exitCode, result.stderr)
+		// Older Corepack/Clipanion versions print UsageError to stdout; newer
+		// versions use stderr. Assert the selected URL independently of the stream.
+		output := result.stdout + "\n" + result.stderr
+		if result.exitCode == 0 || !strings.Contains(output, "Network access disabled") || strings.Contains(output, "/latest") || !strings.Contains(output, "/pnpm-") || !strings.Contains(output, ".tgz") {
+			t.Fatalf("expected an offline versioned tarball request: pin=%q exit=%d stdout=%q stderr=%q err=%v", pin, result.exitCode, result.stdout, result.stderr, result.err)
 		}
-		if pin != "" && !strings.Contains(result.stderr, "/pnpm-10.33.2.tgz") {
-			t.Fatalf("project packageManager was replaced: %q", result.stderr)
+		if pin != "" && !strings.Contains(output, "/pnpm-10.33.2.tgz") {
+			t.Fatalf("project packageManager was replaced: %q", output)
 		}
-		if strings.Contains(result.stderr, "Operation not permitted") || strings.Contains(result.stderr, "sandbox: deny") {
-			t.Fatalf("version selection failed at the sandbox boundary: %q", result.stderr)
+		if strings.Contains(output, "Operation not permitted") || strings.Contains(output, "sandbox: deny") {
+			t.Fatalf("version selection failed at the sandbox boundary: %q", output)
 		}
 	}
 }

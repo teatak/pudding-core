@@ -27,7 +27,8 @@ type Builder struct {
 	attachmentHome string
 	plugins        PluginSkillSource
 
-	skills SkillSource
+	coolingSettings CoolingSettings
+	skills          SkillSource
 }
 
 const noImageComputerUseGuidance = "The current model cannot receive image inputs. Do not request Computer Use screenshots for your own visual inspection because the screenshot bytes will not be visible to you. Capture one only when the user explicitly asks to receive a screenshot."
@@ -120,7 +121,7 @@ func (b *Builder) build(
 // BuildForProviderWithHistory projects a canonical snapshot, optionally ending
 // in a proposed summary. Compaction uses the same projection as actual requests
 // to validate its budget before committing the new boundary.
-func (b *Builder) BuildForProviderWithHistory(ctx context.Context, sessionID, providerName, model, mode string, defs []provider.ToolDef, msgs []*store.Message, cfg provider.ModelConfig) (provider.Request, error) {
+func (b *Builder) BuildForProviderWithHistory(ctx context.Context, sessionID, providerName, model, mode string, defs []provider.ToolDef, msgs []*store.Message, cfg provider.ModelConfig, cooling ...store.ContextCooling) (provider.Request, error) {
 	sess, err := b.store.GetSession(ctx, sessionID)
 	if err != nil {
 		return provider.Request{}, err
@@ -129,10 +130,21 @@ func (b *Builder) BuildForProviderWithHistory(ctx context.Context, sessionID, pr
 	for _, def := range defs {
 		allowed[def.Name] = struct{}{}
 	}
+	if len(cooling) > 0 {
+		return b.buildMessagesWithCooling(ctx, sess, providerName, model, mode, allowed, msgs, cooling[0], cfg)
+	}
 	return b.buildMessages(ctx, sess, providerName, model, mode, allowed, msgs, cfg)
 }
 
 func (b *Builder) buildMessages(ctx context.Context, sess *store.Session, providerName, model, mode string, allowedTools map[string]struct{}, msgs []*store.Message, configs ...provider.ModelConfig) (provider.Request, error) {
+	cooling, err := b.contextCooling(ctx, sess.ID)
+	if err != nil {
+		return provider.Request{}, err
+	}
+	return b.buildMessagesWithCooling(ctx, sess, providerName, model, mode, allowedTools, msgs, cooling, configs...)
+}
+
+func (b *Builder) buildMessagesWithCooling(ctx context.Context, sess *store.Session, providerName, model, mode string, allowedTools map[string]struct{}, msgs []*store.Message, cooling store.ContextCooling, configs ...provider.ModelConfig) (provider.Request, error) {
 	sessionID := sess.ID
 	// Reset is a hard task-context boundary, unlike compaction. Filter both the
 	// ordinary history and the source used to restore historical skill calls;
@@ -140,6 +152,9 @@ func (b *Builder) buildMessages(ctx context.Context, sess *store.Session, provid
 	msgs = store.SubagentContextMessages(msgs)
 	msgs = messagesWithSkillReferences(msgs, EffectiveMessages(msgs), sess.LoadedPluginIDs)
 	msgs = historyInTurnOrder(msgs)
+	if toolIncluded(allowedTools, tool.HistoryGetMessage) {
+		msgs = cooledMessages(msgs, cooling)
+	}
 	currentMode := store.NormalizeAgentMode(store.AgentMode(mode))
 	if currentMode == "" {
 		currentMode = store.ModeChat

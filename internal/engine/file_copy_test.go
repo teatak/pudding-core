@@ -55,13 +55,13 @@ func TestFileCopyScratchAbsoluteUndo(t *testing.T) {
 		t.Fatal(err)
 	}
 	replayer := turnfiles.NewReplayer(ms)
-	if _, err := replayer.Apply(ctx, "session", "turn", turnfiles.ReplayUndo, []string{root}); err != nil {
+	if _, err := replayer.Apply(ctx, "session", "turn", turnfiles.ReplayUndo, []string{root}, fileCopyReplayRevision(t, ms)); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(filepath.Join(root, "target.txt")); !os.IsNotExist(err) {
 		t.Fatal("scratch undo failed")
 	}
-	if _, err := replayer.Apply(ctx, "session", "turn", turnfiles.ReplayRedo, []string{root}); err != nil {
+	if _, err := replayer.Apply(ctx, "session", "turn", turnfiles.ReplayRedo, []string{root}, fileCopyReplayRevision(t, ms)); err != nil {
 		t.Fatal(err)
 	}
 	for _, name := range []string{"source.txt", "target.txt"} {
@@ -157,13 +157,13 @@ func TestCrossScopeCopyApprovalAndUndo(t *testing.T) {
 				t.Fatal(err)
 			}
 			replayer := turnfiles.NewReplayer(ms)
-			if _, err := replayer.Apply(ctx, "session", "turn", turnfiles.ReplayUndo, []string{root}); err != nil {
+			if _, err := replayer.Apply(ctx, "session", "turn", turnfiles.ReplayUndo, []string{root}, fileCopyReplayRevision(t, ms)); err != nil {
 				t.Fatal(err)
 			}
 			if _, err := os.Stat(filepath.Join(root, "page.html")); !os.IsNotExist(err) {
 				t.Fatal("undo did not remove new copy")
 			}
-			if _, err := replayer.Apply(ctx, "session", "turn", turnfiles.ReplayRedo, []string{root}); err != nil {
+			if _, err := replayer.Apply(ctx, "session", "turn", turnfiles.ReplayRedo, []string{root}, fileCopyReplayRevision(t, ms)); err != nil {
 				t.Fatal(err)
 			}
 			data, err := os.ReadFile(filepath.Join(root, "page.html"))
@@ -303,13 +303,13 @@ func TestFileCopyExternalAccessApproval(t *testing.T) {
 					t.Fatal(err)
 				}
 				replayer := turnfiles.NewReplayer(ms)
-				if _, err := replayer.Apply(context.Background(), "session", "turn", turnfiles.ReplayUndo, []string{root}); err != nil {
+				if _, err := replayer.Apply(context.Background(), "session", "turn", turnfiles.ReplayUndo, []string{root}, fileCopyReplayRevision(t, ms)); err != nil {
 					t.Fatal(err)
 				}
 				if _, err := os.Stat(target); !os.IsNotExist(err) {
 					t.Fatal("undo did not remove project destination")
 				}
-				if _, err := replayer.Apply(context.Background(), "session", "turn", turnfiles.ReplayRedo, []string{root}); err != nil {
+				if _, err := replayer.Apply(context.Background(), "session", "turn", turnfiles.ReplayRedo, []string{root}, fileCopyReplayRevision(t, ms)); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -335,4 +335,13 @@ func TestFileCopyExternalAccessApproval(t *testing.T) {
 			}
 		})
 	}
+}
+
+func fileCopyReplayRevision(t *testing.T, s store.Store) int64 {
+	t.Helper()
+	turn, err := s.GetConversationTurn(context.Background(), "session", "turn")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return turn.FileChangeRevision
 }

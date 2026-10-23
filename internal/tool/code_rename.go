@@ -44,6 +44,19 @@ type codeRenameDocumentEdit struct {
 	Edits []codeRenameTextEdit `json:"edits"`
 }
 
+// Keep the server's version with its coordinates until the edits are validated.
+type codeRenameFileEdits struct {
+	Version *int
+	Edits   []codeRenameTextEdit
+}
+
+type codeRenameSnapshot struct {
+	Path    string
+	Text    string
+	Version int
+	Mode    os.FileMode
+}
+
 type codeRenameByteEdit struct {
 	start   int
 	end     int
@@ -99,6 +112,9 @@ func (r *BuiltinRunner) codeRename(ctx context.Context, call Call) Result {
 		}
 		return codeRenameRequestError(out, "rename_not_available", err)
 	}
+	if err := validateCodeRenameDocument(target.path, document.Text); err != nil {
+		return codeRenameFailure(out, err)
+	}
 	if !available {
 		return toolJSONError(out, "rename_not_available", "the selected symbol cannot be renamed")
 	}
@@ -115,6 +131,9 @@ func (r *BuiltinRunner) codeRename(ctx context.Context, call Call) Result {
 	if err := r.languageService.Request(ctx, target.spec, "textDocument/rename", renameParams, &rawEdit); err != nil {
 		return codeRenameRequestError(out, "rename_rejected", err)
 	}
+	if err := validateCodeRenameDocument(target.path, document.Text); err != nil {
+		return codeRenameFailure(out, err)
+	}
 	edits, err := parseCodeRenameWorkspaceEdit(rawEdit)
 	if err != nil {
 		return codeRenameFailure(out, err)
@@ -123,7 +142,36 @@ func (r *BuiltinRunner) codeRename(ctx context.Context, call Call) Result {
 	if err != nil {
 		return codeRenameFailure(out, err)
 	}
-	files, editCount, err := buildCodeRenamePatchFiles(patchProjectDirs, target, state.PositionEncoding, edits)
+	// The first response only discovers affected files. Their contents were not
+	// known before that request, so its coordinates must never be applied.
+	snapshots, err := readCodeRenameSnapshots(patchProjectDirs, target, document, edits)
+	if err != nil {
+		return codeRenameFailure(out, err)
+	}
+	for uri, snapshot := range snapshots {
+		_, languageID := codeLanguageForPath(snapshot.Path)
+		synced, err := r.languageService.SyncDocument(ctx, target.spec, lsp.Document{URI: uri, LanguageID: languageID, Text: snapshot.Text})
+		if err != nil {
+			return codeServiceError(out, err)
+		}
+		snapshot.Version = synced.Version
+		snapshots[uri] = snapshot
+	}
+	if err := validateCodeRenameSnapshots(snapshots); err != nil {
+		return codeRenameFailure(out, err)
+	}
+	// Recompute against the captured documents, including unversioned changes.
+	if err := r.languageService.Request(ctx, target.spec, "textDocument/rename", renameParams, &rawEdit); err != nil {
+		return codeRenameRequestError(out, "rename_rejected", err)
+	}
+	if err := validateCodeRenameSnapshots(snapshots); err != nil {
+		return codeRenameFailure(out, err)
+	}
+	edits, err = parseCodeRenameWorkspaceEdit(rawEdit)
+	if err != nil {
+		return codeRenameFailure(out, err)
+	}
+	files, editCount, err := buildCodeRenamePatchFiles(state.PositionEncoding, edits, snapshots)
 	if err != nil {
 		return codeRenameFailure(out, err)
 	}
@@ -132,6 +180,9 @@ func (r *BuiltinRunner) codeRename(ctx context.Context, call Call) Result {
 		mutatedPaths = append(mutatedPaths, file.Path)
 	}
 	reportMutationTracking(ctx, mutatedPaths)
+	if err := validateCodeRenameSnapshots(snapshots); err != nil {
+		return codeRenameFailure(out, err)
+	}
 
 	patchArgs, err := json.Marshal(filePatchArgs{Scope: managedScopeProject, Files: files})
 	if err != nil {
@@ -142,10 +193,32 @@ func (r *BuiltinRunner) codeRename(ctx context.Context, call Call) Result {
 	patchCall.ProjectDirs = patchProjectDirs
 	patch, err := preparePatch(patchCall, filePatchArgs{Scope: managedScopeProject, Files: files})
 	if err != nil {
+		if conflict := validateCodeRenameSnapshots(snapshots); conflict != nil {
+			return codeRenameFailure(out, conflict)
+		}
 		return patchFailure(out, err)
+	}
+	// preparePatch reads the disk again. Do not let that newer read silently
+	// become the baseline for the replacement computed above.
+	if err := validateCodeRenameSnapshots(snapshots); err != nil {
+		return codeRenameFailure(out, err)
+	}
+	for _, file := range patch.Files {
+		for _, snapshot := range snapshots {
+			if file.Target == snapshot.Path && file.OldText != snapshot.Text {
+				return codeRenameFailure(out, codeRenameConflict(file.Target))
+			}
+		}
 	}
 	applied := applyPreparedPatchResult(out, patchProjectDirs, patch)
 	if !applied.Ok {
+		var failure struct {
+			Reason string `json:"reason"`
+			Detail string `json:"detail"`
+		}
+		if json.Unmarshal([]byte(applied.Content), &failure) == nil && failure.Reason == "patch_stale" {
+			return codeRenameFailure(out, newCodeRenameError("rename_conflict", failure.Detail))
+		}
 		return applied
 	}
 	var payload map[string]any
@@ -262,7 +335,7 @@ func parseCodePrepareRename(raw json.RawMessage) (*lsp.Range, string, bool, erro
 	return nil, "", false, newCodeRenameError("unsafe_workspace_edit", "prepareRename returned an unsupported result")
 }
 
-func parseCodeRenameWorkspaceEdit(raw json.RawMessage) (map[string][]codeRenameTextEdit, error) {
+func parseCodeRenameWorkspaceEdit(raw json.RawMessage) (map[string]codeRenameFileEdits, error) {
 	trimmed := strings.TrimSpace(string(raw))
 	if trimmed == "" || trimmed == "null" {
 		return nil, newCodeRenameError("rename_no_changes", "the language server returned no rename edits")
@@ -274,9 +347,9 @@ func parseCodeRenameWorkspaceEdit(raw json.RawMessage) (map[string][]codeRenameT
 	if len(workspaceEdit.Changes) > 0 && len(workspaceEdit.DocumentChanges) > 0 {
 		return nil, newCodeRenameError("unsafe_workspace_edit", "WorkspaceEdit must not mix changes and documentChanges")
 	}
-	edits := make(map[string][]codeRenameTextEdit)
+	edits := make(map[string]codeRenameFileEdits)
 	for uri, items := range workspaceEdit.Changes {
-		edits[uri] = append(edits[uri], items...)
+		edits[uri] = codeRenameFileEdits{Edits: items}
 	}
 	for _, rawChange := range workspaceEdit.DocumentChanges {
 		var fields map[string]json.RawMessage
@@ -295,7 +368,10 @@ func parseCodeRenameWorkspaceEdit(raw json.RawMessage) (map[string][]codeRenameT
 		if err := json.Unmarshal(rawChange, &documentEdit); err != nil || strings.TrimSpace(documentEdit.TextDocument.URI) == "" {
 			return nil, newCodeRenameError("unsafe_workspace_edit", "documentChanges contains an invalid TextDocumentEdit")
 		}
-		edits[documentEdit.TextDocument.URI] = append(edits[documentEdit.TextDocument.URI], documentEdit.Edits...)
+		if _, exists := edits[documentEdit.TextDocument.URI]; exists {
+			return nil, newCodeRenameError("unsafe_workspace_edit", "duplicate TextDocumentEdit URI")
+		}
+		edits[documentEdit.TextDocument.URI] = codeRenameFileEdits{Version: documentEdit.TextDocument.Version, Edits: documentEdit.Edits}
 	}
 	if len(edits) == 0 {
 		return nil, newCodeRenameError("rename_no_changes", "the language server returned no rename edits")
@@ -303,17 +379,17 @@ func parseCodeRenameWorkspaceEdit(raw json.RawMessage) (map[string][]codeRenameT
 	return edits, nil
 }
 
-func buildCodeRenamePatchFiles(projectDirs []string, target resolvedCodeTarget, encoding string, edits map[string][]codeRenameTextEdit) ([]patchFileArg, int, error) {
+func readCodeRenameSnapshots(projectDirs []string, target resolvedCodeTarget, document lsp.Document, edits map[string]codeRenameFileEdits) (map[string]codeRenameSnapshot, error) {
 	targetProjectRoot, _, _, err := resolveProjectPath(projectDirs, target.path, false, false)
 	if err != nil {
-		return nil, 0, newCodeRenameError("rename_outside_project", err.Error())
+		return nil, newCodeRenameError("rename_outside_project", err.Error())
 	}
 	targetProjectRoot, err = filepath.EvalSymlinks(targetProjectRoot)
 	if err != nil {
-		return nil, 0, newCodeRenameError("rename_outside_project", err.Error())
+		return nil, newCodeRenameError("rename_outside_project", err.Error())
 	}
 	if len(edits) > patchMaxFiles {
-		return nil, 0, newCodeRenameError("rename_too_large", fmt.Sprintf("rename affects more than %d files", patchMaxFiles))
+		return nil, newCodeRenameError("rename_too_large", fmt.Sprintf("rename affects more than %d files", patchMaxFiles))
 	}
 
 	URIs := make([]string, 0, len(edits))
@@ -321,46 +397,107 @@ func buildCodeRenamePatchFiles(projectDirs []string, target resolvedCodeTarget, 
 		URIs = append(URIs, uri)
 	}
 	sort.Strings(URIs)
-	files := make([]patchFileArg, 0, len(URIs))
+	snapshots := make(map[string]codeRenameSnapshot)
 	seenTargets := make(map[string]bool, len(URIs))
 	totalBytes := 0
-	editCount := 0
 	for _, uri := range URIs {
 		path, err := strictCodePathFromURI(uri)
 		if err != nil {
-			return nil, 0, err
+			return nil, err
 		}
 		root, resolvedPath, _, err := resolveProjectPath(projectDirs, path, false, false)
 		if err != nil {
-			return nil, 0, newCodeRenameError("rename_outside_project", "rename edit is outside authorized Project roots: "+path)
+			return nil, newCodeRenameError("rename_outside_project", "rename edit is outside authorized Project roots: "+path)
 		}
 		resolvedRoot, err := filepath.EvalSymlinks(root)
 		if err != nil || filepath.Clean(resolvedRoot) != filepath.Clean(targetProjectRoot) || !pathInsideRoot(resolvedPath, target.languageRoot) {
-			return nil, 0, newCodeRenameError("rename_outside_project", "rename edit is outside the selected language root: "+path)
+			return nil, newCodeRenameError("rename_outside_project", "rename edit is outside the selected language root: "+path)
 		}
 		if seenTargets[resolvedPath] {
-			return nil, 0, newCodeRenameError("unsafe_workspace_edit", "rename returned duplicate file URIs for: "+path)
+			return nil, newCodeRenameError("unsafe_workspace_edit", "rename returned duplicate file URIs for: "+path)
 		}
 		seenTargets[resolvedPath] = true
 		language, _ := codeLanguageForPath(resolvedPath)
 		if language != target.language {
-			return nil, 0, newCodeRenameError("unsafe_workspace_edit", "rename edit targets a different language file: "+path)
+			return nil, newCodeRenameError("unsafe_workspace_edit", "rename edit targets a different language file: "+path)
 		}
 		info, err := os.Lstat(resolvedPath)
 		if err != nil || !info.Mode().IsRegular() {
-			return nil, 0, newCodeRenameError("unsafe_workspace_edit", "rename edit target must be a regular file: "+path)
+			return nil, newCodeRenameError("unsafe_workspace_edit", "rename edit target must be a regular file: "+path)
 		}
 		if info.Size() > patchMaxFileBytes {
-			return nil, 0, newCodeRenameError("rename_too_large", "rename edit target exceeds 512 KiB: "+path)
+			return nil, newCodeRenameError("rename_too_large", "rename edit target exceeds 512 KiB: "+path)
 		}
 		text, _, err := readCodeDocument(resolvedPath)
 		if err != nil {
-			return nil, 0, newCodeRenameError("unsafe_workspace_edit", err.Error())
+			return nil, newCodeRenameError("unsafe_workspace_edit", err.Error())
 		}
-		items := edits[uri]
+		totalBytes += len(text)
+		if totalBytes > patchMaxTotalBytes {
+			return nil, newCodeRenameError("rename_too_large", "rename source text exceeds 2 MiB")
+		}
+		snapshots[uri] = codeRenameSnapshot{Path: resolvedPath, Text: text, Mode: info.Mode()}
+	}
+	// The selected document anchors the user's original symbol, even when the
+	// returned edit only touches other files.
+	current, _, err := readCodeDocument(target.path)
+	if err != nil || current != document.Text {
+		return nil, codeRenameConflict(target.path)
+	}
+	if _, ok := snapshots[document.URI]; !ok {
+		info, err := os.Lstat(target.path)
+		if err != nil {
+			return nil, codeRenameConflict(target.path)
+		}
+		snapshots[document.URI] = codeRenameSnapshot{Path: target.path, Text: document.Text, Mode: info.Mode()}
+	}
+	return snapshots, nil
+}
+
+func validateCodeRenameDocument(path, expected string) error {
+	text, _, err := readCodeDocument(path)
+	if err != nil || text != expected {
+		return codeRenameConflict(path)
+	}
+	return nil
+}
+
+func codeRenameConflict(path string) error {
+	return newCodeRenameError("rename_conflict", "File changed while computing rename; saved changes were preserved. Read the current code before retrying: "+path)
+}
+
+func validateCodeRenameSnapshots(snapshots map[string]codeRenameSnapshot) error {
+	for _, snapshot := range snapshots {
+		info, err := os.Lstat(snapshot.Path)
+		if err != nil || !info.Mode().IsRegular() || info.Mode() != snapshot.Mode {
+			return codeRenameConflict(snapshot.Path)
+		}
+		text, _, err := readCodeDocument(snapshot.Path)
+		if err != nil || text != snapshot.Text {
+			return codeRenameConflict(snapshot.Path)
+		}
+	}
+	return nil
+}
+
+func buildCodeRenamePatchFiles(encoding string, edits map[string]codeRenameFileEdits, snapshots map[string]codeRenameSnapshot) ([]patchFileArg, int, error) {
+	URIs := make([]string, 0, len(edits))
+	for uri := range edits {
+		URIs = append(URIs, uri)
+	}
+	sort.Strings(URIs)
+	files := make([]patchFileArg, 0, len(edits))
+	totalBytes, editCount := 0, 0
+	for _, uri := range URIs {
+		snapshot, known := snapshots[uri]
+		edit := edits[uri]
+		if !known || (edit.Version != nil && *edit.Version != snapshot.Version) {
+			return nil, 0, codeRenameConflict(uri)
+		}
+		items, text := edit.Edits, snapshot.Text
 		editCount += len(items)
 		if editCount > maxCodeRenameEdits {
-			return nil, 0, newCodeRenameError("rename_too_large", fmt.Sprintf("rename contains more than %d edits", maxCodeRenameEdits))
+			return nil, 0, newCodeRenameError("rename_too_large", "rename contains more than 4096 edits")
 		}
 		next, err := applyCodeRenameTextEdits(text, items, encoding)
 		if err != nil {
@@ -370,14 +507,14 @@ func buildCodeRenamePatchFiles(projectDirs []string, target resolvedCodeTarget, 
 			continue
 		}
 		if len(next) > patchMaxFileBytes {
-			return nil, 0, newCodeRenameError("rename_too_large", "renamed file exceeds 512 KiB: "+path)
+			return nil, 0, newCodeRenameError("rename_too_large", "renamed file exceeds 512 KiB")
 		}
 		totalBytes += len(text) + len(next)
 		if totalBytes > patchMaxTotalBytes {
 			return nil, 0, newCodeRenameError("rename_too_large", "rename source and destination text exceeds 2 MiB")
 		}
 		newText := next
-		files = append(files, patchFileArg{Path: resolvedPath, Action: "replace", Content: &newText})
+		files = append(files, patchFileArg{Path: snapshot.Path, Action: "replace", Content: &newText})
 	}
 	if len(files) == 0 {
 		return nil, 0, newCodeRenameError("rename_no_changes", "the language server returned no effective rename edits")

@@ -721,6 +721,7 @@ func TestAutoCompactRunsAfterCompletedTurn(t *testing.T) {
 	}
 	if err := ms.SetSettings(ctx, map[string]string{
 		config.SettingCompactAutoThresholdPercent: "30",
+		config.SettingToolResultCoolingEnabled:    "false",
 		config.SettingCompactTailInputTurns:       "2",
 	}); err != nil {
 		t.Fatal(err)

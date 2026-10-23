@@ -14,6 +14,18 @@ import (
 // context for the summary, including corrections after the replaced messages.
 // Oversized inputs fail before calling the provider; never split or truncate.
 func (e *Engine) summarizeCompactHistory(ctx context.Context, sessionID string, resolved *resolvedModel, client provider.Client, effective, source []*store.Message, hint string, target int) (string, error) {
+	history, err := compactHistoryText(effective, source)
+	if err != nil {
+		return "", err
+	}
+	req, err := compactSummaryRequest(resolved, history, hint, target)
+	if err != nil {
+		return "", err
+	}
+	return e.generateCompactSummary(ctx, sessionID, resolved, client, req)
+}
+
+func compactHistoryText(effective, source []*store.Message) (string, error) {
 	sourceIDs := make(map[string]bool, len(source))
 	for _, message := range source {
 		sourceIDs[message.ID] = true
@@ -34,11 +46,7 @@ func (e *Engine) summarizeCompactHistory(ctx context.Context, sessionID string, 
 	if !hasSource {
 		return "", ErrCompactEmpty
 	}
-	req, err := compactSummaryRequest(resolved, history.String(), hint, target)
-	if err != nil {
-		return "", err
-	}
-	return e.generateCompactSummary(ctx, sessionID, resolved, client, req)
+	return history.String(), nil
 }
 
 func compactSummaryRequest(resolved *resolvedModel, history, hint string, target int) (provider.Request, error) {

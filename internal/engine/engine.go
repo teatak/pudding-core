@@ -217,7 +217,7 @@ func WithAttachmentHome(home string) Option {
 }
 
 func (e *Engine) rebuildBuilder() {
-	e.builder = contextbuilder.New(e.store, e.promptSource, contextbuilder.WithAttachmentHome(e.attachmentHome), contextbuilder.WithSkillSources(e.plugins, e.skills))
+	e.builder = contextbuilder.New(e.store, e.promptSource, contextbuilder.WithAttachmentHome(e.attachmentHome), contextbuilder.WithSkillSources(e.plugins, e.skills), contextbuilder.WithCoolingSettings(e.config))
 }
 
 func New(s store.Store, hub *event.Hub, resolver Resolver, cfg ConfigSource, opts ...Option) *Engine {
@@ -232,7 +232,7 @@ func New(s store.Store, hub *event.Hub, resolver Resolver, cfg ConfigSource, opt
 		config:               cfg,
 		hub:                  hub,
 		resolver:             resolver,
-		builder:              contextbuilder.New(s, nil),
+		builder:              contextbuilder.New(s, nil, contextbuilder.WithCoolingSettings(cfg)),
 		auxCtx:               auxCtx,
 		auxCancel:            auxCancel,
 		running:              make(map[string]*activeTurn),
@@ -1392,6 +1392,7 @@ func (e *Engine) streamTurn(ctx context.Context, sessionID, turnID string, resol
 	consecutiveToolOnlyLoops := 0
 	var continuations []provider.Continuation
 	providerCallIndex := 0
+	coolingChecked := false
 	for {
 		// Inputs can arrive while the preceding context compaction is running.
 		// Apply them before rebuilding or issuing another provider request.
@@ -1420,9 +1421,13 @@ func (e *Engine) streamTurn(ctx context.Context, sessionID, turnID string, resol
 		if err != nil {
 			return store.TurnFailed, fmt.Sprintf("resolve skill references: %v", err), currentMode
 		}
-		compacted, compactErr := e.prepareContextRequest(ctx, sessionID, turnID, resolved, currentMode, &req)
+		allowCooling := !coolingChecked
+		coolingChecked = true
+		compacted, compactErr := e.prepareContextRequest(ctx, sessionID, turnID, resolved, currentMode, &req, allowCooling)
 		if errors.Is(compactErr, store.ErrHistoryChanged) {
-			continue
+			// Rebuild from the committed snapshot just like a successful
+			// context change; keeping the accumulator would duplicate it.
+			compacted, compactErr = true, nil
 		}
 		if compactErr != nil {
 			if ctx.Err() != nil {

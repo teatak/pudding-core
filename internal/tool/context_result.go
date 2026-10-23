@@ -81,15 +81,7 @@ func ModelResultContent(name string, ok bool, content, turnID, callID string, ca
 	if fields == nil {
 		_ = json.Unmarshal([]byte(content), &fields)
 	}
-	for _, key := range []string{
-		"scope", "path", "root", "projectRoot", "relativePath", "cwd", "start", "end", "lines", "origin", "order",
-		"reason", "error", "detail", "hint", "errorKind", "field", "expected", "offset", "receivedBytes", "metric", "actual", "limit", "unit", "count", "allowedScopes", "projectRoots",
-		"command", "exitCode", "signal", "timedOut", "cancelled", "execution", "sandboxKind", "sandboxDenied", "shell", "durationMs", "truncated", "stdoutTruncated", "stderrTruncated", "verificationKind", "verificationStatus", "verificationWarning", "diagnosticCount", "matchCount", "resultsCapped", "shown_matches",
-	} {
-		if value, exists := fields[key]; exists && len(value) <= 1024 {
-			preview[key] = value
-		}
-	}
+	copyResultMetadata(preview, fields)
 	if name == CommandRun && fields["stdout"] != nil && fields["stderr"] != nil {
 		for _, key := range []string{"stdout", "stderr"} {
 			var value string
@@ -246,4 +238,16 @@ func numberSearchExcerpt(match map[string]json.RawMessage) bool {
 func resultJSON(value any) json.RawMessage {
 	data, _ := json.Marshal(value)
 	return data
+}
+
+func copyResultMetadata(out map[string]any, fields map[string]json.RawMessage) {
+	for _, key := range []string{
+		"scope", "path", "root", "projectRoot", "relativePath", "cwd", "start", "end", "lines", "origin", "order",
+		"reason", "error", "detail", "hint", "errorKind", "field", "expected", "offset", "receivedBytes", "metric", "actual", "limit", "unit", "count", "allowedScopes", "projectRoots",
+		"command", "exitCode", "signal", "timedOut", "cancelled", "execution", "sandboxKind", "sandboxDenied", "shell", "durationMs", "truncated", "stdoutTruncated", "stderrTruncated", "verificationKind", "verificationStatus", "verificationWarning", "diagnosticCount", "matchCount", "resultsCapped", "shown_matches",
+	} {
+		if value, exists := fields[key]; exists && len(value) <= 1024 {
+			out[key] = value
+		}
+	}
 }

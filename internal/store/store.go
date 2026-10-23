@@ -1787,20 +1787,21 @@ type SteerQueuedInputResult struct {
 }
 
 type ConversationTurn struct {
-	RetryOfTurnID   string              `json:"retryOfTurnID,omitempty"`
-	ID              string              `json:"id"`
-	SessionID       string              `json:"sessionID"`
-	ClientMessageID string              `json:"clientMessageID"`
-	Status          TurnStatus          `json:"status"`
-	Provider        string              `json:"provider,omitempty"`
-	Model           string              `json:"model,omitempty"`
-	Mode            AgentMode           `json:"mode,omitempty"`
-	Error           string              `json:"error,omitempty"`
-	CreatedAt       time.Time           `json:"createdAt"`
-	UpdatedAt       time.Time           `json:"updatedAt"`
-	Messages        []*Message          `json:"messages"`
-	FileChanges     []*TurnFileChange   `json:"fileChanges,omitempty"`
-	FileChangeState TurnFileChangeState `json:"fileChangeState,omitempty"`
+	RetryOfTurnID      string              `json:"retryOfTurnID,omitempty"`
+	ID                 string              `json:"id"`
+	SessionID          string              `json:"sessionID"`
+	ClientMessageID    string              `json:"clientMessageID"`
+	Status             TurnStatus          `json:"status"`
+	Provider           string              `json:"provider,omitempty"`
+	Model              string              `json:"model,omitempty"`
+	Mode               AgentMode           `json:"mode,omitempty"`
+	Error              string              `json:"error,omitempty"`
+	CreatedAt          time.Time           `json:"createdAt"`
+	UpdatedAt          time.Time           `json:"updatedAt"`
+	Messages           []*Message          `json:"messages"`
+	FileChanges        []*TurnFileChange   `json:"fileChanges,omitempty"`
+	FileChangeState    TurnFileChangeState `json:"fileChangeState,omitempty"`
+	FileChangeRevision int64               `json:"fileChangeRevision,omitempty"`
 }
 
 type TurnPage struct {
@@ -2067,6 +2068,21 @@ type ApplyTurnSteersInput struct {
 	// Events 与 MessageIDs 一一对应，在消息移动到安全采样边界时才分配
 	// seq 并落库，避免尚未发布的事件提前占用 SSE 序号。
 	Events []*event.Event
+}
+
+// ContextCooling is a stable, inclusive input-turn watermark within one
+// compaction epoch. Canonical messages are never rewritten.
+type ContextCooling struct {
+	ThroughTurnID    string
+	SummaryMessageID string
+}
+
+type AdvanceContextCoolingInput struct {
+	SessionID             string
+	RunningTurnID         string
+	ExpectedLastMessageID string
+	Expected              ContextCooling
+	Next                  ContextCooling
 }
 
 type AppendCompactSummaryInput struct {
@@ -2401,6 +2417,8 @@ type Store interface {
 	// 并在同一事务中持久化对应的 input.steered 事件。
 	ApplyTurnSteers(ctx context.Context, in ApplyTurnSteersInput) error
 	// AppendCompactSummary 追加一条 completed summary turn,作为后续上下文压缩边界。
+	ContextCooling(ctx context.Context, sessionID string) (ContextCooling, error)
+	AdvanceContextCooling(ctx context.Context, in AdvanceContextCoolingInput) error
 	AppendCompactSummary(ctx context.Context, in AppendCompactSummaryInput) (*AppendCompactSummaryResult, error)
 	// FinishTurn:更新 turn 状态 + 落 assistant message(如有)+ 落 final 事件。
 	FinishTurn(ctx context.Context, in FinishTurnInput) (*FinishTurnResult, error)
@@ -2440,7 +2458,7 @@ type Store interface {
 	// GetTurnFileChange returns one historical file diff and always verifies the
 	// explicit session and turn scope before exposing snapshot content.
 	GetTurnFileChange(ctx context.Context, sessionID string, turnID string, changeID string) (*TurnFileChange, error)
-	UpdateTurnFileChangeState(ctx context.Context, sessionID string, turnID string, expected, next TurnFileChangeState) error
+	UpdateTurnFileChangeState(ctx context.Context, sessionID string, turnID string, expected, next TurnFileChangeState, expectedRevision int64) (int64, error)
 	// EventsAfter 返回 seq > afterSeq 的 lifecycle 事件,按 seq 升序,
 	// 承载 SSE Last-Event-ID 续传;limit <= 0 表示全部。
 	EventsAfter(ctx context.Context, sessionID string, afterSeq int64, limit int) ([]event.Event, error)

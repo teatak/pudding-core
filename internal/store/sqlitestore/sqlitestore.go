@@ -1730,6 +1730,9 @@ func (s *Store) AppendCompactSummary(ctx context.Context, in store.AppendCompact
 		if err := touchSessionActivityTx(ctx, tx, in.SessionID, now); err != nil {
 			return err
 		}
+		if _, err := tx.ExecContext(ctx, `DELETE FROM session_context_cooling WHERE session_id=?`, in.SessionID); err != nil {
+			return err
+		}
 		out = &store.AppendCompactSummaryResult{Turn: turn, Message: msg, Event: &ev}
 		return nil
 	})
@@ -2461,11 +2464,11 @@ func (s *Store) ListTurnsPage(ctx context.Context, sessionID string, beforeTurnI
 		if err != nil {
 			return nil, err
 		}
-		fileChangeState, err := turnFileChangeStateForTurnTx(ctx, tx, turn.SessionID, turn.ID)
+		fileChangeState, fileChangeRevision, err := turnFileChangeStateForTurnTx(ctx, tx, turn.SessionID, turn.ID)
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, conversationTurnFromSQL(turn, messages, fileChanges, fileChangeState))
+		out = append(out, conversationTurnFromSQL(turn, messages, fileChanges, fileChangeState, fileChangeRevision))
 	}
 	return &store.TurnPage{Turns: out, HasMore: hasMore}, nil
 }
@@ -2500,11 +2503,11 @@ func (s *Store) GetConversationTurn(ctx context.Context, sessionID string, turnI
 	if err != nil {
 		return nil, err
 	}
-	fileChangeState, err := turnFileChangeStateForTurnTx(ctx, tx, turn.SessionID, turn.ID)
+	fileChangeState, fileChangeRevision, err := turnFileChangeStateForTurnTx(ctx, tx, turn.SessionID, turn.ID)
 	if err != nil {
 		return nil, err
 	}
-	return conversationTurnFromSQL(turn, messages, fileChanges, fileChangeState), nil
+	return conversationTurnFromSQL(turn, messages, fileChanges, fileChangeState, fileChangeRevision), nil
 }
 
 func (s *Store) EventsAfter(ctx context.Context, sessionID string, afterSeq int64, limit int) ([]event.Event, error) {
@@ -2774,7 +2777,7 @@ func messagesForTurnTx(ctx context.Context, tx *sql.Tx, sessionID, turnID string
 	return out, rows.Err()
 }
 
-func conversationTurnFromSQL(turn *store.Turn, messages []*store.Message, fileChanges []*store.TurnFileChange, fileChangeState store.TurnFileChangeState) *store.ConversationTurn {
+func conversationTurnFromSQL(turn *store.Turn, messages []*store.Message, fileChanges []*store.TurnFileChange, fileChangeState store.TurnFileChangeState, fileChangeRevision int64) *store.ConversationTurn {
 	visibleMessages := make([]*store.Message, 0, len(messages))
 	for _, message := range messages {
 		if !store.IsProtocolOnlyMessage(message) {
@@ -2782,20 +2785,21 @@ func conversationTurnFromSQL(turn *store.Turn, messages []*store.Message, fileCh
 		}
 	}
 	return &store.ConversationTurn{
-		RetryOfTurnID:   turn.RetryOfTurnID,
-		ID:              turn.ID,
-		SessionID:       turn.SessionID,
-		ClientMessageID: turn.ClientMessageID,
-		Status:          turn.Status,
-		Provider:        turn.Provider,
-		Model:           turn.Model,
-		Mode:            turn.Mode,
-		Error:           turn.Error,
-		CreatedAt:       turn.CreatedAt,
-		UpdatedAt:       turn.UpdatedAt,
-		Messages:        visibleMessages,
-		FileChanges:     fileChanges,
-		FileChangeState: fileChangeState,
+		RetryOfTurnID:      turn.RetryOfTurnID,
+		ID:                 turn.ID,
+		SessionID:          turn.SessionID,
+		ClientMessageID:    turn.ClientMessageID,
+		Status:             turn.Status,
+		Provider:           turn.Provider,
+		Model:              turn.Model,
+		Mode:               turn.Mode,
+		Error:              turn.Error,
+		CreatedAt:          turn.CreatedAt,
+		UpdatedAt:          turn.UpdatedAt,
+		Messages:           visibleMessages,
+		FileChanges:        fileChanges,
+		FileChangeState:    fileChangeState,
+		FileChangeRevision: fileChangeRevision,
 	}
 }
 

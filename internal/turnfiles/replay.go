@@ -39,64 +39,70 @@ func NewReplayer(s store.Store) *Replayer {
 	return &Replayer{store: s}
 }
 
-func (r *Replayer) Apply(ctx context.Context, sessionID, turnID string, direction ReplayDirection, roots []string) (store.TurnFileChangeState, error) {
+type ReplayResult struct {
+	State    store.TurnFileChangeState `json:"state"`
+	Revision int64                     `json:"revision"`
+}
+
+func (r *Replayer) Apply(ctx context.Context, sessionID, turnID string, direction ReplayDirection, roots []string, expectedRevision int64) (ReplayResult, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	if _, err := r.store.RunningTurn(ctx, sessionID); err == nil {
-		return "", store.ErrTurnRunning
+		return ReplayResult{}, store.ErrTurnRunning
 	} else if !errors.Is(err, store.ErrNotFound) {
-		return "", err
+		return ReplayResult{}, err
 	}
 	turn, err := r.store.GetConversationTurn(ctx, sessionID, turnID)
 	if err != nil {
-		return "", err
+		return ReplayResult{}, err
 	}
 	expectedState, nextState := store.TurnFileChangesApplied, store.TurnFileChangesUndone
 	if direction == ReplayRedo {
 		expectedState, nextState = store.TurnFileChangesUndone, store.TurnFileChangesApplied
 	} else if direction != ReplayUndo {
-		return "", ErrReplayInvalidState
+		return ReplayResult{}, ErrReplayInvalidState
 	}
-	if turn.FileChangeState != expectedState || len(turn.FileChanges) == 0 {
-		return "", ErrReplayInvalidState
+	if expectedRevision <= 0 || turn.FileChangeRevision != expectedRevision || turn.FileChangeState != expectedState || len(turn.FileChanges) == 0 {
+		return ReplayResult{}, ErrReplayInvalidState
 	}
 	details := make([]*store.TurnFileChange, 0, len(turn.FileChanges))
 	for _, summary := range turn.FileChanges {
 		if summary == nil || !summary.Reversible {
-			return "", ErrReplayNotReversible
+			return ReplayResult{}, ErrReplayNotReversible
 		}
 		detail, err := r.store.GetTurnFileChange(ctx, sessionID, turnID, summary.ID)
 		if err != nil {
-			return "", err
+			return ReplayResult{}, err
 		}
 		if !detail.Reversible {
-			return "", ErrReplayNotReversible
+			return ReplayResult{}, ErrReplayNotReversible
 		}
 		details = append(details, detail)
 	}
 	actions, err := buildReplayActions(details, direction, roots)
 	if err != nil {
-		return "", err
+		return ReplayResult{}, err
 	}
 	tx, err := prepareReplayTransaction(actions)
 	if err != nil {
-		return "", err
+		return ReplayResult{}, err
 	}
 	if err := tx.install(); err != nil {
 		tx.cleanup()
-		return "", err
+		return ReplayResult{}, err
 	}
-	if err := r.store.UpdateTurnFileChangeState(ctx, sessionID, turnID, expectedState, nextState); err != nil {
+	revision, err := r.store.UpdateTurnFileChangeState(ctx, sessionID, turnID, expectedState, nextState, expectedRevision)
+	if err != nil {
 		rollbackErr := tx.rollback()
 		tx.cleanup()
 		if rollbackErr != nil {
-			return "", fmt.Errorf("%w; rollback: %v", err, rollbackErr)
+			return ReplayResult{}, fmt.Errorf("%w; rollback: %v", err, rollbackErr)
 		}
-		return "", err
+		return ReplayResult{}, err
 	}
 	tx.commit()
-	return nextState, nil
+	return ReplayResult{State: nextState, Revision: revision}, nil
 }
 
 type replaySnapshot struct {

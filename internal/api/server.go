@@ -1441,7 +1441,13 @@ func (s *Server) replayTurnFileChanges(c *cart.Context, direction turnfiles.Repl
 	for _, root := range roots {
 		paths = append(paths, root.Path)
 	}
-	state, err := s.turnFiles.Apply(c.Request.Context(), id, turnID, direction, paths)
+	var req struct {
+		ExpectedRevision int64 `json:"expectedRevision"`
+	}
+	if err := decode(c, &req); err != nil || req.ExpectedRevision <= 0 || req.ExpectedRevision > 9007199254740991 {
+		return badRequest(c, "turn_file_changes_invalid_revision")
+	}
+	result, err := s.turnFiles.Apply(c.Request.Context(), id, turnID, direction, paths, req.ExpectedRevision)
 	if err != nil {
 		switch {
 		case errors.Is(err, turnfiles.ErrReplayUnauthorized):
@@ -1454,7 +1460,7 @@ func (s *Server) replayTurnFileChanges(c *cart.Context, direction turnfiles.Repl
 			return s.fail(c, err)
 		}
 	}
-	c.JSON(http.StatusOK, map[string]any{"state": state})
+	c.JSON(http.StatusOK, result)
 	return nil
 }
 

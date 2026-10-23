@@ -108,7 +108,7 @@ func TestContextPreflightUsesCalibratedInputWithoutEarlyCompaction(t *testing.T)
 			t.Fatal(err)
 		}
 		request := req
-		compacted, err := eng.prepareContextRequest(ctx, sid, "", resolved, store.ModeChat, &request)
+		compacted, err := eng.prepareContextRequest(ctx, sid, "", resolved, store.ModeChat, &request, false)
 		if err != nil || compacted {
 			t.Fatalf("preflight: compacted=%v err=%v", compacted, err)
 		}
@@ -176,7 +176,7 @@ func TestContextPreflightCountsNativeReasoningAcrossTurnBoundary(t *testing.T) {
 		if historical {
 			req.Messages[0].Parts = req.Messages[0].Parts[1:]
 		}
-		compacted, err := eng.prepareContextRequest(ctx, sid, "", resolved, store.ModeChat, &req)
+		compacted, err := eng.prepareContextRequest(ctx, sid, "", resolved, store.ModeChat, &req, false)
 		if err != nil || compacted {
 			t.Fatalf("compacted=%v err=%v", compacted, err)
 		}
@@ -209,7 +209,7 @@ func TestContextPreflightResponsesWireOutputLimit(t *testing.T) {
 				t.Fatal(err)
 			}
 			resolved := &resolvedModel{providerName: "mock", model: "mock-model", protocol: "openai-responses", config: req.Config}
-			if compacted, err := eng.prepareContextRequest(ctx, sid, "", resolved, store.ModeChat, &req); err != nil || compacted {
+			if compacted, err := eng.prepareContextRequest(ctx, sid, "", resolved, store.ModeChat, &req, false); err != nil || compacted {
 				t.Fatalf("preflight: compacted=%v err=%v", compacted, err)
 			}
 			var body map[string]json.RawMessage

@@ -19,7 +19,7 @@ import (
 const (
 	baselineSchemaVersion      = 1
 	currentSchemaLayoutVersion = 8
-	currentSchemaVersion       = 49
+	currentSchemaVersion       = 50
 )
 
 var (
@@ -35,6 +35,7 @@ type schemaMigration func(*sql.Tx) error
 // Unpublished Studio migrations 27–29 are consolidated into destination 30.
 // Unpublished Studio migrations 33–46 are consolidated into destination 47.
 var schemaMigrations = map[int]schemaMigration{
+	50: func(tx *sql.Tx) error { _, err := tx.Exec(contextCoolingSchema); return err },
 	49: func(tx *sql.Tx) error { _, err := tx.Exec(projectRequestsSchema); return err },
 	48: func(tx *sql.Tx) error { _, err := tx.Exec(sessionPluginConnectionsSchema); return err },
 	47: migrateStudioV47,

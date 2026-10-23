@@ -74,7 +74,7 @@ func configuredOutputLimit(cfg provider.ModelConfig, protocol string) int {
 
 // prepareContextRequest covers queued turns as well as tool-loop growth. The
 // engine calls it only after committing the preceding complete tool exchange.
-func (e *Engine) prepareContextRequest(ctx context.Context, sessionID, turnID string, resolved *resolvedModel, mode store.AgentMode, req *provider.Request) (bool, error) {
+func (e *Engine) prepareContextRequest(ctx context.Context, sessionID, turnID string, resolved *resolvedModel, mode store.AgentMode, req *provider.Request, allowCooling bool) (bool, error) {
 	if req.Config.ContextWindow <= 0 {
 		return false, nil
 	}
@@ -90,7 +90,20 @@ func (e *Engine) prepareContextRequest(ctx context.Context, sessionID, turnID st
 	}
 	tokens := calibratedTokenEstimate(estimate.Total(), factor)
 	soft := compactTrigger(req.Config, e.autoCompactThresholdPercent(ctx))
-	if soft > 0 && tokens >= soft {
+	summaryPressure := false
+	if soft > 0 {
+		summaryPressure, err = e.cooledSummaryPressure(ctx, sessionID, resolved, factor)
+		if err != nil {
+			return false, err
+		}
+	}
+	if soft > 0 && tokens >= soft && !summaryPressure && allowCooling {
+		cooled, coolingErr := e.tryCoolContext(ctx, sessionID, turnID, resolved, mode, req, tokens, soft, factor)
+		if coolingErr != nil || cooled {
+			return cooled, coolingErr
+		}
+	}
+	if soft > 0 && (tokens >= soft || summaryPressure) {
 		compactCtx, cancel := context.WithTimeout(ctx, autoCompactTimeout)
 		_, err = e.compact(compactCtx, CompactInput{SessionID: sessionID}, resolved, mode, turnID, true)
 		cancel()

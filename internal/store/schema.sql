@@ -24,6 +24,13 @@ CREATE TABLE IF NOT EXISTS sessions (
 CREATE INDEX IF NOT EXISTS sessions_archived_at
     ON sessions(archived_at);
 
+-- Model-only tool-result projection; reset atomically when Compact commits.
+CREATE TABLE IF NOT EXISTS session_context_cooling (
+    session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
+    through_turn_id TEXT NOT NULL,
+    summary_message_id TEXT NOT NULL
+);
+
 -- Immutable ownership only; messages and execution state stay on Session/Turn.
 CREATE TABLE IF NOT EXISTS session_children (
     child_session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,

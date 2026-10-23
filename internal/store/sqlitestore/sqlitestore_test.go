@@ -1306,16 +1306,35 @@ func TestFinishTurnPersistsHistoricalFileChanges(t *testing.T) {
 	if turn.FileChangeState != store.TurnFileChangesApplied {
 		t.Fatalf("file change state = %q", turn.FileChangeState)
 	}
-	if err := st.UpdateTurnFileChangeState(context.Background(), "sess_changes", "turn_changes", store.TurnFileChangesApplied, store.TurnFileChangesUndone); err != nil {
+	if _, err := st.UpdateTurnFileChangeState(context.Background(), "sess_changes", "turn_changes", store.TurnFileChangesApplied, store.TurnFileChangesUndone, turn.FileChangeRevision); err != nil {
 		t.Fatal(err)
 	}
 	turn, err = st.GetConversationTurn(context.Background(), "sess_changes", "turn_changes")
 	if err != nil || turn.FileChangeState != store.TurnFileChangesUndone {
 		t.Fatalf("updated file change state = %q err=%v", turn.FileChangeState, err)
 	}
-	if err := st.UpdateTurnFileChangeState(context.Background(), "sess_changes", "turn_changes", store.TurnFileChangesApplied, store.TurnFileChangesUndone); !errors.Is(err, store.ErrTurnFileChangeConflict) {
+	if _, err := st.UpdateTurnFileChangeState(context.Background(), "sess_changes", "turn_changes", store.TurnFileChangesApplied, store.TurnFileChangesUndone, turn.FileChangeRevision); !errors.Is(err, store.ErrTurnFileChangeConflict) {
 		t.Fatalf("stale state update error = %v", err)
 	}
+	// Exercise CAS across an applied -> undone -> applied cycle, including a
+	// timestamp ahead of the local clock (the revision must still increase).
+	oldRevision := turn.FileChangeRevision
+	future := time.Now().Add(time.Hour).UnixMilli()
+	if _, err := st.db.ExecContext(context.Background(), `UPDATE turn_file_change_states SET updated_at=? WHERE session_id=? AND turn_id=?`, future, "sess_changes", "turn_changes"); err != nil {
+		t.Fatal(err)
+	}
+	revision, err := st.UpdateTurnFileChangeState(context.Background(), "sess_changes", "turn_changes", store.TurnFileChangesUndone, store.TurnFileChangesApplied, future)
+	if err != nil || revision != future+1 {
+		t.Fatalf("non-monotonic revision=%d err=%v", revision, err)
+	}
+	if _, err := st.UpdateTurnFileChangeState(context.Background(), "sess_changes", "turn_changes", store.TurnFileChangesApplied, store.TurnFileChangesUndone, oldRevision); !errors.Is(err, store.ErrTurnFileChangeConflict) {
+		t.Fatalf("old cycle accepted: %v", err)
+	}
+	turn, err = st.GetConversationTurn(context.Background(), "sess_changes", "turn_changes")
+	if err != nil || turn.FileChangeState != store.TurnFileChangesApplied || turn.FileChangeRevision != revision {
+		t.Fatalf("stored revision=%+v err=%v", turn, err)
+	}
+
 }
 
 func TestFinishTurnPersistsBinarySnapshots(t *testing.T) {

@@ -247,18 +247,54 @@ func TestUndoRedoTurnFileChanges(t *testing.T) {
 	eng := engine.New(ms, hub, registry.Static(mock.New()), ms, engine.WithAttachmentHome(homeDir))
 	handler := New(eng, ms, ms, hub).WithHome(homeDir).Handler(testToken, nil)
 
+	initial, err := ms.GetConversationTurn(ctx, "session", "turn")
+	if err != nil {
+		t.Fatal(err)
+	}
+	send := func(action, body string, want int) {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodPost, "/sessions/session/turns/turn/file-changes/"+action, strings.NewReader(body))
+		req.Header.Set("Authorization", "Bearer "+testToken)
+		recorder := httptest.NewRecorder()
+		handler.ServeHTTP(recorder, req)
+		if recorder.Code != want {
+			t.Fatalf("%s %s: status=%d body=%s", action, body, recorder.Code, recorder.Body.String())
+		}
+	}
+	for _, body := range []string{"", "{}", `{"expectedRevision":0}`, `{"expectedRevision":-1}`, `{"expectedRevision":1.5}`, `{"expectedRevision":"bad"}`, `{"expectedRevision":9007199254740992}`} {
+		send("undo", body, http.StatusBadRequest)
+	}
+
 	for _, action := range []struct{ name, want string }{{"undo", "old\n"}, {"redo", "new\n"}} {
-		req := httptest.NewRequest(http.MethodPost, "/sessions/session/turns/turn/file-changes/"+action.name, nil)
+		turn, err := ms.GetConversationTurn(ctx, "session", "turn")
+		if err != nil {
+			t.Fatal(err)
+		}
+		req := httptest.NewRequest(http.MethodPost, "/sessions/session/turns/turn/file-changes/"+action.name, strings.NewReader(fmt.Sprintf(`{"expectedRevision":%d}`, turn.FileChangeRevision)))
 		req.Header.Set("Authorization", "Bearer "+testToken)
 		recorder := httptest.NewRecorder()
 		handler.ServeHTTP(recorder, req)
 		if recorder.Code != http.StatusOK {
 			t.Fatalf("%s status=%d body=%s", action.name, recorder.Code, recorder.Body.String())
 		}
+		var result struct {
+			State    string `json:"state"`
+			Revision int64  `json:"revision"`
+		}
+		if err := json.Unmarshal(recorder.Body.Bytes(), &result); err != nil || result.Revision <= turn.FileChangeRevision {
+			t.Fatalf("response=%+v err=%v", result, err)
+		}
+		send(action.name, fmt.Sprintf(`{"expectedRevision":%d}`, turn.FileChangeRevision), http.StatusConflict)
 		content, err := os.ReadFile(path)
 		if err != nil || string(content) != action.want {
 			t.Fatalf("%s content=%q err=%v", action.name, content, err)
 		}
+	}
+
+	send("undo", fmt.Sprintf(`{"expectedRevision":%d}`, initial.FileChangeRevision), http.StatusConflict)
+	content, err := os.ReadFile(path)
+	if err != nil || string(content) != "new\n" {
+		t.Fatalf("stale cycle changed file: %q %v", content, err)
 	}
 }
 

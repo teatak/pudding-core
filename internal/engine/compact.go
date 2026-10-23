@@ -280,6 +280,15 @@ func (e *Engine) scheduleAutoCompact(sessionID string) {
 }
 
 func (e *Engine) maybeAutoCompact(ctx context.Context, sessionID string) error {
+	// Cooling makes the next input boundary the decision point. Eager idle
+	// compaction would otherwise consume the history before cooling can help.
+	settings, err := e.config.Settings(ctx)
+	if err != nil {
+		return err
+	}
+	if settings[config.SettingToolResultCoolingEnabled] != "false" {
+		return nil
+	}
 	due, err := e.autoCompactDue(ctx, sessionID)
 	if err != nil || !due {
 		return err

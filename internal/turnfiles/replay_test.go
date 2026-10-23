@@ -28,9 +28,9 @@ func TestReplayerUndoRedoWholeTurn(t *testing.T) {
 	mem := replayTestStore(t, root, changes)
 	replayer := NewReplayer(mem)
 
-	state, err := replayer.Apply(context.Background(), "session", "turn", ReplayUndo, []string{root})
-	if err != nil || state != store.TurnFileChangesUndone {
-		t.Fatalf("undo state=%q err=%v", state, err)
+	state, err := replayer.Apply(context.Background(), "session", "turn", ReplayUndo, []string{root}, replayTestRevision(t, mem))
+	if err != nil || state.State != store.TurnFileChangesUndone {
+		t.Fatalf("undo state=%+v err=%v", state, err)
 	}
 	assertReplayTestFile(t, root, "modified.txt", []byte("old\n"))
 	assertReplayTestMissing(t, root, "added.bin")
@@ -38,9 +38,9 @@ func TestReplayerUndoRedoWholeTurn(t *testing.T) {
 	assertReplayTestMissing(t, root, "renamed.txt")
 	assertReplayTestFile(t, root, "original.txt", []byte("renamed\n"))
 
-	state, err = replayer.Apply(context.Background(), "session", "turn", ReplayRedo, []string{root})
-	if err != nil || state != store.TurnFileChangesApplied {
-		t.Fatalf("redo state=%q err=%v", state, err)
+	state, err = replayer.Apply(context.Background(), "session", "turn", ReplayRedo, []string{root}, replayTestRevision(t, mem))
+	if err != nil || state.State != store.TurnFileChangesApplied {
+		t.Fatalf("redo state=%+v err=%v", state, err)
 	}
 	assertReplayTestFile(t, root, "modified.txt", []byte("new\n"))
 	assertReplayTestFile(t, root, "added.bin", []byte{0, 1, 2})
@@ -58,7 +58,7 @@ func TestReplayerConflictIsAllOrNothing(t *testing.T) {
 		replayTestChange(t, root, "two.txt", "", store.FileChangeModified, []byte("old two"), []byte("new two"), false),
 	}
 	mem := replayTestStore(t, root, changes)
-	_, err := NewReplayer(mem).Apply(context.Background(), "session", "turn", ReplayUndo, []string{root})
+	_, err := NewReplayer(mem).Apply(context.Background(), "session", "turn", ReplayUndo, []string{root}, replayTestRevision(t, mem))
 	if !errors.Is(err, ErrReplayConflict) {
 		t.Fatalf("undo error=%v, want conflict", err)
 	}
@@ -66,7 +66,7 @@ func TestReplayerConflictIsAllOrNothing(t *testing.T) {
 	assertReplayTestFile(t, root, "two.txt", []byte("externally changed"))
 	turn, err := mem.GetConversationTurn(context.Background(), "session", "turn")
 	if err != nil || turn.FileChangeState != store.TurnFileChangesApplied {
-		t.Fatalf("state=%q err=%v", turn.FileChangeState, err)
+		t.Fatalf("state=%+v err=%v", turn.FileChangeState, err)
 	}
 }
 
@@ -90,11 +90,11 @@ func TestReplayerHandlesTextBinaryConversion(t *testing.T) {
 	}
 	mem := replayTestStore(t, root, changes)
 	replayer := NewReplayer(mem)
-	if _, err := replayer.Apply(context.Background(), "session", "turn", ReplayUndo, []string{root}); err != nil {
+	if _, err := replayer.Apply(context.Background(), "session", "turn", ReplayUndo, []string{root}, replayTestRevision(t, mem)); err != nil {
 		t.Fatal(err)
 	}
 	assertReplayTestFile(t, root, "mixed.dat", []byte("text\n"))
-	if _, err := replayer.Apply(context.Background(), "session", "turn", ReplayRedo, []string{root}); err != nil {
+	if _, err := replayer.Apply(context.Background(), "session", "turn", ReplayRedo, []string{root}, replayTestRevision(t, mem)); err != nil {
 		t.Fatal(err)
 	}
 	assertReplayTestFile(t, root, "mixed.dat", []byte{0, 1, 2})
@@ -106,14 +106,14 @@ func TestReplayerRejectsOldSnapshotsAndFormerRoots(t *testing.T) {
 	change := replayTestChange(t, root, "file.txt", "", store.FileChangeModified, []byte("old"), []byte("new"), false)
 	change.SnapshotVersion = 0
 	mem := replayTestStore(t, root, []store.TurnFileChangeInput{change})
-	_, err := NewReplayer(mem).Apply(context.Background(), "session", "turn", ReplayUndo, []string{root})
+	_, err := NewReplayer(mem).Apply(context.Background(), "session", "turn", ReplayUndo, []string{root}, replayTestRevision(t, mem))
 	if !errors.Is(err, ErrReplayNotReversible) {
 		t.Fatalf("old snapshot error=%v", err)
 	}
 
 	change.SnapshotVersion = 1
 	mem = replayTestStore(t, root, []store.TurnFileChangeInput{change})
-	_, err = NewReplayer(mem).Apply(context.Background(), "session", "turn", ReplayUndo, []string{t.TempDir()})
+	_, err = NewReplayer(mem).Apply(context.Background(), "session", "turn", ReplayUndo, []string{t.TempDir()}, replayTestRevision(t, mem))
 	if !errors.Is(err, ErrReplayUnauthorized) {
 		t.Fatalf("former root error=%v", err)
 	}
@@ -129,7 +129,7 @@ func TestReplayerRejectsActionWhileSessionTurnIsRunning(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	_, err := NewReplayer(mem).Apply(context.Background(), "session", "turn", ReplayUndo, []string{root})
+	_, err := NewReplayer(mem).Apply(context.Background(), "session", "turn", ReplayUndo, []string{root}, replayTestRevision(t, mem))
 	if !errors.Is(err, store.ErrTurnRunning) {
 		t.Fatalf("running turn error=%v", err)
 	}
@@ -220,4 +220,74 @@ func assertReplayTestMissing(t *testing.T, root, path string) {
 	if _, err := os.Lstat(filepath.Join(root, path)); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("%s still exists: %v", path, err)
 	}
+}
+
+func replayTestRevision(t *testing.T, s store.Store) int64 {
+	t.Helper()
+	turn, err := s.GetConversationTurn(context.Background(), "session", "turn")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return turn.FileChangeRevision
+}
+
+func TestReplayerRevisionRejectsOldRequestsAcrossCycles(t *testing.T) {
+	root := t.TempDir()
+	writeReplayTestFile(t, root, "file.txt", []byte("new"))
+	mem := replayTestStore(t, root, []store.TurnFileChangeInput{replayTestChange(t, root, "file.txt", "", store.FileChangeModified, []byte("old"), []byte("new"), false)})
+	replayer := NewReplayer(mem)
+	initial := replayTestRevision(t, mem)
+	undo, err := replayer.Apply(context.Background(), "session", "turn", ReplayUndo, []string{root}, initial)
+	if err != nil || undo.Revision <= initial {
+		t.Fatalf("undo=%+v err=%v", undo, err)
+	}
+	// Simulate dropping the successful response and retrying the original request.
+	if _, err := replayer.Apply(context.Background(), "session", "turn", ReplayUndo, []string{root}, initial); !errors.Is(err, ErrReplayInvalidState) {
+		t.Fatalf("duplicate undo: %v", err)
+	}
+	redo, err := replayer.Apply(context.Background(), "session", "turn", ReplayRedo, []string{root}, undo.Revision)
+	if err != nil || redo.Revision <= undo.Revision {
+		t.Fatalf("redo=%+v err=%v", redo, err)
+	}
+	// The state is applied again, but the old undo must not start a new cycle.
+	if _, err := NewReplayer(mem).Apply(context.Background(), "session", "turn", ReplayUndo, []string{root}, initial); !errors.Is(err, ErrReplayInvalidState) {
+		t.Fatalf("old undo after cycle: %v", err)
+	}
+	assertReplayTestFile(t, root, "file.txt", []byte("new"))
+	undo2, err := replayer.Apply(context.Background(), "session", "turn", ReplayUndo, []string{root}, redo.Revision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := replayer.Apply(context.Background(), "session", "turn", ReplayRedo, []string{root}, undo.Revision); !errors.Is(err, ErrReplayInvalidState) {
+		t.Fatalf("old redo after cycle: %v", err)
+	}
+	assertReplayTestFile(t, root, "file.txt", []byte("old"))
+	writeReplayTestFile(t, root, "file.txt", []byte("later saved code"))
+	if _, err := replayer.Apply(context.Background(), "session", "turn", ReplayRedo, []string{root}, undo2.Revision); !errors.Is(err, ErrReplayConflict) {
+		t.Fatalf("real file conflict: %v", err)
+	}
+	assertReplayTestFile(t, root, "file.txt", []byte("later saved code"))
+	if revision := replayTestRevision(t, mem); revision != undo2.Revision {
+		t.Fatalf("conflict consumed revision: %d", revision)
+	}
+}
+
+func TestReplayerConcurrentSameRevisionWritesOnce(t *testing.T) {
+	root := t.TempDir()
+	writeReplayTestFile(t, root, "file.txt", []byte("new"))
+	mem := replayTestStore(t, root, []store.TurnFileChangeInput{replayTestChange(t, root, "file.txt", "", store.FileChangeModified, []byte("old"), []byte("new"), false)})
+	replayer := NewReplayer(mem)
+	revision := replayTestRevision(t, mem)
+	results := make(chan error, 2)
+	for i := 0; i < 2; i++ {
+		go func() {
+			_, err := replayer.Apply(context.Background(), "session", "turn", ReplayUndo, []string{root}, revision)
+			results <- err
+		}()
+	}
+	first, second := <-results, <-results
+	if !((first == nil && errors.Is(second, ErrReplayInvalidState)) || (second == nil && errors.Is(first, ErrReplayInvalidState))) {
+		t.Fatalf("results: %v %v", first, second)
+	}
+	assertReplayTestFile(t, root, "file.txt", []byte("old"))
 }
