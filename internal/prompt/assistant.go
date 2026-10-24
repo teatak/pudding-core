@@ -85,6 +85,6 @@ func assistantAppearance(a store.AssistantAppearance) string {
 	headwear := map[string]string{"none": "no headwear", "antenna": "antenna", "hat": "red hat", "beacon": "indicator light", "crown": "gold crown", "bow": "red bow", "horns": "little black devil horns", "santa": "red Santa hat with white fur trim"}
 	arms := map[string]string{"none": "no arms", "classic": "slender arms", "short": "short thick arms", "orb": "ball-shaped arms", "mitten": "mitten arms", "claw": "mechanical claw arms", "wings": "bat-wing arms", "santa": "red mittens with white cuffs"}
 	eyewear := map[string]string{"none": "no eyewear", "classic": "green face visor", "goggles": "gold-rimmed goggles", "glasses": "black round glasses", "sunglasses": "dark sunglasses", "domino": "black devil eye mask", "halfmoon": "gold half-moon reading glasses"}
-	stickers := map[string]string{"none": "no face stickers", "blush": "blush stickers", "freckles": "freckle stickers", "stars": "star stickers", "hearts": "heart stickers", "lightning": "lightning stickers", "flames": "flame stickers", "beard": "fluffy white Santa beard"}
+	stickers := map[string]string{"none": "no face stickers", "blush": "blush stickers", "freckles": "freckle stickers", "stars": "star stickers", "hearts": "heart stickers", "lightning": "lightning stickers", "flames": "flame stickers", "beard": "curled white Santa moustache"}
 	return fmt.Sprintf("%s %s; %s; %s; %s; %s; %s; %s", palette[a.Palette], body[a.Body], eyes[a.Eyes], mouth[a.Mouth], headwear[a.Headwear], arms[a.Arms], eyewear[a.Eyewear], stickers[a.FaceSticker])
 }
