@@ -147,8 +147,13 @@ func TestConnectionOnlyPluginsSupportExplicitSelection(t *testing.T) {
 					t.Fatal("connection could not be saved", resp.StatusCode, decodeJSON[map[string]any](t, resp))
 				}
 				resp.Body.Close()
-				if _, err := plugins.ResolveEndpoint(ctx, "chat", "config_api", ""); err == nil {
-					t.Fatal("saving implicitly selected a connection")
+				initial, err := plugins.ResolveEndpoint(ctx, "chat", "config_api", "")
+				if selection == "user" {
+					if err != nil || initial.ConnectionID != "workspace" {
+						t.Fatal("sole configuration-only connection was not resolved", initial, err)
+					}
+				} else if err == nil {
+					t.Fatal("single-active connection was implicitly selected")
 				}
 				if selection == "single_active" {
 					resp = req(t, http.MethodPatch, srv.URL+"/plugins/connection-only/connection-bindings", map[string]any{"bindings": map[string]string{"active": "workspace"}})

@@ -99,7 +99,7 @@ func (s *Service) SessionConnection(ctx context.Context, sessionID, pluginID str
 	return out, nil
 }
 
-// This method is only called by the authenticated user API, never an LLM tool.
+// Used by the chat UI and plugin loading tool to persist a connection choice.
 func (s *Service) SetSessionConnection(ctx context.Context, sessionID, pluginID, connectionID string) (*SessionConnectionView, error) {
 	def, err := s.definition(ctx, pluginID)
 	if err != nil {
@@ -174,7 +174,27 @@ func (s *Service) selectedSessionConnection(ctx context.Context, sessionID strin
 			return nil, err
 		}
 		if saved == nil {
-			return nil, required
+			var selected *Connection
+			for _, candidate := range connectionsForPlugin(connections, def.ID) {
+				if !connectionConfiguredFor(def, candidate) {
+					continue
+				}
+				ready, err := s.ReadyConnection(ctx, candidate.ID)
+				if errors.Is(err, ErrConnectionReauthorizationRequired) {
+					continue
+				}
+				if err != nil {
+					return nil, err
+				}
+				if selected != nil {
+					return nil, required
+				}
+				selected = ready
+			}
+			if selected == nil {
+				return nil, required
+			}
+			return selected, nil
 		}
 		c, err := s.ReadyConnection(ctx, saved.ConnectionID)
 		if errors.Is(err, store.ErrNotFound) || errors.Is(err, ErrConnectionReauthorizationRequired) {
@@ -230,8 +250,7 @@ func (s *Service) ResolveSessionEndpoint(ctx context.Context, sessionID, pluginI
 	return endpointBindingForConnection(def, endpointName, endpoint, c), nil
 }
 
-// Discovery is session-scoped too: do not initialize MCP processes for accounts
-// that the user has not selected. Global introspection remains available in Settings.
+// Discovery uses the chat binding or its sole usable connection, just like calls.
 func (s *Service) ListSessionEndpointBindings(ctx context.Context, sessionID, kind string) ([]*EndpointBinding, error) {
 	defs, err := s.ListDefinitions(ctx)
 	if err != nil {

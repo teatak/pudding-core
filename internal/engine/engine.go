@@ -2467,6 +2467,17 @@ func (e *Engine) loadPlugin(ctx context.Context, sessionID string, call tool.Cal
 			break
 		}
 	}
+	if request.ConnectionID != "" {
+		source, ok := e.plugins.(interface {
+			SetSessionConnection(context.Context, string, string, string) (*plugin.SessionConnectionView, error)
+		})
+		if !ok {
+			return pluginLoadFailure(call, "connection_selection_unavailable", "Plugin connection selection is unavailable", map[string]any{"pluginID": request.PluginID}), false
+		}
+		if _, err := source.SetSessionConnection(ctx, sessionID, request.PluginID, request.ConnectionID); err != nil {
+			return pluginLoadFailure(call, "connection_selection_failed", err.Error(), map[string]any{"pluginID": request.PluginID}), false
+		}
+	}
 	if !alreadyLoaded {
 		loaded := store.NormalizePluginIDs(append(append([]string(nil), sess.LoadedPluginIDs...), request.PluginID))
 		if _, err := e.store.UpdateSession(ctx, sessionID, store.SessionUpdate{LoadedPluginIDs: &loaded}); err != nil {
@@ -2486,15 +2497,16 @@ func (e *Engine) loadPlugin(ctx context.Context, sessionID string, call tool.Cal
 	}); ok {
 		selection, err := source.SessionConnection(ctx, sessionID, request.PluginID)
 		if err != nil {
-			return pluginLoadFailure(call, "connection_state_unavailable", err.Error(), map[string]any{"pluginID": request.PluginID}), !alreadyLoaded
+			return pluginLoadFailure(call, "connection_state_unavailable", err.Error(), map[string]any{"pluginID": request.PluginID}), !alreadyLoaded || request.ConnectionID != ""
 		}
 		payload["connectionSelection"] = selection.Selection
+		payload["connections"] = selection.Connections
 		if selection.ConnectionID != "" {
 			payload["connectionID"] = selection.ConnectionID
 		}
 		if selection.Selection == plugin.ConnectionSelectionUser && selection.Required {
 			payload["connectionRequired"] = true
-			payload["message"] = "Plugin loaded. Ask the user to select a connection in the connection picker for this chat before calling its tools. Do not choose an account yourself."
+			payload["message"] = "Plugin loaded. Inspect connections and select the account matching the user's intent with builtin_plugin_load(plugin_id, connection_id). Ask in chat only if ambiguous. If no usable connection exists, explain that one must be connected or reauthorized."
 		}
 	}
 	summaryKind := tool.SummaryReturnedFields
@@ -2520,7 +2532,7 @@ func (e *Engine) loadPlugin(ctx context.Context, sessionID string, call tool.Cal
 		Content:      string(content),
 		SummaryKind:  summaryKind,
 		SummaryCount: summaryCount,
-	}, !alreadyLoaded
+	}, !alreadyLoaded || request.ConnectionID != ""
 }
 
 func (e *Engine) unloadPlugin(ctx context.Context, sessionID string, call tool.Call) (tool.Result, bool) {

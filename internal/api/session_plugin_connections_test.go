@@ -19,7 +19,7 @@ import (
 	"github.com/teatak/pudding-core/internal/store/storetest"
 )
 
-func TestSessionConnectionOnlyUserSelectionAuthorizesAccounts(t *testing.T) {
+func TestSessionConnectionUsesSoleAccountAndReusesBinding(t *testing.T) {
 	ctx := context.Background()
 	home := t.TempDir()
 	cfg := config.NewManager(home)
@@ -38,6 +38,7 @@ auth:
 endpoints:
   accounts_rest: {kind: rest, url: 'https://example.com'}
   accounts_graphql: {kind: graphql, url: 'https://example.com/graphql'}
+  accounts_mcp: {kind: mcp, transport: streamable_http, url: 'https://example.com/mcp'}
 `), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -58,26 +59,44 @@ endpoints:
 			t.Fatal(err)
 		}
 	}
-	save("work")
 	checkBlocked := func(session, ref string) {
 		t.Helper()
 		for _, endpoint := range []string{"accounts_rest", "accounts_graphql"} {
 			_, err := plugins.ResolveEndpoint(ctx, session, endpoint, ref)
 			var required *plugin.EndpointResolveError
 			if !errors.As(err, &required) || required.Reason != "connection_required" || required.PluginID != "accounts" {
-				t.Fatalf("account executed without user selection: %v", err)
+				t.Fatalf("expected unresolved connection: %v", err)
 			}
 		}
 	}
 	checkBlocked("one", "")
-	checkBlocked("one", "work")
+	save("work")
+	if err := cfg.PutPluginConnection(ctx, &plugin.Connection{ID: "unconfigured", PluginID: "accounts", Auth: plugin.Auth{Type: "bearer", MethodID: "key"}}); err != nil {
+		t.Fatal(err)
+	}
+	for _, endpoint := range []string{"accounts_rest", "accounts_graphql", "accounts_mcp"} {
+		binding, err := plugins.ResolveEndpoint(ctx, "one", endpoint, "")
+		if err != nil || binding.ConnectionID != "work" {
+			t.Fatal("sole usable connection", binding, err)
+		}
+	}
+	bindings, err := plugins.ListSessionEndpointBindings(ctx, "one", plugin.EndpointKindMCP)
+	if err != nil || len(bindings) != 1 || bindings[0].ConnectionID != "work" {
+		t.Fatal("sole MCP connection discovery", bindings, err)
+	}
 	route := srv.URL + "/sessions/one/plugins/accounts/connection"
 	view := decodeJSON[plugin.SessionConnectionView](t, req(t, http.MethodGet, route, nil))
 	raw, _ := json.Marshal(view)
-	if !view.Required || view.ConnectionID != "" || len(view.Connections) != 1 || strings.Contains(string(raw), "private-token") {
+	if view.Required || view.ConnectionID != "work" || len(view.Connections) != 2 || strings.Contains(string(raw), "private-token") {
 		t.Fatal("selection metadata", string(raw))
 	}
 	save("personal")
+	checkBlocked("one", "")
+	checkBlocked("one", "work")
+	view = decodeJSON[plugin.SessionConnectionView](t, req(t, http.MethodGet, route, nil))
+	if !view.Required || view.ConnectionID != "" {
+		t.Fatal("multiple usable accounts must require selection", view)
+	}
 	if resp := req(t, http.MethodPut, route, map[string]string{"connectionID": "missing"}); resp.StatusCode != 400 {
 		t.Fatal(resp.StatusCode)
 	} else {
@@ -120,6 +139,7 @@ endpoints:
 		t.Fatal(b, err)
 	}
 	cfg.DeletePluginConnection(ctx, "personal")
+	cfg.DeletePluginConnection(ctx, "third")
 	checkBlocked("one", "")
 	save("personal")
 	checkBlocked("one", "personal")

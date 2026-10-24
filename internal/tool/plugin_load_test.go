@@ -6,11 +6,11 @@ import (
 )
 
 func TestDecodePluginLoadRequest(t *testing.T) {
-	request, err := DecodePluginLoadRequest(json.RawMessage(`{"plugin_id":" widget-authoring ","skill_id":" widget-authoring "}`))
+	request, err := DecodePluginLoadRequest(json.RawMessage(`{"plugin_id":" widget-authoring ","skill_id":" widget-authoring ","connection_id":" work "}`))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if request.PluginID != "widget-authoring" || request.SkillID != "widget-authoring" {
+	if request.PluginID != "widget-authoring" || request.SkillID != "widget-authoring" || request.ConnectionID != "work" {
 		t.Fatalf("request = %+v", request)
 	}
 	if _, err := DecodePluginLoadRequest(json.RawMessage(`{"skill_id":"widget-authoring"}`)); err == nil {

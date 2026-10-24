@@ -364,7 +364,7 @@ func TestSaveAuthoredPackageDoesNotCommitWhenEnablementReadFails(t *testing.T) {
 	}
 }
 
-func TestResolveEndpointRequiresUserSelectionEvenForOneConnection(t *testing.T) {
+func TestResolveEndpointAutomaticallyUsesSoleConnection(t *testing.T) {
 	homeDir := writeTestPlugin(t)
 	svc := NewService(homeDir, fakeConnectionStore{items: map[string]*Connection{
 		"github-main": {
@@ -377,10 +377,7 @@ func TestResolveEndpointRequiresUserSelectionEvenForOneConnection(t *testing.T) 
 		},
 	}})
 
-	if _, err := svc.ResolveEndpoint(context.Background(), "session-1", "github_rest", "github-main"); err == nil {
-		t.Fatal("model supplied connection bypassed user selection")
-	}
-	bindServiceTestConnection(t, svc, "session-1", "github", "github-main")
+	bindServiceTestConnection(t, svc, "session-1", "github", "")
 	binding, err := svc.ResolveEndpoint(context.Background(), "session-1", "github_rest", "")
 	if err != nil {
 		t.Fatal(err)
@@ -402,7 +399,7 @@ func TestResolveEndpointRequiresConnectionWhenMultipleConfigured(t *testing.T) {
 		"github-work": {
 			ID: "github-work", Name: "Work", PluginID: "github",
 			Account: &ConnectionAccount{ID: "42", Login: "octocat", Name: "The Octocat", Type: "User"},
-			Auth:    Auth{MethodID: GitHubAppAuthMethodID, Type: AuthTypeOAuth2, Variant: GitHubAppAuthVariant},
+			Auth:    Auth{MethodID: GitHubAppAuthMethodID, Type: AuthTypeOAuth2, Variant: GitHubAppAuthVariant, AccessToken: "work-token"},
 		},
 		"github-personal": {
 			ID: "github-personal", Name: "Personal", PluginID: "github",

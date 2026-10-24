@@ -67,17 +67,20 @@ endpoints:
 
 For MCP endpoints, use `transport: streamable_http` with `url`, or
 `transport: stdio` with `command` and optional `args` / `env`. Runtime tool
-discovery exposes only user-selected MCP endpoints as model-callable tools after the plugin
+discovery exposes only resolved MCP endpoints as model-callable tools after the plugin
 is loaded. The daemon starts `stdio` endpoints on demand and stops their process
 when the session plugin binding is cleared or the daemon exits.
 
 ## Connection selection
 
 `connection.selection` declares the plugin's connection policy. Omission means
-`user`: the user must pick a connection for each chat, even when only one is saved.
+`user`: reuse the chat's saved binding; without one, automatically use the sole
+usable connection. Multiple usable connections require an explicit account choice.
+The model selects an account matching the user's intent through
+`builtin_plugin_load(plugin_id, connection_id)`, asking in chat if ambiguous.
 `single_active` allows multiple saved connections but at most one active connection
 shared by all tools. `automatic` is reserved and rejected by manifest validation;
-there is no automatic-selection control in the UI.
+the sole-connection behavior is part of `user`, not a separate manifest mode.
 
 ```yaml
 connection:
@@ -95,11 +98,15 @@ For `user` plugins, `GET/PUT /sessions/:id/plugins/:pluginID/connection` exposes
 redacted candidates and accepts `{ "connectionID": "connection-id" }` from the
 user UI. The chat header and the load/error result provide a picker. Selecting
 from a blocked tool offers **Use and continue**; its continuation is a canonical
-user message with an idempotent client message ID. No model-callable tool writes
-this binding, and a `connection` argument cannot establish or change it.
+user message with an idempotent client message ID. The same binding can be set by
+`builtin_plugin_load` with `connection_id`, including for an already-loaded plugin.
+The tool returns redacted account candidates. The picker remains optional; users
+do not need to leave the chat to select an account. A REST/GraphQL `connection`
+argument only checks the resolved account; use the load tool to change it.
 
-REST, GraphQL and MCP resolve only the session selection. Unbound MCP accounts
-are not discovered for model use; cached MCP calls revalidate the current binding
+REST, GraphQL and MCP share the same binding-or-sole-connection resolution.
+Automatic use does not write a binding; if another usable connection is added, an
+unbound chat must choose an account. Cached MCP calls revalidate the current binding
 and credentials before execution. Another session, including a cloned or child
 session, does not inherit the selection. The SQLite binding survives restarts and
 is removed with its session. Missing/deleted/recreated connections and changed
@@ -121,9 +128,10 @@ mailbox modification permissions.
 
 To upgrade an existing read-only connection, run a Core build with the sending
 scope, install Gmail plugin `1.0.0-preview.2` or later, and authorize Gmail again
-from Plugins → Gmail → Connections. Select the connection in the chat picker if
-the chat has no binding. Updating Google Cloud's consent configuration alone does
-not add permissions to existing tokens. A `connection_required` error concerns
+from Plugins → Gmail → Connections. The sole usable connection is used
+automatically; for multiple accounts the model selects the intended connection.
+Updating Google Cloud's consent configuration alone does not add permissions to
+existing tokens. A `connection_required` error concerns
 the chat binding and does not establish whether the token has sending permission.
 
 ## Connection Fields

@@ -66,7 +66,7 @@ func (e *EndpointResolveError) Error() string {
 	}
 	switch e.Reason {
 	case "connection_required":
-		return "the user must select a connection for this chat; ask the user to use the connection picker. A model-supplied connection ID does not authorize an account or change the binding"
+		return "a usable connection is required for this chat; inspect the available accounts and call builtin_plugin_load with plugin_id and connection_id to select one matching the user's intent. If the account is ambiguous, ask the user in chat"
 	case "connection_not_found":
 		return fmt.Sprintf("connection %q is not available for endpoint %q", e.Connection, e.Endpoint)
 	case "endpoint_ambiguous":
