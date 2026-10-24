@@ -846,6 +846,7 @@ func cleanupMigrationBackups(path, keepPath string) error {
 	}
 	keepName := filepath.Base(keepPath)
 	backups := make([]string, 0)
+	latestByVersion := make(map[string]string)
 	keepFound := false
 	for _, entry := range entries {
 		if entry.IsDir() {
@@ -855,6 +856,10 @@ func cleanupMigrationBackups(path, keepPath string) error {
 		if ok {
 			backups = append(backups, entry.Name())
 			keepFound = keepFound || entry.Name() == keepName
+			version, _, _ := strings.Cut(strings.TrimPrefix(entry.Name(), base+".backup-v"), "-")
+			if entry.Name() > latestByVersion[version] {
+				latestByVersion[version] = entry.Name()
+			}
 		}
 	}
 	if !keepFound {
@@ -864,8 +869,15 @@ func cleanupMigrationBackups(path, keepPath string) error {
 		return nil
 	}
 	var cleanupErr error
+	// An interrupted upgrade can leave an intermediate schema. Its retry backup
+	// cannot replace the original published-version rollback point. Keep the
+	// newest backup of each source schema, plus this attempt's explicit backup.
+	keep := map[string]bool{keepName: true}
+	for _, name := range latestByVersion {
+		keep[name] = true
+	}
 	for _, candidate := range backups {
-		if candidate == keepName {
+		if keep[candidate] {
 			continue
 		}
 		if err := os.Remove(filepath.Join(dir, candidate)); err != nil {

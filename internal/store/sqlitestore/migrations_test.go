@@ -814,6 +814,7 @@ func TestOpenCleansOldBackupsAfterMigration(t *testing.T) {
 	if len(backups) != 3 {
 		t.Fatalf("migration backups = %v, want three", backups)
 	}
+	latestV7 := backups[len(backups)-1]
 	unrelated := path + ".backup-vx-not-a-migration-backup"
 	if err := os.WriteFile(unrelated, []byte("keep"), 0o600); err != nil {
 		t.Fatal(err)
@@ -836,8 +837,11 @@ func TestOpenCleansOldBackupsAfterMigration(t *testing.T) {
 	}
 	defer reopened.Close()
 	backups = migrationBackupFiles(t, path)
-	if len(backups) != 1 || !strings.Contains(filepath.Base(backups[0]), ".backup-v8-") {
-		t.Fatalf("migration backups after cleanup = %v, want latest v8 backup", backups)
+	if len(backups) != 2 || !strings.Contains(filepath.Base(backups[0]), ".backup-v7-") || !strings.Contains(filepath.Base(backups[1]), ".backup-v8-") {
+		t.Fatalf("migration backups after cleanup = %v, want latest backup of v7 and v8", backups)
+	}
+	if backups[0] != latestV7 {
+		t.Fatalf("retained v7 backup = %s, want newest %s", backups[0], latestV7)
 	}
 	if _, err := os.Stat(unrelated); err != nil {
 		t.Fatalf("unrelated backup-like file was removed: %v", err)

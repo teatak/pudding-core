@@ -73,6 +73,7 @@ core 默认只提供 API；显式 `-ui-dir` 可挂载外置 UI。桌面构建、
 - canonical messages 是对话历史的事实源；turn 状态由 turns 保存，UI 不自建另一套状态。
 - token delta 不逐条落库。最终 assistant 输出、turn 收尾状态与 lifecycle events 按既有事务契约提交；工具循环的 canonical 结果供后续请求和回读使用。
 - SQLite 使用 WAL；持久化变更同步 schema、迁移和指纹，不改写已发布迁移。
+- 升级前自动备份数据库。升级成功后保留每个来源 schema 的最新备份及本次备份，只清理同一 schema 的更旧副本；中途失败后重试不会删除原正式版本的回退点。跨 schema 回退必须恢复与旧版兼容的备份。
 - 正式升级基线从 `0.1.1` 的 schema v1 起保留迁移链；已发布的 v1–32 迁移及指纹不改写。未发布的 v33–46 已收敛为 v47 入口：根据来源版本执行剩余数据转换，在同一事务内验证最终结构、外键并记录 v47；失败整笔回滚，迁移前仍按原机制备份。已有 v33–47 开发库继续支持，v47 实验遗留数据保持不动；不创建已撤回实验的表。
 - 上下文压缩已实现，摘要落 canonical message；预算、保留边界与工具循环内触发见 [context-compaction.md](context-compaction.md)。
 
