@@ -305,3 +305,55 @@ func TestAssistantMaskMigrationFrom52(t *testing.T) {
 		})
 	}
 }
+
+func TestAssistantPaletteMigrationFrom54(t *testing.T) {
+	for _, palette := range []string{"christmas", "apricot", "crimson"} {
+		t.Run(palette, func(t *testing.T) {
+			s, path := openTestStore(t)
+			ctx := context.Background()
+			input := assistantInput(0)
+			if _, err := s.SaveAssistant(ctx, input); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := s.db.Exec(`UPDATE assistants SET appearance=json_set(appearance,'$.palette',?)`, palette); err != nil {
+				t.Fatal(err)
+			}
+			before, err := s.GetAssistant(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := setSchemaVersion(s.db, 54); err != nil {
+				t.Fatal(err)
+			}
+			if err := s.Close(); err != nil {
+				t.Fatal(err)
+			}
+			reopened, err := Open(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer reopened.Close()
+			got, err := reopened.GetAssistant(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := before.Assistant.Appearance
+			revision := before.Assistant.Revision
+			if palette == "christmas" {
+				want.Palette = "apricot"
+				revision++
+				if !got.Assistant.UpdatedAt.After(before.Assistant.UpdatedAt) {
+					t.Fatal("migration did not advance timestamp")
+				}
+			}
+			if got.Assistant.Appearance != want || got.Assistant.Revision != revision || got.Assistant.Name != before.Assistant.Name || got.Assistant.UserName != before.Assistant.UserName || len(got.Memories) != len(before.Memories) {
+				t.Fatalf("unexpected palette migration: %+v", got)
+			}
+			input.Appearance = got.Assistant.Appearance
+			input.ExpectedRevision = &got.Assistant.Revision
+			if _, err := reopened.SaveAssistant(ctx, input); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}

@@ -1543,8 +1543,9 @@ func TestStartGmailPluginOAuth(t *testing.T) {
 	if got, want := q.Get("prompt"), "consent"; got != want {
 		t.Fatalf("prompt = %q, want %q", got, want)
 	}
-	if !strings.Contains(q.Get("scope"), "https://www.googleapis.com/auth/gmail.readonly") {
-		t.Fatalf("scope missing gmail readonly: %q", q.Get("scope"))
+	wantScopes := []string{"openid", "email", "profile", "https://www.googleapis.com/auth/gmail.readonly", "https://www.googleapis.com/auth/gmail.send"}
+	if got := strings.Fields(q.Get("scope")); !reflect.DeepEqual(got, wantScopes) {
+		t.Fatalf("scopes = %q, want %q", got, wantScopes)
 	}
 }
 

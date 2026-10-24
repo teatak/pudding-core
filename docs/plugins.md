@@ -112,6 +112,20 @@ legacy `web` plugin ID and `/tools/web` API remain compatible. The latter projec
 both features onto the one active connection: conflicting simultaneous provider
 selections are rejected atomically; saving keys alone never selects a connection.
 
+## Gmail OAuth
+
+Gmail requests `gmail.readonly` and `gmail.send`, in addition to the Google account
+identity scopes. The Gmail plugin can read mail and send new messages or replies
+through `POST /users/me/messages/send`; these scopes do not grant draft editing or
+mailbox modification permissions.
+
+To upgrade an existing read-only connection, run a Core build with the sending
+scope, install Gmail plugin `1.0.0-preview.2` or later, and authorize Gmail again
+from Plugins → Gmail → Connections. Select the connection in the chat picker if
+the chat has no binding. Updating Google Cloud's consent configuration alone does
+not add permissions to existing tokens. A `connection_required` error concerns
+the chat binding and does not establish whether the token has sending permission.
+
 ## Connection Fields
 
 Use `connection.fields` for per-connection values that are not auth secrets but

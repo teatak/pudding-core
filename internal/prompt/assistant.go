@@ -78,13 +78,13 @@ func RelevantAssistantMemories(memories []store.AssistantMemory) Segment {
 }
 
 func assistantAppearance(a store.AssistantAppearance) string {
-	palette := map[string]string{"original": "silver-gray", "lavender": "lavender", "mint": "mint", "blue": "bright blue", "coral": "coral orange", "yellow": "bright yellow", "violet": "vivid violet", "emerald": "emerald green"}
-	body := map[string]string{"classic": "rounded body", "round": "round body", "square": "square body"}
-	eyes := map[string]string{"classic": "oval eyes", "curved": "curved eyes", "dots": "dot eyes"}
-	mouth := map[string]string{"classic": "small open smile", "smile": "curved smile", "surprised": "round surprised mouth"}
-	headwear := map[string]string{"none": "no headwear", "antenna": "antenna", "hat": "red hat", "beacon": "indicator light"}
-	arms := map[string]string{"none": "no arms", "classic": "slender arms", "short": "short thick arms", "orb": "ball-shaped arms"}
-	eyewear := map[string]string{"none": "no eyewear", "classic": "green face visor", "goggles": "gold-rimmed goggles"}
-	stickers := map[string]string{"none": "no face stickers", "blush": "blush stickers", "freckles": "freckle stickers", "stars": "star stickers"}
+	palette := map[string]string{"original": "silver-gray", "lavender": "lavender", "mint": "mint", "blue": "bright blue", "coral": "coral orange", "yellow": "bright yellow", "violet": "vivid violet", "emerald": "emerald green", "crimson": "deep crimson", "apricot": "warm apricot"}
+	body := map[string]string{"classic": "rounded body", "round": "round body", "square": "square body", "pudding": "pudding-shaped body", "hexagon": "hexagonal body", "cat": "cat-eared body", "devil": "pointed-chin body", "plump": "plump pear-shaped body"}
+	eyes := map[string]string{"classic": "oval eyes", "curved": "curved eyes", "dots": "dot eyes", "wink": "winking eyes", "sleepy": "half-closed eyes", "mischief": "mischievous eyes", "jolly": "jolly eyes with white eyebrows"}
+	mouth := map[string]string{"classic": "small open smile", "smile": "curved smile", "surprised": "round surprised mouth", "grin": "toothy grin", "mew": "cat-shaped smile", "fangs": "small fangs", "laugh": "open laughing mouth"}
+	headwear := map[string]string{"none": "no headwear", "antenna": "antenna", "hat": "red hat", "beacon": "indicator light", "crown": "gold crown", "bow": "red bow", "horns": "little black devil horns", "santa": "red Santa hat with white fur trim"}
+	arms := map[string]string{"none": "no arms", "classic": "slender arms", "short": "short thick arms", "orb": "ball-shaped arms", "mitten": "mitten arms", "claw": "mechanical claw arms", "wings": "bat-wing arms", "santa": "red mittens with white cuffs"}
+	eyewear := map[string]string{"none": "no eyewear", "classic": "green face visor", "goggles": "gold-rimmed goggles", "glasses": "black round glasses", "sunglasses": "dark sunglasses", "domino": "black devil eye mask", "halfmoon": "gold half-moon reading glasses"}
+	stickers := map[string]string{"none": "no face stickers", "blush": "blush stickers", "freckles": "freckle stickers", "stars": "star stickers", "hearts": "heart stickers", "lightning": "lightning stickers", "flames": "flame stickers", "beard": "fluffy white Santa beard"}
 	return fmt.Sprintf("%s %s; %s; %s; %s; %s; %s; %s", palette[a.Palette], body[a.Body], eyes[a.Eyes], mouth[a.Mouth], headwear[a.Headwear], arms[a.Arms], eyewear[a.Eyewear], stickers[a.FaceSticker])
 }

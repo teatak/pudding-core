@@ -81,19 +81,19 @@ func (in *SaveAssistantInput) Normalize() error {
 		return ErrInvalidAssistant
 	}
 	switch in.Appearance.Palette {
-	case "original", "lavender", "mint", "blue", "coral", "yellow", "violet", "emerald":
+	case "original", "lavender", "mint", "blue", "coral", "yellow", "violet", "emerald", "crimson", "apricot":
 	default:
 		return ErrInvalidAssistant
 	}
 	a := in.Appearance
 	// Core parts are required. Decorative slots always carry an explicit selection,
 	// including "none"; only assets supported by the current renderer are accepted.
-	if !slices.Contains([]string{"classic", "round", "square"}, a.Body) || !slices.Contains([]string{"classic", "curved", "dots"}, a.Eyes) ||
-		!slices.Contains([]string{"classic", "smile", "surprised"}, a.Mouth) ||
-		!slices.Contains([]string{"none", "antenna", "hat", "beacon"}, a.Headwear) ||
-		!slices.Contains([]string{"none", "classic", "short", "orb"}, a.Arms) ||
-		!slices.Contains([]string{"none", "classic", "goggles"}, a.Eyewear) ||
-		!slices.Contains([]string{"none", "blush", "freckles", "stars"}, a.FaceSticker) {
+	if !slices.Contains([]string{"classic", "round", "square", "pudding", "hexagon", "cat", "devil", "plump"}, a.Body) || !slices.Contains([]string{"classic", "curved", "dots", "wink", "sleepy", "mischief", "jolly"}, a.Eyes) ||
+		!slices.Contains([]string{"classic", "smile", "surprised", "grin", "mew", "fangs", "laugh"}, a.Mouth) ||
+		!slices.Contains([]string{"none", "antenna", "hat", "beacon", "crown", "bow", "horns", "santa"}, a.Headwear) ||
+		!slices.Contains([]string{"none", "classic", "short", "orb", "mitten", "claw", "wings", "santa"}, a.Arms) ||
+		!slices.Contains([]string{"none", "classic", "goggles", "glasses", "sunglasses", "domino", "halfmoon"}, a.Eyewear) ||
+		!slices.Contains([]string{"none", "blush", "freckles", "stars", "hearts", "lightning", "flames", "beard"}, a.FaceSticker) {
 		return ErrInvalidAssistant
 	}
 	return nil

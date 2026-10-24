@@ -64,6 +64,11 @@ UPDATE assistants SET appearance=json_object('palette',appearance,'body','classi
 	return err
 }
 
+func migrateAssistantPaletteV55(tx *sql.Tx) error {
+	_, err := tx.Exec(`UPDATE assistants SET appearance=json_set(appearance,'$.palette','apricot'),revision=revision+1,updated_at=max(updated_at+1,?) WHERE json_extract(appearance,'$.palette')='christmas'`, time.Now().UTC().UnixMilli())
+	return err
+}
+
 func migrateAssistantV53(tx *sql.Tx) error {
 	// The old "none" omitted goggles but still rendered the built-in mask.
 	// Name that existing choice explicitly; future "none" means a bare face.

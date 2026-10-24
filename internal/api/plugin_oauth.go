@@ -195,6 +195,7 @@ var pluginOAuthProviders = map[string]pluginOAuthProvider{
 			"email",
 			"profile",
 			"https://www.googleapis.com/auth/gmail.readonly",
+			"https://www.googleapis.com/auth/gmail.send",
 		},
 		AuthorizeParams: map[string]string{
 			"access_type":            "offline",

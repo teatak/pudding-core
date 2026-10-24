@@ -5,6 +5,17 @@ The Go daemon embeds it through this package; desktop generates `web/contracts/`
 `api.ts` and `events.ts` are the TypeScript/Zod client validation definitions for the REST and SSE protocol.
 Server structs and lifecycle semantics remain owned by core; verify both sides when changing a wire field.
 
+Protocol 45 adds eyes `wink` / `sleepy`, mouths `grin` / `mew`, headwear
+`crown` / `bow`, arms `mitten` / `claw`, eyewear `glasses` / `sunglasses`,
+and stickers `hearts` / `lightning`. It also adds assistant body shapes `pudding`, `hexagon`, and `cat` alongside
+`classic`, `round`, and `square`. Shape and palette remain independent. Schema
+advances to 55 to replace saved `christmas` red selections with `apricot`; other selections are preserved. Update desktop and daemon together
+so new values can be validated and rendered. The same expansion includes the
+independent devil set: body `devil`, eyes `mischief`, mouth `fangs`, headwear
+`horns`, arms `wings`, eyewear `domino`, stickers `flames`, and palette `crimson`.
+The Santa set adds body `plump`, eyes `jolly`, mouth `laugh`, headwear and arms
+`santa`, eyewear `halfmoon`, and sticker `beard`; it defaults to the warm `apricot` palette, with fixed red hat and mittens.
+
 Protocol 44 expands assistant memories with `scope` (`personal` / `project`),
 `source` (`user_settings` / `conversation`), a positive `revision`, and optional
 `projectID`, `sourceSessionID`, `sourceTurnID`. Schema 54 preserves existing
@@ -68,12 +79,13 @@ preference returns the current snapshot without another revision, making a retry
 after a lost response safe. Profile and preference commit atomically.
 
 Appearance persists as JSON with required `body`, `eyes`, and `mouth` asset IDs
-(default `classic`). Body supports `classic`, `round`, `square`. Palette supports
-`original`, `lavender`, `mint`, `blue`, `coral`, `yellow`, `violet`, `emerald`. Eyes support
-`classic`, `curved`, `dots`; mouth supports `classic`, `smile`, `surprised`.
+(default `classic`). Body supports `classic`, `round`, `square`, `pudding`, `hexagon`, `cat`, `devil`, `plump`. Palette supports
+`original`, `lavender`, `mint`, `blue`, `coral`, `yellow`, `violet`, `emerald`, `crimson`, `apricot`. Eyes support
+`classic`, `curved`, `dots`, `wink`, `sleepy`, `mischief`, `jolly`; mouth supports `classic`, `smile`, `surprised`, `grin`, `mew`, `fangs`, `laugh`.
 Decorative slots carry explicit IDs or `none`: headwear supports `antenna`, `hat`,
-`beacon`; arms support `classic`, `short`, `orb`; faceSticker supports `blush`,
-`freckles`, `stars`; eyewear supports `classic`, `goggles`.
+`beacon`, `crown`, `bow`, `horns`, `santa`; arms support `classic`, `short`, `orb`, `mitten`, `claw`, `wings`, `santa`;
+faceSticker supports `blush`, `freckles`, `stars`, `hearts`, `lightning`, `flames`, `beard`;
+eyewear supports `classic`, `goggles`, `glasses`, `sunglasses`, `domino`, `halfmoon`.
 Missing/unknown selections return `400 invalid_assistant`.
 The optional communication preference uses memory ID `communication_preference`,
 scope `personal` and source `user_settings`; an empty value deletes it. This
