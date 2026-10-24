@@ -78,7 +78,7 @@ func RelevantAssistantMemories(memories []store.AssistantMemory) Segment {
 }
 
 func assistantAppearance(a store.AssistantAppearance) string {
-	palette := map[string]string{"original": "silver-gray", "lavender": "lavender", "mint": "mint", "blue": "bright blue", "coral": "coral orange", "yellow": "bright yellow", "violet": "vivid violet", "emerald": "emerald green", "crimson": "deep crimson", "apricot": "warm apricot"}
+	palette := map[string]string{"original": "silver-gray", "lavender": "lavender", "mint": "mint", "blue": "bright blue", "coral": "coral orange", "yellow": "bright yellow", "violet": "vivid violet", "emerald": "emerald green", "crimson": "deep crimson", "apricot": "soft peach"}
 	body := map[string]string{"classic": "rounded body", "round": "round body", "square": "square body", "pudding": "pudding-shaped body", "hexagon": "hexagonal body", "cat": "cat-eared body", "devil": "pointed-chin body", "plump": "plump pear-shaped body"}
 	eyes := map[string]string{"classic": "oval eyes", "curved": "curved eyes", "dots": "dot eyes", "wink": "winking eyes", "sleepy": "half-closed eyes", "mischief": "mischievous eyes", "jolly": "jolly eyes with white eyebrows"}
 	mouth := map[string]string{"classic": "small open smile", "smile": "curved smile", "surprised": "round surprised mouth", "grin": "toothy grin", "mew": "cat-shaped smile", "fangs": "small fangs", "laugh": "open laughing mouth"}

@@ -14,7 +14,7 @@ so new values can be validated and rendered. The same expansion includes the
 independent devil set: body `devil`, eyes `mischief`, mouth `fangs`, headwear
 `horns`, arms `wings`, eyewear `domino`, stickers `flames`, and palette `crimson`.
 The Santa set adds body `plump`, eyes `jolly`, mouth `laugh`, headwear and arms
-`santa`, eyewear `halfmoon`, and sticker `beard`; it defaults to the warm `apricot` palette, with fixed red hat and mittens.
+`santa`, eyewear `halfmoon`, and sticker `beard`; it defaults to the soft peach `apricot` palette, with fixed red hat and mittens.
 
 Protocol 44 expands assistant memories with `scope` (`personal` / `project`),
 `source` (`user_settings` / `conversation`), a positive `revision`, and optional
