@@ -1,11 +1,75 @@
 package api
 
 import (
+	"context"
+	"errors"
 	"net/http"
+	"os"
+	"path/filepath"
 	"testing"
 
+	"github.com/teatak/pudding-core/internal/home"
 	"github.com/teatak/pudding-core/internal/store"
 )
+
+func TestDeleteAssistantAPI(t *testing.T) {
+	srv, st, homeDir := newTestServerWithHome(t)
+	ctx := context.Background()
+	profile := decodeJSON[store.AssistantSnapshot](t, req(t, "POST", srv.URL+"/assistant/open", map[string]string{"locale": "en", "provider": "mock", "model": "mock"}))
+	id := profile.Assistant.SessionID
+	ordinary := decodeJSON[store.Session](t, req(t, "POST", srv.URL+"/sessions", map[string]string{"title": "Keep me", "provider": "mock", "model": "mock"}))
+	item := decodeJSON[map[string]any](t, req(t, "POST", srv.URL+"/studio/items", map[string]string{"kind": "page", "name": "Kept artifact", "body": "Keep this page", "sourceSessionID": id}))
+	itemID := item["id"].(string)
+	response := req(t, "POST", srv.URL+"/sessions/"+id+"/studio/items/"+itemID+"/open", map[string]any{})
+	response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("mount: %d", response.StatusCode)
+	}
+	scratch, err := home.PrepareCodeScratch(homeDir, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(scratch, "temporary.txt"), []byte("delete"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	response = req(t, "DELETE", srv.URL+"/assistant", nil)
+	response.Body.Close()
+	if response.StatusCode != http.StatusNoContent {
+		t.Fatalf("delete: %d", response.StatusCode)
+	}
+	got := decodeJSON[store.AssistantSnapshot](t, req(t, "GET", srv.URL+"/assistant", nil))
+	if got.Assistant != nil || len(got.Memories) != 0 {
+		t.Fatalf("profile remains: %+v", got)
+	}
+	if _, err := st.GetSession(ctx, id); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("session remains: %v", err)
+	}
+	if _, err := os.Stat(scratch); !os.IsNotExist(err) {
+		t.Fatalf("scratch remains: %v", err)
+	}
+	if _, err := st.GetSession(ctx, ordinary.ID); err != nil {
+		t.Fatal(err)
+	}
+	response = req(t, "GET", srv.URL+"/studio/items/"+itemID, nil)
+	response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("artifact removed: %d", response.StatusCode)
+	}
+	response = req(t, "POST", srv.URL+"/sessions/"+id+"/restore", nil)
+	response.Body.Close()
+	if response.StatusCode != http.StatusNotFound {
+		t.Fatalf("permanent deletion is restorable: %d", response.StatusCode)
+	}
+	response = req(t, "DELETE", srv.URL+"/assistant", nil)
+	response.Body.Close()
+	if response.StatusCode != http.StatusNoContent {
+		t.Fatalf("delete retry: %d", response.StatusCode)
+	}
+	fresh := decodeJSON[store.AssistantSnapshot](t, req(t, "POST", srv.URL+"/assistant/open", map[string]string{"locale": "en", "provider": "mock", "model": "mock"}))
+	if fresh.Assistant.SessionID == id {
+		t.Fatal("reused deleted conversation")
+	}
+}
 
 func TestAssistantAPI(t *testing.T) {
 	srv, _ := newTestServer(t)
@@ -104,7 +168,7 @@ func TestAssistantNewPartsRoundTrip(t *testing.T) {
 		{Palette: "blue", Body: "hexagon", Eyes: "sleepy", Mouth: "mew", Headwear: "bow", Arms: "claw", Eyewear: "sunglasses", FaceSticker: "lightning"},
 		{Palette: "crimson", Body: "devil", Eyes: "mischief", Mouth: "fangs", Headwear: "horns", Arms: "wings", Eyewear: "domino", FaceSticker: "flames"},
 		{Palette: "apricot", Body: "plump", Eyes: "jolly", Mouth: "laugh", Headwear: "santa", Arms: "santa", Eyewear: "halfmoon", FaceSticker: "beard"},
-		{Palette: "gold", Body: "plump", Eyes: "curved", Mouth: "grin", Headwear: "tang", Arms: "greeting", Eyewear: "none", FaceSticker: "papercut"},
+		{Palette: "gold", Body: "classic", Eyes: "curved", Mouth: "grin", Headwear: "tang", Arms: "greeting", Eyewear: "none", FaceSticker: "papercut"},
 	} {
 		input := map[string]any{"expectedRevision": index + 1, "name": "小布", "appearance": appearance, "communicationPreference": "简短回答"}
 		response := req(t, http.MethodPut, srv.URL+"/assistant", input)

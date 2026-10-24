@@ -14,6 +14,91 @@ func assistantInput(revision int64) store.SaveAssistantInput {
 	return store.SaveAssistantInput{ExpectedRevision: &revision, Name: "小布", UserName: "主人", Appearance: store.AssistantAppearance{Palette: "mint", Body: "classic", Eyes: "classic", Mouth: "classic", Headwear: "antenna", Arms: "none", Eyewear: "none", FaceSticker: "none"}, CommunicationPreference: "简短回答"}
 }
 
+func TestAssistantPermanentDeletion(t *testing.T) {
+	s, _ := openTestStore(t)
+	ctx := context.Background()
+	profile, err := s.OpenAssistant(ctx, "小布", "mock", "mock")
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := profile.Assistant.SessionID
+	if _, err := s.SaveAssistant(ctx, assistantInput(1)); err != nil {
+		t.Fatal(err)
+	}
+	beginTestTurn(t, s, id, "assistant-delete-turn", "assistant-delete-message", "assistant-delete-client")
+	if _, err := s.SaveAssistantMemory(ctx, id, store.AssistantMemoryWrite{Content: "喜欢喝茶", SourceTurnID: "assistant-delete-turn"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CreateChildSession(ctx, id, &store.Session{ID: "assistant-child", Provider: "mock", Model: "mock"}); err != nil {
+		t.Fatal(err)
+	}
+	createTestSession(t, s, "ordinary-kept")
+	if err := s.PrepareAssistantDeletion(ctx, "ordinary-kept"); !errors.Is(err, store.ErrAssistantToolUnavailable) {
+		t.Fatalf("ordinary admission: %v", err)
+	}
+	if err := s.PrepareAssistantDeletion(ctx, id); err != nil {
+		t.Fatal(err)
+	}
+	// Profile, memories and conversation must roll back together on a write failure.
+	if _, err := s.db.Exec(`CREATE TRIGGER reject_assistant_delete BEFORE DELETE ON assistants BEGIN SELECT RAISE(ABORT,'test failure'); END`); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DeleteAssistant(ctx); err == nil {
+		t.Fatal("expected transaction failure")
+	}
+	var count int
+	if err := s.db.QueryRow(`SELECT count(*) FROM sessions WHERE id=?`, id).Scan(&count); err != nil || count != 1 {
+		t.Fatalf("conversation lost on rollback: %d %v", count, err)
+	}
+	if _, err := s.db.Exec(`DROP TRIGGER reject_assistant_delete`); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DeleteAssistant(ctx); err != nil {
+		t.Fatal(err)
+	}
+	for _, table := range []string{"assistants", "assistant_sessions", "assistant_memories", "assistant_memory_terms", "messages", "turns", "session_children"} {
+		if err := s.db.QueryRow(`SELECT count(*) FROM ` + table).Scan(&count); err != nil || count != 0 {
+			t.Fatalf("%s retained rows: %d %v", table, count, err)
+		}
+	}
+	for _, deleted := range []string{id, "assistant-child"} {
+		if _, err := s.GetSession(ctx, deleted); !errors.Is(err, store.ErrNotFound) {
+			t.Fatalf("session remains: %s %v", deleted, err)
+		}
+		if _, err := s.RestoreSession(ctx, deleted); !errors.Is(err, store.ErrNotFound) {
+			t.Fatalf("deleted session restored: %s %v", deleted, err)
+		}
+	}
+	if _, err := s.GetSession(ctx, "ordinary-kept"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DeleteAssistant(ctx); err != nil {
+		t.Fatal("retry", err)
+	}
+	fresh, err := s.OpenAssistant(ctx, "Puddy", "mock", "mock")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fresh.Assistant.SessionID == id || fresh.Assistant.Name != "" || fresh.Assistant.UserName != "" || fresh.Assistant.Appearance.Palette != "original" || len(fresh.Memories) != 0 {
+		t.Fatalf("defaults not reset: %+v", fresh)
+	}
+}
+
+func TestAssistantDeletionWithoutConversation(t *testing.T) {
+	s, _ := openTestStore(t)
+	ctx := context.Background()
+	if _, err := s.SaveAssistant(ctx, assistantInput(0)); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DeleteAssistant(ctx); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.GetAssistant(ctx)
+	if err != nil || got.Assistant != nil || len(got.Memories) != 0 {
+		t.Fatalf("delete profile: %+v %v", got, err)
+	}
+}
+
 func TestAssistantSingletonAndPersistence(t *testing.T) {
 	s, path := openTestStore(t)
 	ctx := context.Background()

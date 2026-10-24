@@ -629,6 +629,10 @@ func archiveSessionGroupTx(ctx context.Context, tx *sql.Tx, id string, now time.
 	if err := requireOrdinaryConversationTx(ctx, tx, id); err != nil {
 		return err
 	}
+	return closeSessionAdmissionTx(ctx, tx, id, now)
+}
+
+func closeSessionAdmissionTx(ctx context.Context, tx *sql.Tx, id string, now time.Time) error {
 	if _, err := tx.ExecContext(ctx, `UPDATE sessions SET archived_at=?,updated_at=?
 		WHERE archived_at=0 AND (id=? OR id IN
 		(SELECT child_session_id FROM session_children WHERE parent_session_id=?))`, unixMS(now), unixMS(now), id, id); err != nil {
@@ -717,29 +721,34 @@ func (s *Store) deleteSession(ctx context.Context, id string) error {
 		if err := requireOrdinaryConversationTx(ctx, tx, id); err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, `DELETE FROM widget_page_pins WHERE scope=? OR scope IN (SELECT child_session_id FROM session_children WHERE parent_session_id=?)`, id, id); err != nil {
-			return err
-		}
-		if _, err := tx.ExecContext(ctx, `DELETE FROM widget_pages WHERE scope=? OR scope IN (SELECT child_session_id FROM session_children WHERE parent_session_id=?)`, id, id); err != nil {
-			return err
-		}
-		if _, err := tx.ExecContext(ctx, `DELETE FROM sessions WHERE id IN
-			(SELECT child_session_id FROM session_children WHERE parent_session_id=?)`, id); err != nil {
-			return err
-		}
-		res, err := tx.ExecContext(ctx, `DELETE FROM sessions WHERE id=?`, id)
-		if err != nil {
-			return err
-		}
-		n, err := res.RowsAffected()
-		if err != nil {
-			return err
-		}
-		if n == 0 {
-			return store.ErrNotFound
-		}
-		return nil
+		return deleteSessionTx(ctx, tx, id)
 	})
+}
+
+// Shared by ordinary conversation deletion and the explicit assistant reset.
+func deleteSessionTx(ctx context.Context, tx *sql.Tx, id string) error {
+	if _, err := tx.ExecContext(ctx, `DELETE FROM widget_page_pins WHERE scope=? OR scope IN (SELECT child_session_id FROM session_children WHERE parent_session_id=?)`, id, id); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM widget_pages WHERE scope=? OR scope IN (SELECT child_session_id FROM session_children WHERE parent_session_id=?)`, id, id); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM sessions WHERE id IN
+			(SELECT child_session_id FROM session_children WHERE parent_session_id=?)`, id); err != nil {
+		return err
+	}
+	res, err := tx.ExecContext(ctx, `DELETE FROM sessions WHERE id=?`, id)
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return store.ErrNotFound
+	}
+	return nil
 }
 
 func (s *Store) HasComputerAppGrant(ctx context.Context, sessionID, appID string) (bool, error) {

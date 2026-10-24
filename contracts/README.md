@@ -5,8 +5,16 @@ The Go daemon embeds it through this package; desktop generates `web/contracts/`
 `api.ts` and `events.ts` are the TypeScript/Zod client validation definitions for the REST and SSE protocol.
 Server structs and lifecycle semantics remain owned by core; verify both sides when changing a wire field.
 
+Protocol 47 adds `DELETE /assistant` (204): permanently delete the personal assistant's
+profile, preferences, indexed memories and bound conversation, including child sessions.
+The endpoint closes admission, cancels and joins active work, and reuses session resource
+cleanup. Ordinary session delete/archive remain forbidden for the assistant. Independent
+Studio items and other conversations/projects are preserved. The desktop requires explicit
+irreversible-deletion confirmation and returns to a new conversation; only a subsequent
+`POST /assistant/open` creates fresh defaults. Schema remains 55.
+
 Protocol 46 adds the Spring Festival outfit: palette `gold`, headwear `tang`,
-arms `greeting`, and face sticker `papercut`. It reuses body `plump`, eyes `curved`,
+arms `greeting`, and face sticker `papercut`. It reuses body `classic`, eyes `curved`,
 and mouth `grin`, without eyewear. Schema stays at 55; existing appearances are unchanged.
 Update desktop and daemon together so the new asset values can be saved and rendered.
 
@@ -88,8 +96,8 @@ Appearance persists as JSON with required `body`, `eyes`, and `mouth` asset IDs
 `original`, `lavender`, `mint`, `blue`, `coral`, `yellow`, `violet`, `emerald`, `crimson`, `apricot`, `gold`. Eyes support
 `classic`, `curved`, `dots`, `wink`, `sleepy`, `mischief`, `jolly`; mouth supports `classic`, `smile`, `surprised`, `grin`, `mew`, `fangs`, `laugh`.
 Decorative slots carry explicit IDs or `none`: headwear supports `antenna`, `hat`,
-`beacon`, `crown`, `bow`, `horns`, `santa`; arms support `classic`, `short`, `orb`, `mitten`, `claw`, `wings`, `santa`;
-faceSticker supports `blush`, `freckles`, `stars`, `hearts`, `lightning`, `flames`, `beard`;
+`beacon`, `crown`, `bow`, `horns`, `santa`, `tang`; arms support `classic`, `short`, `orb`, `mitten`, `claw`, `wings`, `santa`, `greeting`;
+faceSticker supports `blush`, `freckles`, `stars`, `hearts`, `lightning`, `flames`, `beard`, `papercut`;
 eyewear supports `classic`, `goggles`, `glasses`, `sunglasses`, `domino`, `halfmoon`.
 Missing/unknown selections return `400 invalid_assistant`.
 The optional communication preference uses memory ID `communication_preference`,

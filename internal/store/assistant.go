@@ -100,6 +100,8 @@ func (in *SaveAssistantInput) Normalize() error {
 }
 
 type AssistantStore interface {
+	PrepareAssistantDeletion(context.Context, string) error
+	DeleteAssistant(context.Context) error
 	GetAssistant(context.Context) (*AssistantSnapshot, error)
 	SaveAssistant(context.Context, SaveAssistantInput) (*AssistantSnapshot, error)
 	OpenAssistant(context.Context, string, string, string) (*AssistantSnapshot, error)

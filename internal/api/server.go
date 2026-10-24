@@ -76,6 +76,7 @@ type Server struct {
 	// with reclamation. SQLite remains the authority for session existence.
 	attachmentMu sync.Mutex
 
+	assistantMu        sync.Mutex
 	sessionLifecycleMu sync.Mutex
 	sessionLifecycles  map[string]chan struct{}
 }
@@ -182,7 +183,7 @@ type browserMCPService interface {
 func (s *Server) Handler(token string, static http.Handler) http.Handler {
 	app := cart.New()
 	s.registerRemote(app)
-	app.Route("/assistant").GET(s.getAssistant).PUT(s.saveAssistant)
+	app.Route("/assistant").GET(s.getAssistant).PUT(s.saveAssistant).DELETE(s.deleteAssistant)
 	app.Route("/assistant/open").POST(s.openAssistant)
 	public := cart.New()
 
@@ -836,6 +837,10 @@ func (s *Server) restoreSession(c *cart.Context) error {
 }
 
 func (s *Server) purgeSession(ctx context.Context, id string) error {
+	return s.purgeSessionWith(ctx, id, s.store.PrepareSessionDeletion, s.store.DeleteSession)
+}
+
+func (s *Server) purgeSessionWith(ctx context.Context, id string, prepare, remove func(context.Context, string) error) error {
 	unlock, err := s.lockSessionLifecycle(ctx, id)
 	if err != nil {
 		return err
@@ -843,14 +848,14 @@ func (s *Server) purgeSession(ctx context.Context, id string) error {
 	defer unlock()
 	// A child can be deleted independently. Close its admission too, while
 	// keeping the public archive operation scoped to complete session groups.
-	if err := s.store.PrepareSessionDeletion(ctx, id); err != nil {
+	if err := prepare(ctx, id); err != nil {
 		return err
 	}
 	children, err := s.cancelSessionWork(ctx, id)
 	if err != nil {
 		return err
 	}
-	if err := s.store.DeleteSession(ctx, id); err != nil {
+	if err := remove(ctx, id); err != nil {
 		return err
 	}
 	s.attachmentMu.Lock()

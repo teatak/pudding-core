@@ -31,6 +31,32 @@ CREATE TABLE IF NOT EXISTS assistant_memories (
 
 const communicationPreferenceID = "communication_preference"
 
+func (s *Store) PrepareAssistantDeletion(ctx context.Context, sessionID string) error {
+	return s.tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		if err := requireAssistantConversation(ctx, tx, sessionID); err != nil {
+			return err
+		}
+		return closeSessionAdmissionTx(ctx, tx, sessionID, time.Now())
+	})
+}
+
+func (s *Store) DeleteAssistant(ctx context.Context) error {
+	return s.tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		current, err := readAssistant(ctx, tx)
+		if err != nil || current.Assistant == nil {
+			return err
+		}
+		if id := current.Assistant.SessionID; id != "" {
+			if err := deleteSessionTx(ctx, tx, id); err != nil {
+				return err
+			}
+		}
+		// Cascades clear preferences, memories, their search index and binding.
+		_, err = tx.ExecContext(ctx, `DELETE FROM assistants WHERE id=?`, store.PersonalAssistantID)
+		return err
+	})
+}
+
 const assistantSessionsSchema = `CREATE TABLE IF NOT EXISTS assistant_sessions (
     assistant_id TEXT PRIMARY KEY REFERENCES assistants(id) ON DELETE CASCADE,
     session_id TEXT NOT NULL UNIQUE REFERENCES sessions(id) ON DELETE CASCADE

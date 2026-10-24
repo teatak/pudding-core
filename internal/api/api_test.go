@@ -3873,6 +3873,48 @@ func TestDeleteSessionCancelsRunningTurn(t *testing.T) {
 	}
 }
 
+func TestDeleteAssistantCancelsRunningTurn(t *testing.T) {
+	// mock 慢流:submit 后 turn 持续 running,delete 必须 cancel 它而非
+	// 留 goroutine 跑到自然结束。
+	ms := storetest.New(t)
+	if err := ms.PutProviderProfile(context.Background(), &store.ProviderProfile{
+		ID:          "mock",
+		DisplayName: "mock",
+		Protocol:    "openai-compatible",
+		BaseURL:     "http://127.0.0.1:11434/v1",
+		Models:      []store.ProviderModel{{ID: "m"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	hub := event.NewHub()
+	eng := engine.New(ms, hub,
+		registry.Static(mock.New(mock.WithScript([]string{"slow"}), mock.WithDelay(2*time.Second))), ms)
+	srv := httptest.NewServer(New(eng, ms, ms, hub).Handler(testToken, nil))
+	t.Cleanup(srv.Close)
+
+	profile := decodeJSON[store.AssistantSnapshot](t, req(t, http.MethodPost, srv.URL+"/assistant/open", map[string]string{"locale": "en", "provider": "mock", "model": "m"}))
+	sess := store.Session{ID: profile.Assistant.SessionID}
+	resp := req(t, http.MethodPost, srv.URL+"/sessions/"+sess.ID+"/submit",
+		map[string]string{"clientMessageID": "c1", "text": "hi"})
+	resp.Body.Close()
+	time.Sleep(100 * time.Millisecond) // 让 turn 进入 running
+
+	resp = req(t, http.MethodDelete, srv.URL+"/assistant", nil)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("delete must 204, got %d", resp.StatusCode)
+	}
+
+	// engine.Wait 应很快返回(turn 已被 cancel),不会等满 2s 的 mock 延迟
+	waited := make(chan struct{})
+	go func() { eng.Wait(); close(waited) }()
+	select {
+	case <-waited:
+	case <-time.After(1 * time.Second):
+		t.Fatal("delete did not cancel the running turn; goroutine still streaming")
+	}
+}
+
 func TestArchiveSessionHidesRestoresAndExpires(t *testing.T) {
 	ctx := context.Background()
 	homeDir := t.TempDir()
