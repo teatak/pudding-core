@@ -104,6 +104,7 @@ func TestAssistantNewPartsRoundTrip(t *testing.T) {
 		{Palette: "blue", Body: "hexagon", Eyes: "sleepy", Mouth: "mew", Headwear: "bow", Arms: "claw", Eyewear: "sunglasses", FaceSticker: "lightning"},
 		{Palette: "crimson", Body: "devil", Eyes: "mischief", Mouth: "fangs", Headwear: "horns", Arms: "wings", Eyewear: "domino", FaceSticker: "flames"},
 		{Palette: "apricot", Body: "plump", Eyes: "jolly", Mouth: "laugh", Headwear: "santa", Arms: "santa", Eyewear: "halfmoon", FaceSticker: "beard"},
+		{Palette: "gold", Body: "plump", Eyes: "curved", Mouth: "grin", Headwear: "tang", Arms: "greeting", Eyewear: "none", FaceSticker: "papercut"},
 	} {
 		input := map[string]any{"expectedRevision": index + 1, "name": "小布", "appearance": appearance, "communicationPreference": "简短回答"}
 		response := req(t, http.MethodPut, srv.URL+"/assistant", input)

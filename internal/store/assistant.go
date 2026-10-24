@@ -81,7 +81,7 @@ func (in *SaveAssistantInput) Normalize() error {
 		return ErrInvalidAssistant
 	}
 	switch in.Appearance.Palette {
-	case "original", "lavender", "mint", "blue", "coral", "yellow", "violet", "emerald", "crimson", "apricot":
+	case "original", "lavender", "mint", "blue", "coral", "yellow", "violet", "emerald", "crimson", "apricot", "gold":
 	default:
 		return ErrInvalidAssistant
 	}
@@ -90,10 +90,10 @@ func (in *SaveAssistantInput) Normalize() error {
 	// including "none"; only assets supported by the current renderer are accepted.
 	if !slices.Contains([]string{"classic", "round", "square", "pudding", "hexagon", "cat", "devil", "plump"}, a.Body) || !slices.Contains([]string{"classic", "curved", "dots", "wink", "sleepy", "mischief", "jolly"}, a.Eyes) ||
 		!slices.Contains([]string{"classic", "smile", "surprised", "grin", "mew", "fangs", "laugh"}, a.Mouth) ||
-		!slices.Contains([]string{"none", "antenna", "hat", "beacon", "crown", "bow", "horns", "santa"}, a.Headwear) ||
-		!slices.Contains([]string{"none", "classic", "short", "orb", "mitten", "claw", "wings", "santa"}, a.Arms) ||
+		!slices.Contains([]string{"none", "antenna", "hat", "beacon", "crown", "bow", "horns", "santa", "tang"}, a.Headwear) ||
+		!slices.Contains([]string{"none", "classic", "short", "orb", "mitten", "claw", "wings", "santa", "greeting"}, a.Arms) ||
 		!slices.Contains([]string{"none", "classic", "goggles", "glasses", "sunglasses", "domino", "halfmoon"}, a.Eyewear) ||
-		!slices.Contains([]string{"none", "blush", "freckles", "stars", "hearts", "lightning", "flames", "beard"}, a.FaceSticker) {
+		!slices.Contains([]string{"none", "blush", "freckles", "stars", "hearts", "lightning", "flames", "beard", "papercut"}, a.FaceSticker) {
 		return ErrInvalidAssistant
 	}
 	return nil

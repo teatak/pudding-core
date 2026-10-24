@@ -1366,15 +1366,17 @@ func TestPluginLoadIsExplicitAndAtomic(t *testing.T) {
 
 	for _, removedID := range []string{"project-files", "source-control"} {
 		legacyCall := tool.Call{CallID: "load_" + removedID, Name: tool.PluginLoad, Args: json.RawMessage(`{"plugin_id":"` + removedID + `"}`)}
-		result, changed := eng.loadPlugin(ctx, sid, legacyCall, store.ModeCode)
+		result, changed, _ := eng.loadPlugin(ctx, sid, legacyCall, store.ModeCode)
 		if result.Ok || changed || !strings.Contains(result.Content, `"reason":"plugin_unavailable"`) {
 			t.Fatalf("removed %s App did not return plugin_unavailable: %+v", removedID, result)
 		}
 	}
 
 	call := tool.Call{CallID: "load_browser", Name: tool.PluginLoad, Args: json.RawMessage(`{"plugin_id":"browser"}`)}
-	result, changed := eng.loadPlugin(ctx, sid, call, store.ModeChat)
-	if result.Ok || changed || !strings.Contains(result.Content, `"reason":"capability_required"`) {
+	cancelled, cancel := context.WithCancel(ctx)
+	cancel()
+	result, changed, _ := eng.loadPlugin(cancelled, sid, call, store.ModeChat)
+	if result.Ok || changed || !strings.Contains(result.Content, "cancel") {
 		t.Fatalf("Chat loaded Browser: %+v", result)
 	}
 	sess, err := ms.GetSession(ctx, sid)
@@ -1386,7 +1388,7 @@ func TestPluginLoadIsExplicitAndAtomic(t *testing.T) {
 	}
 
 	call.Args = json.RawMessage(`{"plugin_id":"browser","skill_id":"missing"}`)
-	result, changed = eng.loadPlugin(ctx, sid, call, store.ModeWork)
+	result, changed, _ = eng.loadPlugin(ctx, sid, call, store.ModeWork)
 	if result.Ok || changed || !strings.Contains(result.Content, `"reason":"plugin_skill_not_found"`) {
 		t.Fatalf("missing App skill loaded Browser: %+v", result)
 	}
@@ -1396,11 +1398,11 @@ func TestPluginLoadIsExplicitAndAtomic(t *testing.T) {
 	}
 
 	call.Args = json.RawMessage(`{"plugin_id":"browser"}`)
-	result, changed = eng.loadPlugin(ctx, sid, call, store.ModeWork)
+	result, changed, _ = eng.loadPlugin(ctx, sid, call, store.ModeWork)
 	if !result.Ok || !changed || !strings.Contains(result.Content, `"newlyLoaded":true`) {
 		t.Fatalf("explicit App load failed: %+v", result)
 	}
-	result, changed = eng.loadPlugin(ctx, sid, call, store.ModeWork)
+	result, changed, _ = eng.loadPlugin(ctx, sid, call, store.ModeWork)
 	if !result.Ok || changed || !strings.Contains(result.Content, `"alreadyLoaded":true`) {
 		t.Fatalf("repeated App load should be idempotent: %+v", result)
 	}
@@ -1424,7 +1426,7 @@ func TestPluginLoadAllowsToolOnlyPluginWithoutSkill(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result, changed := eng.loadPlugin(ctx, sid, tool.Call{
+	result, changed, _ := eng.loadPlugin(ctx, sid, tool.Call{
 		CallID: "load_tool_only",
 		Name:   tool.PluginLoad,
 		Args:   json.RawMessage(`{"plugin_id":"tool-only"}`),

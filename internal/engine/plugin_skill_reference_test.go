@@ -28,7 +28,7 @@ func TestPluginLoadReturnsSkillReferenceWithoutBody(t *testing.T) {
 	}
 	eng := New(st, event.NewHub(), registry.Static(mock.New()), st, WithPlugins(&mutablePluginSource{defs: plugin.BuiltinDefinitions()}))
 	t.Cleanup(eng.Stop)
-	result, _ := eng.loadPlugin(ctx, "s", tool.Call{Name: tool.PluginLoad, Args: json.RawMessage(`{"plugin_id":"computer-use"}`)}, store.ModeWork)
+	result, _, _ := eng.loadPlugin(ctx, "s", tool.Call{Name: tool.PluginLoad, Args: json.RawMessage(`{"plugin_id":"computer-use"}`)}, store.ModeWork)
 	if !result.Ok || strings.Contains(result.Content, `"content"`) || !strings.Contains(result.Content, `"reference"`) {
 		t.Fatalf("expected a body-free App skill reference: %+v", result)
 	}

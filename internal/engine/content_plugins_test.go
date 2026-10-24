@@ -56,7 +56,7 @@ func TestContentPluginsLoadIndependently(t *testing.T) {
 			load := func(id string) {
 				t.Helper()
 				raw, _ := json.Marshal(map[string]string{"plugin_id": id})
-				out, changed := e.loadPlugin(ctx, "s", tool.Call{Name: tool.PluginLoad, Args: raw}, store.ModeChat)
+				out, changed, _ := e.loadPlugin(ctx, "s", tool.Call{Name: tool.PluginLoad, Args: raw}, store.ModeChat)
 				if !out.Ok || !changed {
 					t.Fatalf("load %s: %+v", id, out)
 				}

@@ -58,7 +58,7 @@ endpoints:
 		if err != nil {
 			t.Fatal(err)
 		}
-		result, changed := eng.loadPlugin(ctx, "one", tool.Call{Name: tool.PluginLoad, Args: raw}, store.ModeWork)
+		result, changed, _ := eng.loadPlugin(ctx, "one", tool.Call{Name: tool.PluginLoad, Args: raw}, store.ModeWork)
 		if result.Ok && connection != "" && !changed {
 			t.Fatal("connection selection must refresh model tools")
 		}

@@ -5,6 +5,11 @@ The Go daemon embeds it through this package; desktop generates `web/contracts/`
 `api.ts` and `events.ts` are the TypeScript/Zod client validation definitions for the REST and SSE protocol.
 Server structs and lifecycle semantics remain owned by core; verify both sides when changing a wire field.
 
+Protocol 46 adds the Spring Festival outfit: palette `gold`, headwear `tang`,
+arms `greeting`, and face sticker `papercut`. It reuses body `plump`, eyes `curved`,
+and mouth `grin`, without eyewear. Schema stays at 55; existing appearances are unchanged.
+Update desktop and daemon together so the new asset values can be saved and rendered.
+
 Protocol 45 adds eyes `wink` / `sleepy`, mouths `grin` / `mew`, headwear
 `crown` / `bow`, arms `mitten` / `claw`, eyewear `glasses` / `sunglasses`,
 and stickers `hearts` / `lightning`. It also adds assistant body shapes `pudding`, `hexagon`, and `cat` alongside
@@ -80,7 +85,7 @@ after a lost response safe. Profile and preference commit atomically.
 
 Appearance persists as JSON with required `body`, `eyes`, and `mouth` asset IDs
 (default `classic`). Body supports `classic`, `round`, `square`, `pudding`, `hexagon`, `cat`, `devil`, `plump`. Palette supports
-`original`, `lavender`, `mint`, `blue`, `coral`, `yellow`, `violet`, `emerald`, `crimson`, `apricot`. Eyes support
+`original`, `lavender`, `mint`, `blue`, `coral`, `yellow`, `violet`, `emerald`, `crimson`, `apricot`, `gold`. Eyes support
 `classic`, `curved`, `dots`, `wink`, `sleepy`, `mischief`, `jolly`; mouth supports `classic`, `smile`, `surprised`, `grin`, `mew`, `fangs`, `laugh`.
 Decorative slots carry explicit IDs or `none`: headwear supports `antenna`, `hat`,
 `beacon`, `crown`, `bow`, `horns`, `santa`; arms support `classic`, `short`, `orb`, `mitten`, `claw`, `wings`, `santa`;

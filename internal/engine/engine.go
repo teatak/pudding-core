@@ -2154,7 +2154,9 @@ func (e *Engine) executePendingTools(ctx context.Context, sessionID, turnID stri
 			}
 		} else if call.Name == tool.PluginLoad {
 			var changed bool
-			result, changed = e.loadPlugin(ctx, sessionID, call, nextMode)
+			previousMode := nextMode
+			result, changed, nextMode = e.loadPlugin(ctx, sessionID, call, nextMode)
+			modeChanged = modeChanged || nextMode != previousMode
 			contextChanged = contextChanged || changed
 		} else if call.Name == tool.PluginUnload {
 			var changed bool
@@ -2397,23 +2399,23 @@ func commandSandboxStateKey(project *store.Project, sessionID string) string {
 	return "session:" + sessionID
 }
 
-func (e *Engine) loadPlugin(ctx context.Context, sessionID string, call tool.Call, mode store.AgentMode) (tool.Result, bool) {
+func (e *Engine) loadPlugin(ctx context.Context, sessionID string, call tool.Call, mode store.AgentMode) (tool.Result, bool, store.AgentMode) {
 	if e.plugins == nil {
-		return pluginLoadFailure(call, "plugin_service_unavailable", "Plugin loading is unavailable", nil), false
+		return pluginLoadFailure(call, "plugin_service_unavailable", "Plugin loading is unavailable", nil), false, mode
 	}
 	request, err := tool.DecodePluginLoadRequest(call.Args)
 	if err != nil {
-		return pluginLoadFailure(call, "invalid_arguments", err.Error(), nil), false
+		return pluginLoadFailure(call, "invalid_arguments", err.Error(), nil), false, mode
 	}
 	if request.PluginID == plugin.BuiltinSubagentID {
 		owner, err := e.store.ParentSessionID(ctx, sessionID)
 		if err != nil || owner != "" {
-			return pluginLoadFailure(call, "child_delegation_unavailable", "Child conversations cannot delegate further work", nil), false
+			return pluginLoadFailure(call, "child_delegation_unavailable", "Child conversations cannot delegate further work", nil), false, mode
 		}
 	}
 	definitions, err := e.plugins.ListDefinitions(ctx)
 	if err != nil {
-		return pluginLoadFailure(call, "plugin_state_unavailable", err.Error(), nil), false
+		return pluginLoadFailure(call, "plugin_state_unavailable", err.Error(), nil), false, mode
 	}
 	var definition *plugin.Definition
 	for _, candidate := range definitions {
@@ -2423,19 +2425,26 @@ func (e *Engine) loadPlugin(ctx context.Context, sessionID string, call tool.Cal
 		}
 	}
 	if definition == nil {
-		return pluginLoadFailure(call, "plugin_unavailable", "the plugin is not available in the current runtime", map[string]any{"pluginID": request.PluginID}), false
+		return pluginLoadFailure(call, "plugin_unavailable", "the plugin is not available in the current runtime", map[string]any{"pluginID": request.PluginID}), false, mode
 	}
 	if !definition.Enabled {
-		return pluginLoadFailure(call, "plugin_disabled", "the plugin is disabled", map[string]any{"pluginID": request.PluginID}), false
+		return pluginLoadFailure(call, "plugin_disabled", "the plugin is disabled", map[string]any{"pluginID": request.PluginID}), false, mode
 	}
 	requiredMode := requiredPluginMode(definition)
 	if store.AgentModeRank(mode) < store.AgentModeRank(requiredMode) {
-		return pluginLoadFailure(call, "capability_required", "the plugin requires a higher capability", map[string]any{
-			"pluginID":     request.PluginID,
-			"currentMode":  store.NormalizeAgentMode(mode),
-			"requiredMode": requiredMode,
-		}), false
+		approvalCall := call
+		approvalCall.Args = mustJSON(tool.CapabilityRequest{
+			TargetMode: requiredMode,
+			Reason:     fmt.Sprintf("Load %s plugin", definition.Name),
+		})
+		result, approvedMode, approved := e.requestCapabilityApproval(ctx, sessionID, call.TurnID, approvalCall, mode)
+		if !approved {
+			return result, false, mode
+		}
+		// Re-read plugin state after approval before loading or binding an account.
+		return e.loadPlugin(ctx, sessionID, call, approvedMode)
 	}
+
 	skillID := request.SkillID
 	if skillID == "" {
 		skillID = defaultPluginSkillID(definition)
@@ -2453,12 +2462,12 @@ func (e *Engine) loadPlugin(ctx context.Context, sessionID string, call tool.Cal
 			case errors.Is(err, plugin.ErrDisabled):
 				reason = "plugin_disabled"
 			}
-			return pluginLoadFailure(call, reason, err.Error(), map[string]any{"pluginID": request.PluginID, "skillID": skillID}), false
+			return pluginLoadFailure(call, reason, err.Error(), map[string]any{"pluginID": request.PluginID, "skillID": skillID}), false, mode
 		}
 	}
 	sess, err := e.store.GetSession(ctx, sessionID)
 	if err != nil {
-		return pluginLoadFailure(call, "plugin_state_unavailable", err.Error(), map[string]any{"pluginID": request.PluginID}), false
+		return pluginLoadFailure(call, "plugin_state_unavailable", err.Error(), map[string]any{"pluginID": request.PluginID}), false, mode
 	}
 	alreadyLoaded := false
 	for _, loadedID := range sess.LoadedPluginIDs {
@@ -2472,16 +2481,16 @@ func (e *Engine) loadPlugin(ctx context.Context, sessionID string, call tool.Cal
 			SetSessionConnection(context.Context, string, string, string) (*plugin.SessionConnectionView, error)
 		})
 		if !ok {
-			return pluginLoadFailure(call, "connection_selection_unavailable", "Plugin connection selection is unavailable", map[string]any{"pluginID": request.PluginID}), false
+			return pluginLoadFailure(call, "connection_selection_unavailable", "Plugin connection selection is unavailable", map[string]any{"pluginID": request.PluginID}), false, mode
 		}
 		if _, err := source.SetSessionConnection(ctx, sessionID, request.PluginID, request.ConnectionID); err != nil {
-			return pluginLoadFailure(call, "connection_selection_failed", err.Error(), map[string]any{"pluginID": request.PluginID}), false
+			return pluginLoadFailure(call, "connection_selection_failed", err.Error(), map[string]any{"pluginID": request.PluginID}), false, mode
 		}
 	}
 	if !alreadyLoaded {
 		loaded := store.NormalizePluginIDs(append(append([]string(nil), sess.LoadedPluginIDs...), request.PluginID))
 		if _, err := e.store.UpdateSession(ctx, sessionID, store.SessionUpdate{LoadedPluginIDs: &loaded}); err != nil {
-			return pluginLoadFailure(call, "plugin_state_unavailable", err.Error(), map[string]any{"pluginID": request.PluginID}), false
+			return pluginLoadFailure(call, "plugin_state_unavailable", err.Error(), map[string]any{"pluginID": request.PluginID}), false, mode
 		}
 	}
 	payload := map[string]any{
@@ -2497,7 +2506,7 @@ func (e *Engine) loadPlugin(ctx context.Context, sessionID string, call tool.Cal
 	}); ok {
 		selection, err := source.SessionConnection(ctx, sessionID, request.PluginID)
 		if err != nil {
-			return pluginLoadFailure(call, "connection_state_unavailable", err.Error(), map[string]any{"pluginID": request.PluginID}), !alreadyLoaded || request.ConnectionID != ""
+			return pluginLoadFailure(call, "connection_state_unavailable", err.Error(), map[string]any{"pluginID": request.PluginID}), !alreadyLoaded || request.ConnectionID != "", mode
 		}
 		payload["connectionSelection"] = selection.Selection
 		payload["connections"] = selection.Connections
@@ -2532,7 +2541,7 @@ func (e *Engine) loadPlugin(ctx context.Context, sessionID string, call tool.Cal
 		Content:      string(content),
 		SummaryKind:  summaryKind,
 		SummaryCount: summaryCount,
-	}, !alreadyLoaded || request.ConnectionID != ""
+	}, !alreadyLoaded || request.ConnectionID != "", mode
 }
 
 func (e *Engine) unloadPlugin(ctx context.Context, sessionID string, call tool.Call) (tool.Result, bool) {

@@ -31,7 +31,7 @@ func TestPluginIDRenamePreservesLoadUnloadAndAuthorization(t *testing.T) {
 			if current == "subagent" {
 				mode = store.ModeWork
 			}
-			out, changed := e.loadPlugin(ctx, "s", call(old, old), mode)
+			out, changed, _ := e.loadPlugin(ctx, "s", call(old, old), mode)
 			if !out.Ok || !changed {
 				t.Fatal(out, changed)
 			}
@@ -42,7 +42,7 @@ func TestPluginIDRenamePreservesLoadUnloadAndAuthorization(t *testing.T) {
 			if err := json.Unmarshal([]byte(out.Content), &payload); err != nil || payload.PluginID != current || payload.SkillID != current {
 				t.Fatal(out, err)
 			}
-			out, changed = e.loadPlugin(ctx, "s", call(current, current), mode)
+			out, changed, _ = e.loadPlugin(ctx, "s", call(current, current), mode)
 			if !out.Ok || changed {
 				t.Fatal("duplicate load", out, changed)
 			}
@@ -59,7 +59,7 @@ func TestPluginIDRenamePreservesLoadUnloadAndAuthorization(t *testing.T) {
 				t.Fatal(err)
 			}
 			for _, id := range []string{old, current} {
-				out, _ = e.loadPlugin(ctx, "s", call(id, old), mode)
+				out, _, _ = e.loadPlugin(ctx, "s", call(id, old), mode)
 				if out.Ok || !strings.Contains(out.Content, `"reason":"plugin_disabled"`) {
 					t.Fatal("disabled alias bypass", out)
 				}
@@ -68,7 +68,7 @@ func TestPluginIDRenamePreservesLoadUnloadAndAuthorization(t *testing.T) {
 	}
 }
 
-func TestSubagentPluginAliasCannotBypassChildOrModeRestrictions(t *testing.T) {
+func TestSubagentPluginAliasCannotBypassChildRestrictions(t *testing.T) {
 	ctx := context.Background()
 	st := storetest.New(t)
 	e := New(st, event.NewHub(), nil, st, WithPlugins(plugin.NewService(t.TempDir(), st.Manager)))
@@ -81,12 +81,8 @@ func TestSubagentPluginAliasCannotBypassChildOrModeRestrictions(t *testing.T) {
 	for _, id := range []string{"collaboration", "subagent"} {
 		raw, _ := json.Marshal(map[string]string{"plugin_id": id})
 		call := tool.Call{Name: tool.PluginLoad, Args: raw}
-		out, _ := e.loadPlugin(ctx, "child", call, store.ModeWork)
+		out, _, _ := e.loadPlugin(ctx, "child", call, store.ModeWork)
 		if out.Ok || !strings.Contains(out.Content, `"reason":"child_delegation_unavailable"`) {
-			t.Fatal(out)
-		}
-		out, _ = e.loadPlugin(ctx, "parent", call, store.ModeChat)
-		if out.Ok || !strings.Contains(out.Content, `"reason":"capability_required"`) {
 			t.Fatal(out)
 		}
 	}

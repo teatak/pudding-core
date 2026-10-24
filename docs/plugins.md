@@ -10,6 +10,10 @@ Installs created before plugins were renamed from Apps kept packages in
 each step is idempotent, so an interrupted move finishes on the next start. A name
 present in both `apps` and `plugins` is left in place and logged.
 
+Loading a plugin requests its missing capability through the existing approval flow and
+continues the same load after approval. Turn-only and session approvals retain their
+normal scopes; denial or cancellation preserves the existing loaded state and account binding.
+
 ## MCP Plugins
 
 Ordinary MCP servers are managed as simplified plugins with `kind: mcp`; there is

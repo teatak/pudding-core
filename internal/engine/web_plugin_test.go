@@ -138,7 +138,7 @@ func TestWebPluginChatLifecyclePreservesConfiguration(t *testing.T) {
 		t.Fatal("unloaded plugin made a request")
 	}
 	load := tool.Call{Name: tool.PluginLoad, Args: json.RawMessage(fmt.Sprintf(`{"plugin_id":%q}`, plugin.BuiltinWebSearchFetchID))}
-	out, changed := e.loadPlugin(ctx, "web-session", load, store.ModeChat)
+	out, changed, _ := e.loadPlugin(ctx, "web-session", load, store.ModeChat)
 	if !out.Ok || !changed {
 		t.Fatalf("Web must load in Chat: %+v", out)
 	}

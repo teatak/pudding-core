@@ -4,10 +4,10 @@ import { z } from "zod";
 import { studioItem } from "./studio";
 
 export const assistantAppearance = z.object({
-  palette: z.enum(["original", "lavender", "mint", "blue", "coral", "yellow", "violet", "emerald", "crimson", "apricot"]),
+  palette: z.enum(["original", "lavender", "mint", "blue", "coral", "yellow", "violet", "emerald", "crimson", "apricot", "gold"]),
   body: z.enum(["classic", "round", "square", "pudding", "hexagon", "cat", "devil", "plump"]), eyes: z.enum(["classic", "curved", "dots", "wink", "sleepy", "mischief", "jolly"]), mouth: z.enum(["classic", "smile", "surprised", "grin", "mew", "fangs", "laugh"]),
-  headwear: z.enum(["none", "antenna", "hat", "beacon", "crown", "bow", "horns", "santa"]), arms: z.enum(["none", "classic", "short", "orb", "mitten", "claw", "wings", "santa"]),
-  eyewear: z.enum(["none", "classic", "goggles", "glasses", "sunglasses", "domino", "halfmoon"]), faceSticker: z.enum(["none", "blush", "freckles", "stars", "hearts", "lightning", "flames", "beard"]),
+  headwear: z.enum(["none", "antenna", "hat", "beacon", "crown", "bow", "horns", "santa", "tang"]), arms: z.enum(["none", "classic", "short", "orb", "mitten", "claw", "wings", "santa", "greeting"]),
+  eyewear: z.enum(["none", "classic", "goggles", "glasses", "sunglasses", "domino", "halfmoon"]), faceSticker: z.enum(["none", "blush", "freckles", "stars", "hearts", "lightning", "flames", "beard", "papercut"]),
 });
 export const assistant = z.object({
   id: z.literal("personal"), name: z.string(), userName: z.string(), appearance: assistantAppearance,
