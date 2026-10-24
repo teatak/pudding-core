@@ -94,15 +94,13 @@ credentials. Saving, selecting, and enabling/disabling a plugin are independent.
 Both policies support configuration-only connections (`authType: none`) when
 authentication is optional, including plugins without an `auth` declaration.
 
-For `user` plugins, `GET/PUT /sessions/:id/plugins/:pluginID/connection` exposes
-redacted candidates and accepts `{ "connectionID": "connection-id" }` from the
-user UI. The chat header and the load/error result provide a picker. Selecting
-from a blocked tool offers **Use and continue**; its continuation is a canonical
-user message with an idempotent client message ID. The same binding can be set by
-`builtin_plugin_load` with `connection_id`, including for an already-loaded plugin.
-The tool returns redacted account candidates. The picker remains optional; users
-do not need to leave the chat to select an account. A REST/GraphQL `connection`
-argument only checks the resolved account; use the load tool to change it.
+For `user` plugins, `builtin_plugin_load` with `connection_id` sets the chat's
+binding, including for an already-loaded plugin. The tool returns redacted account
+candidates so the model can select an account matching the user's intent, asking
+in chat if ambiguous. The chat header and tool results have no manual connection
+picker. The authenticated `GET/PUT /sessions/:id/plugins/:pluginID/connection` API
+still exposes the binding. A REST/GraphQL `connection` argument only checks the
+resolved account; use the load tool to change it.
 
 REST, GraphQL and MCP share the same binding-or-sole-connection resolution.
 Automatic use does not write a binding; if another usable connection is added, an
