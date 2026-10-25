@@ -38,25 +38,27 @@ type pluginOAuthProvider struct {
 }
 
 type oauthStartState struct {
-	Provider       string
-	PluginID       string
-	AuthMethodID   string
-	ConnectionID   string
-	ConnectionName string
-	Fields         map[string]string
-	EndpointURLs   map[string]string
-	RedirectURI    string
-	Verifier       string
-	CreatedAt      time.Time
+	EndpointInsecureTLS map[string]bool
+	Provider            string
+	PluginID            string
+	AuthMethodID        string
+	ConnectionID        string
+	ConnectionName      string
+	Fields              map[string]string
+	EndpointURLs        map[string]string
+	RedirectURI         string
+	Verifier            string
+	CreatedAt           time.Time
 }
 
 type startPluginOAuthReq struct {
-	ConnectionID   string            `json:"connectionID"`
-	PluginID       string            `json:"pluginID"`
-	AuthMethodID   string            `json:"authMethodID"`
-	ConnectionName string            `json:"connectionName"`
-	Fields         map[string]string `json:"fields"`
-	EndpointURLs   map[string]string `json:"endpointURLs"`
+	EndpointInsecureTLS map[string]bool   `json:"endpointInsecureTLS"`
+	ConnectionID        string            `json:"connectionID"`
+	PluginID            string            `json:"pluginID"`
+	AuthMethodID        string            `json:"authMethodID"`
+	ConnectionName      string            `json:"connectionName"`
+	Fields              map[string]string `json:"fields"`
+	EndpointURLs        map[string]string `json:"endpointURLs"`
 }
 
 type startPluginOAuthResp struct {
@@ -281,6 +283,11 @@ func (s *Server) startPluginOAuth(c *cart.Context) error {
 	if err != nil {
 		return badRequest(c, err.Error())
 	}
+	endpointTLS, err := plugin.NormalizeConnectionEndpointInsecureTLS(def, endpointURLs, req.EndpointInsecureTLS, existing)
+	if err != nil {
+		return badRequest(c, err.Error())
+	}
+
 	state, err := randomOAuthState()
 	if err != nil {
 		return s.fail(c, err)
@@ -321,16 +328,17 @@ func (s *Server) startPluginOAuth(c *cart.Context) error {
 		}
 	}
 	s.rememberOAuthState(state, oauthStartState{
-		Provider:       providerID,
-		PluginID:       pluginID,
-		AuthMethodID:   method.ID,
-		ConnectionID:   connectionID,
-		ConnectionName: name,
-		Fields:         fields,
-		EndpointURLs:   endpointURLs,
-		RedirectURI:    redirectURI,
-		Verifier:       verifier,
-		CreatedAt:      time.Now(),
+		Provider:            providerID,
+		PluginID:            pluginID,
+		AuthMethodID:        method.ID,
+		ConnectionID:        connectionID,
+		ConnectionName:      name,
+		Fields:              fields,
+		EndpointURLs:        endpointURLs,
+		EndpointInsecureTLS: endpointTLS,
+		RedirectURI:         redirectURI,
+		Verifier:            verifier,
+		CreatedAt:           time.Now(),
 	})
 	c.JSON(http.StatusOK, startPluginOAuthResp{AuthorizationURL: authorizationURL})
 	return nil
@@ -417,9 +425,9 @@ func (s *Server) pluginOAuthCallback(c *cart.Context) error {
 		Name:         name,
 		PluginID:     start.PluginID,
 		Fields:       start.Fields,
-		EndpointURLs: start.EndpointURLs,
-		Account:      account,
-		Auth:         auth,
+		EndpointURLs: start.EndpointURLs, EndpointInsecureTLS: start.EndpointInsecureTLS,
+		Account: account,
+		Auth:    auth,
 	}
 	if err := cfg.PutPluginConnection(c.Request.Context(), conn); err != nil {
 		return oauthHTML(c, http.StatusInternalServerError, "Authorization failed", err.Error())
@@ -491,7 +499,7 @@ func (s *Server) completePluginOAuth(c *cart.Context) error {
 		auth.RefreshExpiresAt = time.Now().Add(time.Duration(token.RefreshTokenExpiresIn) * time.Second)
 	}
 	connection := &plugin.Connection{
-		ID: targetID, Name: name, PluginID: start.PluginID, Fields: start.Fields, EndpointURLs: start.EndpointURLs,
+		ID: targetID, Name: name, PluginID: start.PluginID, Fields: start.Fields, EndpointURLs: start.EndpointURLs, EndpointInsecureTLS: start.EndpointInsecureTLS,
 		Account: &plugin.ConnectionAccount{ID: account.ID, Login: account.Login, Name: account.Name, AvatarURL: account.AvatarURL, Type: account.Type},
 		Auth:    auth,
 	}

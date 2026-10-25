@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/teatak/pudding-core/internal/plugin"
+	"github.com/teatak/pudding-core/internal/pluginhttp"
 	"io"
 	"net/http"
 	"net/url"
@@ -59,6 +60,7 @@ var endpointSensitiveResponseHeaders = map[string]struct{}{
 }
 
 type RequestPayload struct {
+	InsecureTLS         bool
 	EndpointName        string
 	PluginID            string
 	ConnectionID        string
@@ -106,6 +108,7 @@ func (r *Executor) REST(ctx context.Context, binding *plugin.EndpointBinding, ar
 		return (map[string]any{"ok": false, "reason": "invalid_body", "error": err.Error()})
 	}
 	payload := RequestPayload{
+		InsecureTLS:         binding.InsecureTLS,
 		MaxResponseBytes:    responseBytes(responseLimit),
 		EndpointName:        binding.EndpointName,
 		PluginID:            binding.PluginID,
@@ -136,6 +139,7 @@ func (r *Executor) GraphQL(ctx context.Context, binding *plugin.EndpointBinding,
 		return (map[string]any{"ok": false, "reason": "encode_error", "error": err.Error()})
 	}
 	payload := RequestPayload{
+		InsecureTLS:         binding.InsecureTLS,
 		MaxResponseBytes:    responseBytes(responseLimit),
 		EndpointName:        binding.EndpointName,
 		PluginID:            binding.PluginID,
@@ -185,9 +189,9 @@ func (r *Executor) Do(ctx context.Context, payload RequestPayload) map[string]an
 	}
 	req.Header.Set("Accept", "application/json")
 	start := time.Now()
-	client := *r.webHTTPClient
-	client.CheckRedirect = func(*http.Request, []*http.Request) error {
-		return http.ErrUseLastResponse
+	client, err := pluginhttp.Client(r.webHTTPClient, payload.URL, payload.InsecureTLS)
+	if err != nil {
+		return map[string]any{"ok": false, "reason": "tls_config_error", "error": err.Error()}
 	}
 	resp, err := client.Do(req)
 	elapsed := time.Since(start)

@@ -202,15 +202,16 @@ type SkillDetail struct {
 }
 
 type Connection struct {
-	ID           string             `json:"id" yaml:"-"`
-	Name         string             `json:"name,omitempty" yaml:"name,omitempty"`
-	PluginID     string             `json:"pluginID" yaml:"plugin"`
-	Account      *ConnectionAccount `json:"account,omitempty" yaml:"account,omitempty"`
-	Auth         Auth               `json:"-" yaml:"auth,omitempty"`
-	Fields       map[string]string  `json:"-" yaml:"fields,omitempty"`
-	EndpointURLs map[string]string  `json:"-" yaml:"endpoint_urls,omitempty"`
-	CreatedAt    time.Time          `json:"createdAt,omitempty" yaml:"created_at,omitempty"`
-	UpdatedAt    time.Time          `json:"updatedAt,omitempty" yaml:"updated_at,omitempty"`
+	EndpointInsecureTLS map[string]bool    `json:"-" yaml:"endpoint_insecure_tls,omitempty"`
+	ID                  string             `json:"id" yaml:"-"`
+	Name                string             `json:"name,omitempty" yaml:"name,omitempty"`
+	PluginID            string             `json:"pluginID" yaml:"plugin"`
+	Account             *ConnectionAccount `json:"account,omitempty" yaml:"account,omitempty"`
+	Auth                Auth               `json:"-" yaml:"auth,omitempty"`
+	Fields              map[string]string  `json:"-" yaml:"fields,omitempty"`
+	EndpointURLs        map[string]string  `json:"-" yaml:"endpoint_urls,omitempty"`
+	CreatedAt           time.Time          `json:"createdAt,omitempty" yaml:"created_at,omitempty"`
+	UpdatedAt           time.Time          `json:"updatedAt,omitempty" yaml:"updated_at,omitempty"`
 }
 
 type ConnectionAccount struct {
@@ -237,6 +238,7 @@ type ConnectionView struct {
 }
 
 type ConnectionDetailView struct {
+	EndpointInsecureTLS map[string]bool `json:"endpointInsecureTLS,omitempty"`
 	ConnectionView
 	Fields       map[string]string `json:"fields,omitempty"`
 	EndpointURLs map[string]string `json:"endpointURLs,omitempty"`
@@ -265,6 +267,7 @@ type Auth struct {
 }
 
 type EndpointBinding struct {
+	InsecureTLS         bool
 	PluginID            string
 	ConnectionID        string
 	EndpointName        string
@@ -309,13 +312,14 @@ func ViewConnectionDetail(c *Connection) ConnectionDetailView {
 		fields = nil
 	}
 	return ConnectionDetailView{
-		ConnectionView: ViewConnection(c),
-		Fields:         fields,
-		EndpointURLs:   cloneStringMap(c.EndpointURLs),
-		Token:          c.Auth.Token,
-		Prefix:         c.Auth.Prefix,
-		Username:       c.Auth.Username,
-		Password:       c.Auth.Password,
+		ConnectionView:      ViewConnection(c),
+		Fields:              fields,
+		EndpointURLs:        cloneStringMap(c.EndpointURLs),
+		EndpointInsecureTLS: cloneBoolMap(c.EndpointInsecureTLS),
+		Token:               c.Auth.Token,
+		Prefix:              c.Auth.Prefix,
+		Username:            c.Auth.Username,
+		Password:            c.Auth.Password,
 	}
 }
 
@@ -538,6 +542,7 @@ func CloneConnection(in *Connection) *Connection {
 	out.Auth = CloneAuth(in.Auth)
 	out.Fields = cloneStringMap(in.Fields)
 	out.EndpointURLs = cloneStringMap(in.EndpointURLs)
+	out.EndpointInsecureTLS = cloneBoolMap(in.EndpointInsecureTLS)
 	return &out
 }
 
@@ -585,4 +590,15 @@ func CloneJSON(raw json.RawMessage) json.RawMessage {
 		return nil
 	}
 	return append(json.RawMessage(nil), raw...)
+}
+
+func cloneBoolMap(in map[string]bool) map[string]bool {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]bool, len(in))
+	for key, value := range in {
+		out[key] = value
+	}
+	return out
 }

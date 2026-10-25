@@ -72,7 +72,7 @@ func TestAcquireSessionJSONAndFailureBoundaries(t *testing.T) {
 	defer provider.Close()
 	for _, scenario := range []string{"success", "redirect", "large", "malformed"} {
 		mode = scenario
-		result := AcquireSession(context.Background(), http.DefaultClient, spec, provider.URL, map[string]string{"password": " secret "})
+		result := AcquireSession(context.Background(), http.DefaultClient, spec, provider.URL, map[string]string{"password": " secret "}, false)
 		if scenario == "success" {
 			if result.Status != "success" || result.Fields["sid"] != "sid-value" {
 				t.Fatal(result)
@@ -90,7 +90,7 @@ func TestAcquireSessionJSONAndFailureBoundaries(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if result := AcquireSession(ctx, http.DefaultClient, spec, provider.URL, map[string]string{"password": " secret "}); result.Status != "error" {
+	if result := AcquireSession(ctx, http.DefaultClient, spec, provider.URL, map[string]string{"password": " secret "}, false); result.Status != "error" {
 		t.Fatal("ignored cancellation")
 	}
 }

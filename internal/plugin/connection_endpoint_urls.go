@@ -65,3 +65,42 @@ func validateConnectionEndpointURL(rawURL string) error {
 	}
 	return nil
 }
+
+// NormalizeConnectionEndpointInsecureTLS accepts trust exceptions only for the
+// connection's configurable HTTPS endpoints. Omitted options retain exceptions
+// solely when the effective server address is unchanged.
+func NormalizeConnectionEndpointInsecureTLS(def *Definition, endpointURLs map[string]string, values map[string]bool, existing *Connection) (map[string]bool, error) {
+	effectiveURL := func(name string, overrides map[string]string) string {
+		if value := overrides[name]; value != "" {
+			return value
+		}
+		return strings.TrimRight(def.Endpoints[name].URL, "/")
+	}
+	if values == nil && existing != nil && existing.PluginID == def.ID {
+		values = make(map[string]bool)
+		for name, enabled := range existing.EndpointInsecureTLS {
+			if enabled && effectiveURL(name, endpointURLs) == effectiveURL(name, existing.EndpointURLs) {
+				values[name] = true
+			}
+		}
+	}
+	var out map[string]bool
+	for name, enabled := range values {
+		endpoint, ok := def.Endpoints[name]
+		if !ok || endpoint.URLConfig == nil || (endpoint.Kind != EndpointKindREST && endpoint.Kind != EndpointKindGraphQL) {
+			return nil, fmt.Errorf("endpoint %s does not allow connection TLS settings", name)
+		}
+		if !enabled {
+			continue
+		}
+		target, err := url.Parse(effectiveURL(name, endpointURLs))
+		if err != nil || target.Scheme != "https" || target.Host == "" {
+			return nil, fmt.Errorf("endpoint %s must use HTTPS to ignore certificate errors", name)
+		}
+		if out == nil {
+			out = map[string]bool{}
+		}
+		out[name] = true
+	}
+	return out, nil
+}

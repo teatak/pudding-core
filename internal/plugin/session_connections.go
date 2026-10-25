@@ -42,9 +42,10 @@ func connectionIdentity(c *Connection) string {
 		PluginID, ID, Method, Type, CreatedAt string
 		AccountID, AccountType                string
 		Fields, EndpointURLs                  map[string]string
+		EndpointInsecureTLS                   map[string]bool `json:",omitempty"`
 		Credentials                           []string
 	}{PluginID: store.CurrentPluginID(c.PluginID), ID: c.ID, Method: c.Auth.MethodID, Type: c.Auth.Type,
-		CreatedAt: c.CreatedAt.UTC().Format("2006-01-02T15:04:05.999999999Z"), Fields: c.Fields, EndpointURLs: c.EndpointURLs}
+		CreatedAt: c.CreatedAt.UTC().Format("2006-01-02T15:04:05.999999999Z"), Fields: c.Fields, EndpointURLs: c.EndpointURLs, EndpointInsecureTLS: c.EndpointInsecureTLS}
 	if c.Account != nil {
 		identity.AccountID = c.Account.ID
 		identity.AccountType = c.Account.Type

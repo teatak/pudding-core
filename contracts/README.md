@@ -18,6 +18,13 @@ history and memory and uses the existing profile revision. Communication prefere
 are managed through `builtin_assistant_memory` using `communication_preference`.
 No new wire fields or schema change are required for these tools.
 
+Protocol 53 adds per-connection `endpointInsecureTLS` maps to connection details,
+write requests, interactive login and OAuth-start requests. Exceptions default to
+false and apply only to configurable HTTPS REST/GraphQL endpoints. New hosts
+require a new explicit opt-in; session TLS changes require sign-in. Login, Core
+widget calls, assistant calls and GraphQL introspection honor the same setting.
+Only the connection settings API can supply it; it is not a model-callable option.
+
 Protocol 52 adds declarative `session` plugin authentication and
 `POST /plugin-connections/:id/login`. Login returns success with a connection
 summary, challenge with declared input IDs, or a sanitized error code. Passwords

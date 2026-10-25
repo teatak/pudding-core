@@ -340,7 +340,7 @@ It does not create a connection or retain an unfinished server-side login.
 
 Core posts to the selected endpoint plus the declared relative path, with a
 15-second timeout, a 64 KiB response limit and no redirects. Use HTTPS to protect
-passwords in transit; TLS verification stays enabled. Inputs preserve exact
+passwords in transit; TLS verification is enabled by default. Inputs preserve exact
 values, including password whitespace. Raw provider errors and credentials are
 not returned to the desktop. A configured `success_field` must be JSON `true`;
 `outputs` map response JSON paths to declared secret connection fields, with at
@@ -362,3 +362,30 @@ expired session requires an explicit sign-in in settings. Cookie-based flows,
 multi-request challenges and per-request signatures are not part of this
 contract. Synology uses this flow with SID and optional SynoToken outputs;
 its protocol details stay in the plugin manifest, outside Core.
+
+
+## Connection endpoint TLS settings
+
+Protocol 53 adds `endpointInsecureTLS?: Record<string, boolean>` to connection
+write, login and OAuth-start requests, and connection detail responses. The
+connection file stores it as `endpoint_insecure_tls`. The desktop shows an
+**Ignore server certificate errors** switch below each configurable HTTPS
+endpoint, off by default. Enabling it skips both certificate-chain and hostname
+verification for that connection's endpoint; it does not merely add a private CA.
+
+Only configurable REST and GraphQL endpoints accept this setting. Unknown,
+fixed or non-HTTPS endpoints cannot opt in. Omitted settings preserve an existing
+exception only while the effective server URL is unchanged; an empty object
+explicitly clears all exceptions. Changing the address in the desktop clears its
+switch, including when changing to HTTP. Changing a session connection's TLS
+policy requires signing in again, validating the chosen policy before saving.
+Failed sign-in preserves the old connection and settings.
+
+Login, assistant REST/GraphQL calls, GraphQL schema discovery and Core-side
+widget requests share the same scoped HTTP client helper. Strict and insecure
+transports keep separate pools, and neither changes the global transport or
+follows redirects. OAuth provider calls and token-exchange URLs do not inherit
+an endpoint's exception. TLS settings are supplied by saved connection bindings,
+not tool or widget arguments. Trust-policy changes invalidate schema caches and
+saved connection grants. The setting survives restart and never applies to a
+browser navigation or a NAS link opened outside Core.

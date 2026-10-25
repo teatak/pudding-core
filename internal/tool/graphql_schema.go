@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/teatak/pudding-core/internal/pluginexec"
+	"github.com/teatak/pudding-core/internal/pluginhttp"
 	"io"
 	"net/http"
 	"sort"
@@ -460,7 +461,11 @@ func (r *BuiltinRunner) doGraphQLSchemaQuery(ctx context.Context, binding *plugi
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
-	resp, err := r.webHTTPClient.Do(req)
+	client, err := pluginhttp.Client(r.webHTTPClient, binding.Endpoint.URL, binding.InsecureTLS)
+	if err != nil {
+		return nil, graphQLSchemaError(binding, "tls_config_error", err.Error())
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, graphQLSchemaError(binding, pluginexec.EndpointNetworkReason(err), err.Error())
 	}
@@ -498,7 +503,7 @@ func readGraphQLSchemaBody(body io.Reader) ([]byte, bool, error) {
 }
 
 func graphqlSchemaCacheKey(binding *plugin.EndpointBinding) string {
-	return strings.Join([]string{binding.PluginID, binding.ConnectionID, binding.EndpointName, binding.Endpoint.URL}, "|")
+	return fmt.Sprintf("%s|tls=%t", strings.Join([]string{binding.PluginID, binding.ConnectionID, binding.EndpointName, binding.Endpoint.URL}, "|"), binding.InsecureTLS)
 }
 
 func graphQLSchemaError(binding *plugin.EndpointBinding, reason, message string) map[string]any {

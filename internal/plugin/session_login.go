@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/teatak/pudding-core/internal/pluginhttp"
 	"io"
 	"net/http"
 	"net/url"
@@ -167,7 +168,7 @@ func loginValue(data map[string]any, path string) any {
 
 // AcquireSession performs only the declared login request, never follows redirects,
 // and returns sanitized failures. The caller validates and atomically stores outputs.
-func AcquireSession(ctx context.Context, client *http.Client, spec *SessionLoginSpec, baseURL string, inputs map[string]string) SessionLoginResult {
+func AcquireSession(ctx context.Context, client *http.Client, spec *SessionLoginSpec, baseURL string, inputs map[string]string, insecureTLS bool) SessionLoginResult {
 	failure := func(code string) SessionLoginResult { return SessionLoginResult{Status: "error", Code: code} }
 	known := map[string]bool{}
 	for _, field := range spec.Inputs {
@@ -210,8 +211,10 @@ func AcquireSession(ctx context.Context, client *http.Client, spec *SessionLogin
 	}
 	req.Header.Set("Content-Type", contentType)
 	req.Header.Set("Accept", "application/json")
-	transport := *client
-	transport.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	transport, err := pluginhttp.Client(client, baseURL, insecureTLS)
+	if err != nil {
+		return failure("invalid_tls_config")
+	}
 	response, err := transport.Do(req)
 	if err != nil {
 		return failure("login_unavailable")

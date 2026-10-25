@@ -13,11 +13,12 @@ import (
 )
 
 type pluginSessionLoginReq struct {
-	PluginID     string            `json:"pluginID"`
-	Name         string            `json:"name"`
-	AuthMethodID string            `json:"authMethodID"`
-	EndpointURLs map[string]string `json:"endpointURLs"`
-	Inputs       map[string]string `json:"inputs"`
+	EndpointInsecureTLS map[string]bool   `json:"endpointInsecureTLS"`
+	PluginID            string            `json:"pluginID"`
+	Name                string            `json:"name"`
+	AuthMethodID        string            `json:"authMethodID"`
+	EndpointURLs        map[string]string `json:"endpointURLs"`
+	Inputs              map[string]string `json:"inputs"`
 }
 
 func (s *Server) loginPluginConnection(c *cart.Context) error {
@@ -59,11 +60,15 @@ func (s *Server) loginPluginConnection(c *cart.Context) error {
 	if err != nil {
 		return badRequest(c, err.Error())
 	}
+	endpointTLS, err := plugin.NormalizeConnectionEndpointInsecureTLS(def, endpointURLs, req.EndpointInsecureTLS, existing)
+	if err != nil {
+		return badRequest(c, err.Error())
+	}
 	baseURL := def.Endpoints[method.Session.Endpoint].URL
 	if value := endpointURLs[method.Session.Endpoint]; value != "" {
 		baseURL = value
 	}
-	result := plugin.AcquireSession(c.Request.Context(), http.DefaultClient, method.Session, baseURL, req.Inputs)
+	result := plugin.AcquireSession(c.Request.Context(), http.DefaultClient, method.Session, baseURL, req.Inputs, endpointTLS[method.Session.Endpoint])
 	if result.Status != "success" {
 		c.JSON(http.StatusOK, result)
 		return nil
@@ -75,7 +80,7 @@ func (s *Server) loginPluginConnection(c *cart.Context) error {
 		c.JSON(http.StatusOK, plugin.SessionLoginResult{Status: "error", Code: "invalid_credentials"})
 		return nil
 	}
-	conn := &plugin.Connection{ID: id, PluginID: def.ID, Name: strings.TrimSpace(req.Name), Fields: fields, EndpointURLs: endpointURLs, Account: result.Account, Auth: plugin.Auth{Type: plugin.AuthTypeSession, MethodID: method.ID, SessionEstablished: true, ExpiresAt: result.ExpiresAt}}
+	conn := &plugin.Connection{ID: id, PluginID: def.ID, Name: strings.TrimSpace(req.Name), Fields: fields, EndpointURLs: endpointURLs, EndpointInsecureTLS: endpointTLS, Account: result.Account, Auth: plugin.Auth{Type: plugin.AuthTypeSession, MethodID: method.ID, SessionEstablished: true, ExpiresAt: result.ExpiresAt}}
 	if err := cfg.PutPluginConnectionIfUnchanged(c.Request.Context(), conn, expected); err != nil {
 		if errors.Is(err, config.ErrInvalidSetting) {
 			c.JSON(http.StatusConflict, map[string]string{"error": "connection_changed"})

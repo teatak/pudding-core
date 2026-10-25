@@ -1352,6 +1352,7 @@ export const pluginConnection = z.object({
   header: z.string().optional(),
   fields: z.record(z.string(), z.string()).optional(),
   endpointURLs: z.record(z.string(), z.string()).optional(),
+  endpointInsecureTLS: z.record(z.string(), z.boolean()).optional(),
   prefix: z.string().optional(),
   token: z.string().optional(),
   username: z.string().optional(),
@@ -1410,6 +1411,7 @@ export const startPluginOAuthRequest = z.object({
   connectionName: z.string().optional(),
   fields: z.record(z.string(), z.string()).optional(),
   endpointURLs: z.record(z.string(), z.string()).optional(),
+  endpointInsecureTLS: z.record(z.string(), z.boolean()).optional(),
 });
 export const startPluginOAuthResponse = z.object({
   authorizationURL: z.string().url(),

@@ -886,6 +886,7 @@ func endpointBindingForConnection(def *Definition, endpointName string, endpoint
 	}
 	authMethod, _ := FindAuthMethod(def, conn.Auth.MethodID, conn.Auth.Type)
 	return &EndpointBinding{
+		InsecureTLS:         conn.EndpointInsecureTLS[endpointName],
 		PluginID:            def.ID,
 		ConnectionID:        conn.ID,
 		EndpointName:        endpointName,

@@ -41,17 +41,18 @@ type pluginEnablementConfig interface {
 }
 
 type putPluginConnectionReq struct {
-	PluginID     string            `json:"pluginID"`
-	Name         string            `json:"name"`
-	AuthMethodID string            `json:"authMethodID"`
-	AuthType     string            `json:"authType"`
-	Token        string            `json:"token"`
-	Prefix       string            `json:"prefix"`
-	Header       string            `json:"header"`
-	Username     string            `json:"username"`
-	Password     string            `json:"password"`
-	Fields       map[string]string `json:"fields"`
-	EndpointURLs map[string]string `json:"endpointURLs"`
+	EndpointInsecureTLS map[string]bool   `json:"endpointInsecureTLS"`
+	PluginID            string            `json:"pluginID"`
+	Name                string            `json:"name"`
+	AuthMethodID        string            `json:"authMethodID"`
+	AuthType            string            `json:"authType"`
+	Token               string            `json:"token"`
+	Prefix              string            `json:"prefix"`
+	Header              string            `json:"header"`
+	Username            string            `json:"username"`
+	Password            string            `json:"password"`
+	Fields              map[string]string `json:"fields"`
+	EndpointURLs        map[string]string `json:"endpointURLs"`
 }
 
 type installPluginReq struct {
@@ -554,11 +555,23 @@ func (s *Server) putPluginConnection(c *cart.Context) error {
 	if found, err := cfg.GetPluginConnection(c.Request.Context(), id); err == nil {
 		existing = found
 	}
+	endpointURLsInput := req.EndpointURLs
+	if endpointURLsInput == nil && existing != nil && existing.PluginID == pluginID {
+		endpointURLsInput = existing.EndpointURLs
+	}
+	endpointURLs, err := plugin.NormalizeConnectionEndpointURLs(def, endpointURLsInput)
+	if err != nil {
+		return badRequest(c, err.Error())
+	}
+	endpointTLS, err := plugin.NormalizeConnectionEndpointInsecureTLS(def, endpointURLs, req.EndpointInsecureTLS, existing)
+	if err != nil {
+		return badRequest(c, err.Error())
+	}
 	if method.Type == plugin.AuthTypeSession {
 		if existing == nil || existing.PluginID != pluginID || !samePluginConnectionAuthMethod(existing.Auth, method) {
 			return badRequest(c, "session credentials must be acquired through login")
 		}
-		if (req.EndpointURLs != nil && !reflect.DeepEqual(req.EndpointURLs, existing.EndpointURLs)) || len(req.Fields) > 0 {
+		if (req.EndpointURLs != nil && !reflect.DeepEqual(req.EndpointURLs, existing.EndpointURLs)) || !reflect.DeepEqual(endpointTLS, existing.EndpointInsecureTLS) || len(req.Fields) > 0 {
 			return badRequest(c, "login is required to change session credentials or endpoint")
 		}
 		conn := plugin.CloneConnection(existing)
@@ -573,14 +586,6 @@ func (s *Server) putPluginConnection(c *cart.Context) error {
 	if err != nil {
 		return badRequest(c, err.Error())
 	}
-	endpointURLsInput := req.EndpointURLs
-	if endpointURLsInput == nil && existing != nil && existing.PluginID == pluginID {
-		endpointURLsInput = existing.EndpointURLs
-	}
-	endpointURLs, err := plugin.NormalizeConnectionEndpointURLs(def, endpointURLsInput)
-	if err != nil {
-		return badRequest(c, err.Error())
-	}
 	prefix := strings.TrimSpace(req.Prefix)
 	if prefix == "" {
 		prefix = method.Prefix
@@ -590,11 +595,12 @@ func (s *Server) putPluginConnection(c *cart.Context) error {
 		header = method.Header
 	}
 	conn := &plugin.Connection{
-		ID:           id,
-		Name:         strings.TrimSpace(req.Name),
-		PluginID:     pluginID,
-		Fields:       fields,
-		EndpointURLs: endpointURLs,
+		ID:                  id,
+		Name:                strings.TrimSpace(req.Name),
+		PluginID:            pluginID,
+		Fields:              fields,
+		EndpointURLs:        endpointURLs,
+		EndpointInsecureTLS: endpointTLS,
 		Auth: plugin.Auth{
 			MethodID: method.ID,
 			Type:     method.Type,
