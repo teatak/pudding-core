@@ -3,14 +3,14 @@
 import { z } from "zod";
 import { studioItem } from "./studio";
 
-export const assistantAppearance = z.object({
-  palette: z.enum(["original", "lavender", "mint", "blue", "coral", "yellow", "violet", "emerald", "crimson", "apricot", "gold"]),
-  body: z.enum(["classic", "round", "square", "pudding", "hexagon", "cat", "devil", "plump"]), eyes: z.enum(["classic", "curved", "dots", "wink", "sleepy", "mischief", "jolly"]), mouth: z.enum(["classic", "smile", "surprised", "grin", "mew", "fangs", "laugh"]),
-  headwear: z.enum(["none", "antenna", "hat", "beacon", "crown", "bow", "horns", "santa", "tang"]), arms: z.enum(["none", "classic", "short", "orb", "mitten", "claw", "wings", "santa", "greeting"]),
-  eyewear: z.enum(["none", "classic", "goggles", "glasses", "sunglasses", "domino", "halfmoon"]), faceSticker: z.enum(["none", "blush", "freckles", "stars", "hearts", "lightning", "flames", "beard", "papercut"]),
-});
+// Renderer-owned JSON. New parts and formats do not change the Core protocol.
+export const assistantAppearance = z.object({ version: z.number().int().positive().max(Number.MAX_SAFE_INTEGER) }).catchall(z.json());
+
+export const assistantAppearanceFavorite = z.object({ id: z.string(), appearance: assistantAppearance });
 export const assistant = z.object({
   id: z.literal("personal"), name: z.string(), userName: z.string(), appearance: assistantAppearance,
+  appearanceHistory: z.array(assistantAppearance).max(6),
+  appearanceFavorites: z.array(assistantAppearanceFavorite),
   sessionID: z.string().optional(),
   revision: z.number().int().positive(), createdAt: z.string(), updatedAt: z.string(),
 });
@@ -22,10 +22,13 @@ export const assistantMemory = z.object({
 });
 export const assistantSnapshot = z.object({ assistant: assistant.nullable(), memories: z.array(assistantMemory) });
 export const openAssistantRequest = z.object({
+  appearance: assistantAppearance,
   locale: z.enum(["zh-CN", "zh-TW", "en"]), provider: z.string().min(1).optional(), model: z.string().min(1).optional(),
 }).refine(value => Boolean(value.provider) === Boolean(value.model));
 const assistantName = z.string().trim().max(80).refine(value => !/[\r\n]/.test(value));
+export const finishAssistantAppearanceEditRequest = z.object({ appearanceEditGroup: z.string().min(1).max(128) }).strict();
 export const saveAssistantRequest = z.object({
+  appearanceEditGroup: z.string().min(1).max(128).optional(),
   expectedRevision: z.number().int().nonnegative(), name: assistantName,
   userName: z.string().trim().max(80).refine(value => !/[\r\n]/.test(value)),
   appearance: assistantAppearance, communicationPreference: z.string().trim().max(2000),

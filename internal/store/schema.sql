@@ -504,6 +504,18 @@ CREATE TABLE IF NOT EXISTS assistants (
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS assistant_appearance_history (
+    assistant_id TEXT PRIMARY KEY REFERENCES assistants(id) ON DELETE CASCADE,
+    history TEXT NOT NULL,
+    edit_group TEXT NOT NULL,
+    edit_base TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS assistant_appearance_favorites (
+    id TEXT PRIMARY KEY,
+    assistant_id TEXT NOT NULL REFERENCES assistants(id) ON DELETE CASCADE,
+    appearance TEXT NOT NULL,
+    created_at INTEGER NOT NULL
+);
 CREATE TABLE IF NOT EXISTS assistant_memories (
     id TEXT PRIMARY KEY,
     assistant_id TEXT NOT NULL REFERENCES assistants(id) ON DELETE CASCADE,

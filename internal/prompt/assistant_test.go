@@ -8,11 +8,11 @@ import (
 )
 
 func TestPersonalAssistantNamesAndPreferenceScope(t *testing.T) {
-	snapshot := &store.AssistantSnapshot{Assistant: &store.Assistant{Appearance: store.AssistantAppearance{
-		Palette: "violet", Body: "round", Eyes: "dots", Mouth: "smile", Headwear: "hat", Arms: "orb", Eyewear: "goggles", FaceSticker: "stars",
+	snapshot := &store.AssistantSnapshot{Assistant: &store.Assistant{Appearance: store.AssistantAppearance{"version": 1,
+		"palette": "violet", "body": "round", "eyes": "dots", "mouth": "smile", "headwear": "hat", "arms": "orb", "eyewear": "goggles", "faceSticker": "stars",
 	}}}
 	defaultProfile := PersonalAssistant(snapshot).Content
-	for _, want := range []string{"Chinese name is 小布", "English name is Puddy", "red hat", "gold-rimmed goggles", "vivid violet round body"} {
+	for _, want := range []string{"Chinese name is 小布", "English name is Puddy", `"headwear":"hat"`, `"eyewear":"goggles"`, `"palette":"violet"`, `"body":"round"`} {
 		if !strings.Contains(defaultProfile, want) {
 			t.Fatalf("profile missing %q: %s", want, defaultProfile)
 		}

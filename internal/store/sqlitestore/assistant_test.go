@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"sync"
 	"testing"
 
@@ -11,13 +12,63 @@ import (
 )
 
 func assistantInput(revision int64) store.SaveAssistantInput {
-	return store.SaveAssistantInput{ExpectedRevision: &revision, Name: "小布", UserName: "主人", Appearance: store.AssistantAppearance{Palette: "mint", Body: "classic", Eyes: "classic", Mouth: "classic", Headwear: "antenna", Arms: "none", Eyewear: "none", FaceSticker: "none"}, CommunicationPreference: "简短回答"}
+	return store.SaveAssistantInput{ExpectedRevision: &revision, Name: "小布", UserName: "主人", Appearance: store.AssistantAppearance{"version": 1, "palette": "mint", "body": "classic", "eyes": "classic", "mouth": "classic", "headwear": "antenna", "arms": "none", "eyewear": "none", "faceSticker": "none"}, CommunicationPreference: "简短回答"}
+}
+
+func TestAssistantAppearanceMigrationFrom55PreservesConfiguration(t *testing.T) {
+	s, path := openTestStore(t)
+	ctx := context.Background()
+	initial := assistantInput(0)
+	if _, err := s.SaveAssistant(ctx, initial); err != nil {
+		t.Fatal(err)
+	}
+	old, err := s.OpenAssistant(ctx, "小布", "mock", "mock", initial.Appearance)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Include a client extension so migration cannot silently reconstruct known parts only.
+	if _, err := s.db.Exec(`UPDATE assistants SET appearance=json_set(json_remove(appearance,'$.version'),'$.extension',json('{"custom":true}'))`); err != nil {
+		t.Fatal(err)
+	}
+	if err := setSchemaVersion(s.db, 55); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	got, err := reopened.GetAssistant(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := maps.Clone(initial.Appearance)
+	want["extension"] = map[string]any{"custom": true}
+	if !got.Assistant.Appearance.Equal(want) || got.Assistant.Revision != old.Assistant.Revision || got.Assistant.SessionID != old.Assistant.SessionID || got.Assistant.Name != old.Assistant.Name || len(got.Memories) != len(old.Memories) {
+		t.Fatalf("migration lost profile: %+v", got)
+	}
+	// Restart again without rewriting version or appearance.
+	if err := reopened.Close(); err != nil {
+		t.Fatal(err)
+	}
+	again, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer again.Close()
+	read, err := again.GetAssistant(ctx)
+	if err != nil || !read.Assistant.Appearance.Equal(want) {
+		t.Fatalf("restart lost config: %+v %v", read, err)
+	}
 }
 
 func TestAssistantPermanentDeletion(t *testing.T) {
 	s, _ := openTestStore(t)
 	ctx := context.Background()
-	profile, err := s.OpenAssistant(ctx, "小布", "mock", "mock")
+	profile, err := s.OpenAssistant(ctx, "小布", "mock", "mock", store.AssistantAppearance{"version": 1, "palette": "original", "body": "classic", "eyes": "classic", "mouth": "classic", "headwear": "antenna", "arms": "classic", "eyewear": "classic", "faceSticker": "blush"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -75,11 +126,11 @@ func TestAssistantPermanentDeletion(t *testing.T) {
 	if err := s.DeleteAssistant(ctx); err != nil {
 		t.Fatal("retry", err)
 	}
-	fresh, err := s.OpenAssistant(ctx, "Puddy", "mock", "mock")
+	fresh, err := s.OpenAssistant(ctx, "Puddy", "mock", "mock", store.AssistantAppearance{"version": 1, "palette": "original", "body": "classic", "eyes": "classic", "mouth": "classic", "headwear": "antenna", "arms": "classic", "eyewear": "classic", "faceSticker": "blush"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if fresh.Assistant.SessionID == id || fresh.Assistant.Name != "" || fresh.Assistant.UserName != "" || fresh.Assistant.Appearance.Palette != "original" || len(fresh.Memories) != 0 {
+	if fresh.Assistant.SessionID == id || fresh.Assistant.Name != "" || fresh.Assistant.UserName != "" || fresh.Assistant.Appearance["palette"] != "original" || len(fresh.Memories) != 0 {
 		t.Fatalf("defaults not reset: %+v", fresh)
 	}
 }
@@ -134,7 +185,7 @@ func TestAssistantSingletonAndPersistence(t *testing.T) {
 	}
 	defer reopened.Close()
 	got, err := reopened.GetAssistant(ctx)
-	if err != nil || got.Assistant.Name != "小布" || got.Assistant.UserName != "主人" || got.Assistant.Appearance != assistantInput(0).Appearance || len(got.Memories) != 1 || got.Memories[0].Content != "简短回答" || got.Memories[0].Source != "user_settings" {
+	if err != nil || got.Assistant.Name != "小布" || got.Assistant.UserName != "主人" || !got.Assistant.Appearance.Equal(assistantInput(0).Appearance) || len(got.Memories) != 1 || got.Memories[0].Content != "简短回答" || got.Memories[0].Source != "user_settings" {
 		t.Fatalf("reopened: %+v %v", got, err)
 	}
 }
@@ -212,8 +263,8 @@ func TestAssistantMigrationFrom50PreservesSessions(t *testing.T) {
 func TestOpenAssistantDefaultsAndOneConversation(t *testing.T) {
 	s, path := openTestStore(t)
 	ctx := context.Background()
-	initial, err := s.OpenAssistant(ctx, "Puddy", "", "")
-	if err != nil || initial.Assistant.Name != "" || initial.Assistant.SessionID != "" || initial.Assistant.Appearance.Eyewear != "classic" {
+	initial, err := s.OpenAssistant(ctx, "Puddy", "", "", store.AssistantAppearance{"version": 1, "palette": "original", "body": "classic", "eyes": "classic", "mouth": "classic", "headwear": "antenna", "arms": "classic", "eyewear": "classic", "faceSticker": "blush"})
+	if err != nil || initial.Assistant.Name != "" || initial.Assistant.SessionID != "" || initial.Assistant.Appearance["eyewear"] != "classic" {
 		t.Fatalf("default without model: %+v %v", initial, err)
 	}
 	var wg sync.WaitGroup
@@ -222,7 +273,7 @@ func TestOpenAssistantDefaultsAndOneConversation(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			got, err := s.OpenAssistant(ctx, "小布", "mock", "mock")
+			got, err := s.OpenAssistant(ctx, "小布", "mock", "mock", store.AssistantAppearance{"version": 1, "palette": "original", "body": "classic", "eyes": "classic", "mouth": "classic", "headwear": "antenna", "arms": "classic", "eyewear": "classic", "faceSticker": "blush"})
 			if err != nil {
 				t.Error(err)
 				return
@@ -253,7 +304,7 @@ func TestOpenAssistantDefaultsAndOneConversation(t *testing.T) {
 	}
 	input := assistantInput(1)
 	input.Name = "自定义名字"
-	input.Appearance.Eyewear = "goggles"
+	input.Appearance["eyewear"] = "goggles"
 	if _, err := s.SaveAssistant(ctx, input); err != nil {
 		t.Fatal(err)
 	}
@@ -265,8 +316,8 @@ func TestOpenAssistantDefaultsAndOneConversation(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer reopened.Close()
-	got, err := reopened.OpenAssistant(ctx, "Puddy", "different", "different")
-	if err != nil || got.Assistant.Name != input.Name || got.Assistant.SessionID != id || got.Assistant.Appearance != input.Appearance {
+	got, err := reopened.OpenAssistant(ctx, "Puddy", "different", "different", store.AssistantAppearance{"version": 1, "palette": "original", "body": "classic", "eyes": "classic", "mouth": "classic", "headwear": "antenna", "arms": "classic", "eyewear": "classic", "faceSticker": "blush"})
+	if err != nil || got.Assistant.Name != input.Name || got.Assistant.SessionID != id || !got.Assistant.Appearance.Equal(input.Appearance) {
 		t.Fatalf("reopen reset profile: %+v %v", got, err)
 	}
 	session, err := reopened.GetSession(ctx, id)
@@ -282,8 +333,8 @@ func TestAssistantMigrationFromBothV51Layouts(t *testing.T) {
 			ctx := context.Background()
 			input := assistantInput(0)
 			if legacy {
-				input.Appearance.Arms = "classic"
-				input.Appearance.FaceSticker = "blush"
+				input.Appearance["arms"] = "classic"
+				input.Appearance["faceSticker"] = "blush"
 			}
 			if _, err := s.SaveAssistant(ctx, input); err != nil {
 				t.Fatal(err)
@@ -309,15 +360,15 @@ func TestAssistantMigrationFromBothV51Layouts(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer reopened.Close()
-			input.Appearance.Eyewear = "classic"
+			input.Appearance["eyewear"] = "classic"
 			got, err := reopened.GetAssistant(ctx)
-			if err != nil || got.Assistant.Name != input.Name || got.Assistant.Appearance != input.Appearance || got.Assistant.Revision != 2 || len(got.Memories) != 1 || got.Memories[0].Content != input.CommunicationPreference {
+			if err != nil || got.Assistant.Name != input.Name || !got.Assistant.Appearance.Equal(input.Appearance) || got.Assistant.Revision != 2 || len(got.Memories) != 1 || got.Memories[0].Content != input.CommunicationPreference {
 				t.Fatalf("migration changed data: %+v %v", got, err)
 			}
 			if _, err := reopened.GetSession(ctx, "existing"); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := reopened.OpenAssistant(ctx, "小布", "mock", "mock"); err != nil {
+			if _, err := reopened.OpenAssistant(ctx, "小布", "mock", "mock", store.AssistantAppearance{"version": 1, "palette": "original", "body": "classic", "eyes": "classic", "mouth": "classic", "headwear": "antenna", "arms": "classic", "eyewear": "classic", "faceSticker": "blush"}); err != nil {
 				t.Fatal(err)
 			}
 		})
@@ -330,11 +381,11 @@ func TestAssistantMaskMigrationFrom52(t *testing.T) {
 			s, path := openTestStore(t)
 			ctx := context.Background()
 			input := assistantInput(0)
-			input.Appearance.Eyewear = oldEyewear
+			input.Appearance["eyewear"] = oldEyewear
 			if _, err := s.SaveAssistant(ctx, input); err != nil {
 				t.Fatal(err)
 			}
-			old, err := s.OpenAssistant(ctx, "小布", "mock", "mock")
+			old, err := s.OpenAssistant(ctx, "小布", "mock", "mock", store.AssistantAppearance{"version": 1, "palette": "original", "body": "classic", "eyes": "classic", "mouth": "classic", "headwear": "antenna", "arms": "classic", "eyewear": "classic", "faceSticker": "blush"})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -354,13 +405,13 @@ func TestAssistantMaskMigrationFrom52(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			want := input.Appearance
+			want := maps.Clone(input.Appearance)
 			wantRevision := int64(1)
 			if oldEyewear == "none" {
-				want.Eyewear = "classic"
+				want["eyewear"] = "classic"
 				wantRevision++
 			}
-			if got.Assistant.Appearance != want || got.Assistant.Revision != wantRevision || got.Assistant.Name != old.Assistant.Name || got.Assistant.SessionID != old.Assistant.SessionID || len(got.Memories) != 1 || got.Memories[0].Content != input.CommunicationPreference {
+			if !got.Assistant.Appearance.Equal(want) || got.Assistant.Revision != wantRevision || got.Assistant.Name != old.Assistant.Name || got.Assistant.SessionID != old.Assistant.SessionID || len(got.Memories) != 1 || got.Memories[0].Content != input.CommunicationPreference {
 				t.Fatalf("migration: %+v", got)
 			}
 			if oldEyewear == "none" {
@@ -371,7 +422,7 @@ func TestAssistantMaskMigrationFrom52(t *testing.T) {
 				}
 			}
 			input.ExpectedRevision = &got.Assistant.Revision
-			input.Appearance.Eyewear = "none"
+			input.Appearance["eyewear"] = "none"
 			if _, err := reopened.SaveAssistant(ctx, input); err != nil {
 				t.Fatal(err)
 			}
@@ -384,7 +435,7 @@ func TestAssistantMaskMigrationFrom52(t *testing.T) {
 			}
 			defer again.Close()
 			persisted, err := again.GetAssistant(ctx)
-			if err != nil || persisted.Assistant.Appearance.Eyewear != "none" {
+			if err != nil || persisted.Assistant.Appearance["eyewear"] != "none" {
 				t.Fatalf("new bare-face choice was remapped: %+v %v", persisted, err)
 			}
 		})
@@ -425,13 +476,13 @@ func TestAssistantPaletteMigrationFrom54(t *testing.T) {
 			want := before.Assistant.Appearance
 			revision := before.Assistant.Revision
 			if palette == "christmas" {
-				want.Palette = "apricot"
+				want["palette"] = "apricot"
 				revision++
 				if !got.Assistant.UpdatedAt.After(before.Assistant.UpdatedAt) {
 					t.Fatal("migration did not advance timestamp")
 				}
 			}
-			if got.Assistant.Appearance != want || got.Assistant.Revision != revision || got.Assistant.Name != before.Assistant.Name || got.Assistant.UserName != before.Assistant.UserName || len(got.Memories) != len(before.Memories) {
+			if !got.Assistant.Appearance.Equal(want) || got.Assistant.Revision != revision || got.Assistant.Name != before.Assistant.Name || got.Assistant.UserName != before.Assistant.UserName || len(got.Memories) != len(before.Memories) {
 				t.Fatalf("unexpected palette migration: %+v", got)
 			}
 			input.Appearance = got.Assistant.Appearance

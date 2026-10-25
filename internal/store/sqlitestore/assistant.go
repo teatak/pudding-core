@@ -104,11 +104,11 @@ func migrateAssistantV53(tx *sql.Tx) error {
 
 func readAssistant(ctx context.Context, tx *sql.Tx) (*store.AssistantSnapshot, error) {
 	out := &store.AssistantSnapshot{Memories: []store.AssistantMemory{}}
-	a := &store.Assistant{}
-	var appearance string
+	a := &store.Assistant{AppearanceFavorites: []store.AssistantAppearanceFavorite{}}
+	var appearance, history string
 	var created, updated int64
-	err := tx.QueryRowContext(ctx, `SELECT a.id,a.name,a.user_name,a.appearance,a.revision,a.created_at,a.updated_at,coalesce(c.session_id,'') FROM assistants a LEFT JOIN assistant_sessions c ON c.assistant_id=a.id WHERE a.id=?`, store.PersonalAssistantID).
-		Scan(&a.ID, &a.Name, &a.UserName, &appearance, &a.Revision, &created, &updated, &a.SessionID)
+	err := tx.QueryRowContext(ctx, `SELECT a.id,a.name,a.user_name,a.appearance,a.revision,a.created_at,a.updated_at,coalesce(c.session_id,''),coalesce(h.history,'[]') FROM assistants a LEFT JOIN assistant_sessions c ON c.assistant_id=a.id LEFT JOIN assistant_appearance_history h ON h.assistant_id=a.id WHERE a.id=?`, store.PersonalAssistantID).
+		Scan(&a.ID, &a.Name, &a.UserName, &appearance, &a.Revision, &created, &updated, &a.SessionID, &history)
 	if errors.Is(err, sql.ErrNoRows) {
 		return out, nil
 	}
@@ -118,8 +118,14 @@ func readAssistant(ctx context.Context, tx *sql.Tx) (*store.AssistantSnapshot, e
 	if err := json.Unmarshal([]byte(appearance), &a.Appearance); err != nil {
 		return nil, err
 	}
+	if err := json.Unmarshal([]byte(history), &a.AppearanceHistory); err != nil {
+		return nil, err
+	}
 	a.CreatedAt, a.UpdatedAt = time.UnixMilli(created).UTC(), time.UnixMilli(updated).UTC()
 	out.Assistant = a
+	if err := readAssistantAppearanceFavorites(ctx, tx, a); err != nil {
+		return nil, err
+	}
 	rows, err := tx.QueryContext(ctx, `SELECT `+assistantMemoryColumns+` FROM assistant_memories m WHERE assistant_id=? ORDER BY created_at,id`, a.ID)
 	if err != nil {
 		return nil, err
@@ -150,12 +156,16 @@ func (s *Store) GetAssistant(ctx context.Context) (*store.AssistantSnapshot, err
 
 // Opening supplies defaults only once. Concurrent opens and lost responses
 // return the same identity and conversation, without resetting custom settings.
-func (s *Store) OpenAssistant(ctx context.Context, defaultName, provider, model string) (*store.AssistantSnapshot, error) {
+func (s *Store) OpenAssistant(ctx context.Context, defaultName, provider, model string, appearance store.AssistantAppearance) (*store.AssistantSnapshot, error) {
+	initialAppearance, err := json.Marshal(appearance)
+	if err != nil {
+		return nil, err
+	}
 	var out *store.AssistantSnapshot
-	err := s.tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
+	err = s.tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		now := time.Now().UTC().UnixMilli()
 		_, err := tx.ExecContext(ctx, `INSERT INTO assistants(id,name,user_name,appearance,revision,created_at,updated_at) VALUES(?,'','',?,1,?,?) ON CONFLICT(id) DO NOTHING`,
-			store.PersonalAssistantID, `{"palette":"original","body":"classic","eyes":"classic","mouth":"classic","headwear":"antenna","arms":"classic","eyewear":"classic","faceSticker":"blush"}`, now, now)
+			store.PersonalAssistantID, string(initialAppearance), now, now)
 		if err != nil {
 			return err
 		}
@@ -200,7 +210,7 @@ func (s *Store) SaveAssistant(ctx context.Context, in store.SaveAssistantInput) 
 					preference = m.Content
 				}
 			}
-			if a.Name == in.Name && a.UserName == in.UserName && a.Appearance == in.Appearance && preference == in.CommunicationPreference {
+			if a.Name == in.Name && a.UserName == in.UserName && a.Appearance.Equal(in.Appearance) && preference == in.CommunicationPreference {
 				out = current
 				return nil
 			}
@@ -217,6 +227,11 @@ func (s *Store) SaveAssistant(ctx context.Context, in store.SaveAssistantInput) 
 ON CONFLICT(id) DO UPDATE SET name=excluded.name,user_name=excluded.user_name,appearance=excluded.appearance,revision=assistants.revision+1,updated_at=excluded.updated_at`, store.PersonalAssistantID, in.Name, in.UserName, string(appearance), now, now)
 		if err != nil {
 			return err
+		}
+		if a := current.Assistant; a != nil && !a.Appearance.Equal(in.Appearance) {
+			if err := saveAssistantAppearanceHistory(ctx, tx, a, in); err != nil {
+				return err
+			}
 		}
 		if in.CommunicationPreference == "" {
 			_, err = tx.ExecContext(ctx, `DELETE FROM assistant_memories WHERE id=?`, communicationPreferenceID)
@@ -236,4 +251,10 @@ ON CONFLICT(id) DO UPDATE SET content=excluded.content,source='user_settings',so
 		return err
 	})
 	return out, err
+}
+
+func migrateAssistantAppearanceV56(tx *sql.Tx) error {
+	// Preserve every saved part and any client extension; only add the format version.
+	_, err := tx.Exec(`UPDATE assistants SET appearance=json_set(appearance,'$.version',1) WHERE json_type(appearance,'$.version') IS NULL`)
+	return err
 }

@@ -1,9 +1,10 @@
 package store
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
-	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -21,26 +22,46 @@ var (
 // The local owner's assistant has one identity, independent of chat sessions.
 const PersonalAssistantID = "personal"
 
-type AssistantAppearance struct {
-	Palette     string `json:"palette"`
-	Body        string `json:"body"`
-	Eyes        string `json:"eyes"`
-	Mouth       string `json:"mouth"`
-	Headwear    string `json:"headwear"`
-	Arms        string `json:"arms"`
-	Eyewear     string `json:"eyewear"`
-	FaceSticker string `json:"faceSticker"`
+// AssistantAppearance is a client-owned, versioned JSON object. Core does not
+// interpret part IDs, palettes or renderer-specific fields.
+type AssistantAppearance map[string]any
+
+func (a AssistantAppearance) Validate() error {
+	data, err := json.Marshal(a)
+	if err != nil || a == nil || len(data) > 16*1024 {
+		return ErrInvalidAssistant
+	}
+	var envelope struct {
+		Version int64 `json:"version"`
+	}
+	if err := json.Unmarshal(data, &envelope); err != nil || envelope.Version < 1 || envelope.Version > 9007199254740991 {
+		return ErrInvalidAssistant
+	}
+	return nil
+}
+
+func (a AssistantAppearance) Equal(b AssistantAppearance) bool {
+	left, leftErr := json.Marshal(a)
+	right, rightErr := json.Marshal(b)
+	return leftErr == nil && rightErr == nil && bytes.Equal(left, right)
+}
+
+type AssistantAppearanceFavorite struct {
+	ID         string              `json:"id"`
+	Appearance AssistantAppearance `json:"appearance"`
 }
 
 type Assistant struct {
-	ID         string              `json:"id"`
-	Name       string              `json:"name"`
-	UserName   string              `json:"userName"`
-	Appearance AssistantAppearance `json:"appearance"`
-	SessionID  string              `json:"sessionID,omitempty"`
-	Revision   int64               `json:"revision"`
-	CreatedAt  time.Time           `json:"createdAt"`
-	UpdatedAt  time.Time           `json:"updatedAt"`
+	ID                  string                        `json:"id"`
+	Name                string                        `json:"name"`
+	UserName            string                        `json:"userName"`
+	Appearance          AssistantAppearance           `json:"appearance"`
+	AppearanceHistory   []AssistantAppearance         `json:"appearanceHistory"`
+	AppearanceFavorites []AssistantAppearanceFavorite `json:"appearanceFavorites"`
+	SessionID           string                        `json:"sessionID,omitempty"`
+	Revision            int64                         `json:"revision"`
+	CreatedAt           time.Time                     `json:"createdAt"`
+	UpdatedAt           time.Time                     `json:"updatedAt"`
 }
 
 type AssistantMemory struct {
@@ -63,6 +84,7 @@ type AssistantSnapshot struct {
 }
 
 type SaveAssistantInput struct {
+	AppearanceEditGroup     string              `json:"appearanceEditGroup,omitempty"`
 	ExpectedRevision        *int64              `json:"expectedRevision"`
 	Name                    string              `json:"name"`
 	UserName                string              `json:"userName"`
@@ -75,36 +97,24 @@ func (in *SaveAssistantInput) Normalize() error {
 	in.UserName = strings.TrimSpace(in.UserName)
 	in.CommunicationPreference = strings.TrimSpace(in.CommunicationPreference)
 	if in.ExpectedRevision == nil || *in.ExpectedRevision < 0 || *in.ExpectedRevision > 9007199254740991 ||
+		len(in.AppearanceEditGroup) > 128 ||
 		utf8.RuneCountInString(in.Name) > 80 || strings.ContainsAny(in.Name, "\r\n") ||
 		utf8.RuneCountInString(in.UserName) > 80 || strings.ContainsAny(in.UserName, "\r\n") ||
 		utf8.RuneCountInString(in.CommunicationPreference) > 2000 {
 		return ErrInvalidAssistant
 	}
-	switch in.Appearance.Palette {
-	case "original", "lavender", "mint", "blue", "coral", "yellow", "violet", "emerald", "crimson", "apricot", "gold":
-	default:
-		return ErrInvalidAssistant
-	}
-	a := in.Appearance
-	// Core parts are required. Decorative slots always carry an explicit selection,
-	// including "none"; only assets supported by the current renderer are accepted.
-	if !slices.Contains([]string{"classic", "round", "square", "pudding", "hexagon", "cat", "devil", "plump"}, a.Body) || !slices.Contains([]string{"classic", "curved", "dots", "wink", "sleepy", "mischief", "jolly"}, a.Eyes) ||
-		!slices.Contains([]string{"classic", "smile", "surprised", "grin", "mew", "fangs", "laugh"}, a.Mouth) ||
-		!slices.Contains([]string{"none", "antenna", "hat", "beacon", "crown", "bow", "horns", "santa", "tang"}, a.Headwear) ||
-		!slices.Contains([]string{"none", "classic", "short", "orb", "mitten", "claw", "wings", "santa", "greeting"}, a.Arms) ||
-		!slices.Contains([]string{"none", "classic", "goggles", "glasses", "sunglasses", "domino", "halfmoon"}, a.Eyewear) ||
-		!slices.Contains([]string{"none", "blush", "freckles", "stars", "hearts", "lightning", "flames", "beard", "papercut"}, a.FaceSticker) {
-		return ErrInvalidAssistant
-	}
-	return nil
+	return in.Appearance.Validate()
 }
 
 type AssistantStore interface {
+	FinishAssistantAppearanceEdit(context.Context, string) (*AssistantSnapshot, error)
+	SaveAssistantAppearanceFavorite(context.Context, AssistantAppearance) (*AssistantSnapshot, error)
+	DeleteAssistantAppearanceFavorite(context.Context, string) (*AssistantSnapshot, error)
 	PrepareAssistantDeletion(context.Context, string) error
 	DeleteAssistant(context.Context) error
 	GetAssistant(context.Context) (*AssistantSnapshot, error)
 	SaveAssistant(context.Context, SaveAssistantInput) (*AssistantSnapshot, error)
-	OpenAssistant(context.Context, string, string, string) (*AssistantSnapshot, error)
+	OpenAssistant(context.Context, string, string, string, AssistantAppearance) (*AssistantSnapshot, error)
 	SearchAssistantMemories(context.Context, string, AssistantMemoryQuery) ([]AssistantMemory, error)
 	SaveAssistantMemory(context.Context, string, AssistantMemoryWrite) (*AssistantMemory, error)
 	DeleteAssistantMemory(context.Context, string, string, int64) error

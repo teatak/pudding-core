@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/teatak/pudding-core/internal/home"
@@ -15,7 +16,7 @@ import (
 func TestDeleteAssistantAPI(t *testing.T) {
 	srv, st, homeDir := newTestServerWithHome(t)
 	ctx := context.Background()
-	profile := decodeJSON[store.AssistantSnapshot](t, req(t, "POST", srv.URL+"/assistant/open", map[string]string{"locale": "en", "provider": "mock", "model": "mock"}))
+	profile := decodeJSON[store.AssistantSnapshot](t, req(t, "POST", srv.URL+"/assistant/open", map[string]any{"locale": "en", "provider": "mock", "model": "mock", "appearance": store.AssistantAppearance{"version": 1, "palette": "original", "body": "classic", "eyes": "classic", "mouth": "classic", "headwear": "antenna", "arms": "classic", "eyewear": "classic", "faceSticker": "blush"}}))
 	id := profile.Assistant.SessionID
 	ordinary := decodeJSON[store.Session](t, req(t, "POST", srv.URL+"/sessions", map[string]string{"title": "Keep me", "provider": "mock", "model": "mock"}))
 	item := decodeJSON[map[string]any](t, req(t, "POST", srv.URL+"/studio/items", map[string]string{"kind": "page", "name": "Kept artifact", "body": "Keep this page", "sourceSessionID": id}))
@@ -65,7 +66,7 @@ func TestDeleteAssistantAPI(t *testing.T) {
 	if response.StatusCode != http.StatusNoContent {
 		t.Fatalf("delete retry: %d", response.StatusCode)
 	}
-	fresh := decodeJSON[store.AssistantSnapshot](t, req(t, "POST", srv.URL+"/assistant/open", map[string]string{"locale": "en", "provider": "mock", "model": "mock"}))
+	fresh := decodeJSON[store.AssistantSnapshot](t, req(t, "POST", srv.URL+"/assistant/open", map[string]any{"locale": "en", "provider": "mock", "model": "mock", "appearance": store.AssistantAppearance{"version": 1, "palette": "original", "body": "classic", "eyes": "classic", "mouth": "classic", "headwear": "antenna", "arms": "classic", "eyewear": "classic", "faceSticker": "blush"}}))
 	if fresh.Assistant.SessionID == id {
 		t.Fatal("reused deleted conversation")
 	}
@@ -77,7 +78,7 @@ func TestAssistantAPI(t *testing.T) {
 	if initial.Assistant != nil || len(initial.Memories) != 0 {
 		t.Fatalf("initial: %+v", initial)
 	}
-	input := map[string]any{"expectedRevision": 0, "name": "  小布  ", "userName": "  杨  ", "appearance": store.AssistantAppearance{Palette: "lavender", Body: "classic", Eyes: "classic", Mouth: "classic", Headwear: "none", Arms: "none", Eyewear: "classic", FaceSticker: "none"}, "communicationPreference": "  回答简短  "}
+	input := map[string]any{"expectedRevision": 0, "name": "  小布  ", "userName": "  杨  ", "appearance": store.AssistantAppearance{"version": 1, "palette": "lavender", "body": "classic", "eyes": "classic", "mouth": "classic", "headwear": "none", "arms": "none", "eyewear": "classic", "faceSticker": "none"}, "communicationPreference": "  回答简短  "}
 	response := req(t, http.MethodPut, srv.URL+"/assistant", input)
 	if response.StatusCode != http.StatusOK {
 		t.Fatalf("save: %d", response.StatusCode)
@@ -103,7 +104,7 @@ func TestAssistantAPI(t *testing.T) {
 	if cleared.Assistant.Name != "" || cleared.Assistant.Revision != 2 {
 		t.Fatalf("blank name did not restore localized default: %+v", cleared)
 	}
-	reopened := decodeJSON[store.AssistantSnapshot](t, req(t, http.MethodPost, srv.URL+"/assistant/open", map[string]any{"locale": "en"}))
+	reopened := decodeJSON[store.AssistantSnapshot](t, req(t, http.MethodPost, srv.URL+"/assistant/open", map[string]any{"locale": "en", "appearance": store.AssistantAppearance{"version": 1, "palette": "original", "body": "classic", "eyes": "classic", "mouth": "classic", "headwear": "antenna", "arms": "classic", "eyewear": "classic", "faceSticker": "blush"}}))
 	if reopened.Assistant.Name != "" || reopened.Assistant.Revision != 2 {
 		t.Fatalf("opening changed the default-name selection: %+v", reopened)
 	}
@@ -111,7 +112,7 @@ func TestAssistantAPI(t *testing.T) {
 
 func TestAssistantAPIRejectsInvalidInput(t *testing.T) {
 	srv, _ := newTestServer(t)
-	appearance := map[string]string{"palette": "original", "body": "classic", "eyes": "classic", "mouth": "classic", "headwear": "none", "arms": "none", "eyewear": "none", "faceSticker": "none"}
+	appearance := store.AssistantAppearance{"version": 1, "palette": "original"}
 	for _, invalid := range []map[string]any{
 		{"expectedRevision": nil}, {"expectedRevision": -1},
 		{"name": "invalid\nname"},
@@ -126,16 +127,14 @@ func TestAssistantAPIRejectsInvalidInput(t *testing.T) {
 			t.Fatalf("input %+v: %d", input, response.StatusCode)
 		}
 	}
-	for slot := range appearance {
-		valid := appearance[slot]
-		appearance[slot] = ""
-		response := req(t, http.MethodPut, srv.URL+"/assistant", map[string]any{"expectedRevision": 0, "name": "小布", "appearance": appearance})
+	for _, invalid := range []any{nil, []any{}, "image", map[string]any{}, map[string]any{"version": 0}, map[string]any{"version": 1.5}, map[string]any{"version": "1"}, map[string]any{"version": 1, "data": strings.Repeat("x", 16*1024)}} {
+		response := req(t, "PUT", srv.URL+"/assistant", map[string]any{"expectedRevision": 0, "appearance": invalid})
 		response.Body.Close()
 		if response.StatusCode != http.StatusBadRequest {
-			t.Fatalf("invalid %s accepted: %d", slot, response.StatusCode)
+			t.Fatalf("invalid appearance accepted: %d", response.StatusCode)
 		}
-		appearance[slot] = valid
 	}
+
 	got := decodeJSON[store.AssistantSnapshot](t, req(t, http.MethodGet, srv.URL+"/assistant", nil))
 	if got.Assistant != nil {
 		t.Fatal("invalid setup created assistant")
@@ -150,45 +149,36 @@ func TestAssistantAPIRejectsInvalidInput(t *testing.T) {
 	}
 }
 
-func TestAssistantNewPartsRoundTrip(t *testing.T) {
+func TestAssistantClientOwnedAppearanceRoundTrip(t *testing.T) {
 	srv, _ := newTestServer(t)
-	opened := decodeJSON[store.AssistantSnapshot](t, req(t, http.MethodPost, srv.URL+"/assistant/open", map[string]any{"locale": "zh-CN", "provider": "mock", "model": "mock"}))
-	for index, appearance := range []store.AssistantAppearance{
-		{Palette: "lavender", Body: "classic", Eyes: "curved", Mouth: "smile", Headwear: "hat", Arms: "short", Eyewear: "classic", FaceSticker: "freckles"},
-		{Palette: "mint", Body: "classic", Eyes: "dots", Mouth: "surprised", Headwear: "beacon", Arms: "orb", Eyewear: "goggles", FaceSticker: "stars"},
-		{Palette: "blue", Body: "round", Eyes: "classic", Mouth: "classic", Headwear: "antenna", Arms: "classic", Eyewear: "classic", FaceSticker: "blush"},
-		{Palette: "coral", Body: "round", Eyes: "classic", Mouth: "classic", Headwear: "antenna", Arms: "classic", Eyewear: "classic", FaceSticker: "blush"},
-		{Palette: "yellow", Body: "square", Eyes: "dots", Mouth: "smile", Headwear: "hat", Arms: "short", Eyewear: "none", FaceSticker: "freckles"},
-		{Palette: "violet", Body: "square", Eyes: "dots", Mouth: "smile", Headwear: "hat", Arms: "short", Eyewear: "none", FaceSticker: "freckles"},
-		{Palette: "emerald", Body: "classic", Eyes: "curved", Mouth: "surprised", Headwear: "beacon", Arms: "orb", Eyewear: "goggles", FaceSticker: "stars"},
-		{Palette: "violet", Body: "pudding", Eyes: "dots", Mouth: "smile", Headwear: "hat", Arms: "short", Eyewear: "classic", FaceSticker: "freckles"},
-		{Palette: "violet", Body: "hexagon", Eyes: "dots", Mouth: "smile", Headwear: "hat", Arms: "short", Eyewear: "classic", FaceSticker: "freckles"},
-		{Palette: "violet", Body: "cat", Eyes: "dots", Mouth: "smile", Headwear: "hat", Arms: "short", Eyewear: "classic", FaceSticker: "freckles"},
-		{Palette: "coral", Body: "pudding", Eyes: "wink", Mouth: "grin", Headwear: "crown", Arms: "mitten", Eyewear: "glasses", FaceSticker: "hearts"},
-		{Palette: "blue", Body: "hexagon", Eyes: "sleepy", Mouth: "mew", Headwear: "bow", Arms: "claw", Eyewear: "sunglasses", FaceSticker: "lightning"},
-		{Palette: "crimson", Body: "devil", Eyes: "mischief", Mouth: "fangs", Headwear: "horns", Arms: "wings", Eyewear: "domino", FaceSticker: "flames"},
-		{Palette: "apricot", Body: "plump", Eyes: "jolly", Mouth: "laugh", Headwear: "santa", Arms: "santa", Eyewear: "halfmoon", FaceSticker: "beard"},
-		{Palette: "gold", Body: "classic", Eyes: "curved", Mouth: "grin", Headwear: "tang", Arms: "greeting", Eyewear: "none", FaceSticker: "papercut"},
-	} {
-		input := map[string]any{"expectedRevision": index + 1, "name": "小布", "appearance": appearance, "communicationPreference": "简短回答"}
-		response := req(t, http.MethodPut, srv.URL+"/assistant", input)
+	initial := store.AssistantAppearance{"version": 1, "renderer": "client-fixture"}
+	opened := decodeJSON[store.AssistantSnapshot](t, req(t, "POST", srv.URL+"/assistant/open", map[string]any{"locale": "en", "provider": "mock", "model": "mock", "appearance": initial}))
+	// Neither the version, part IDs nor the nested extension is known to Core.
+	appearance := store.AssistantAppearance{"version": 23, "palette": "future-color", "headwear": "future-hat", "tail": map[string]any{"style": "curly", "size": 1.5}, "layers": []any{"body", "tail"}}
+	input := map[string]any{"expectedRevision": 1, "name": "Puddy", "appearance": appearance, "communicationPreference": "brief"}
+	for attempt := 0; attempt < 2; attempt++ {
+		response := req(t, "PUT", srv.URL+"/assistant", input)
 		if response.StatusCode != http.StatusOK {
-			t.Fatalf("save parts: %d", response.StatusCode)
+			t.Fatalf("save generic config: %d", response.StatusCode)
 		}
 		got := decodeJSON[store.AssistantSnapshot](t, response)
-		if got.Assistant.Appearance != appearance || got.Assistant.SessionID != opened.Assistant.SessionID {
-			t.Fatalf("parts changed: %+v", got)
+		if !got.Assistant.Appearance.Equal(appearance) || got.Assistant.Revision != 2 || got.Assistant.SessionID != opened.Assistant.SessionID {
+			t.Fatalf("roundtrip/retry changed config: %+v", got)
 		}
-		read := decodeJSON[store.AssistantSnapshot](t, req(t, http.MethodGet, srv.URL+"/assistant", nil))
-		if read.Assistant.Appearance != appearance || read.Assistant.Revision != int64(index+2) {
-			t.Fatalf("parts not persisted: %+v", read)
-		}
+	}
+	read := decodeJSON[store.AssistantSnapshot](t, req(t, "GET", srv.URL+"/assistant", nil))
+	if !read.Assistant.Appearance.Equal(appearance) {
+		t.Fatal("unknown fields lost")
+	}
+	reopened := decodeJSON[store.AssistantSnapshot](t, req(t, "POST", srv.URL+"/assistant/open", map[string]any{"locale": "en", "appearance": initial}))
+	if !reopened.Assistant.Appearance.Equal(appearance) {
+		t.Fatal("client defaults overwrote saved shape")
 	}
 }
 
 func TestOpenAssistantAPI(t *testing.T) {
 	srv, _ := newTestServer(t)
-	input := map[string]any{"locale": "en", "provider": "mock", "model": "mock"}
+	input := map[string]any{"locale": "en", "provider": "mock", "model": "mock", "appearance": store.AssistantAppearance{"version": 1, "palette": "original", "body": "classic", "eyes": "classic", "mouth": "classic", "headwear": "antenna", "arms": "classic", "eyewear": "classic", "faceSticker": "blush"}}
 	got := decodeJSON[store.AssistantSnapshot](t, req(t, http.MethodPost, srv.URL+"/assistant/open", input))
 	if got.Assistant == nil || got.Assistant.Name != "" || got.Assistant.SessionID == "" {
 		t.Fatalf("open: %+v", got)

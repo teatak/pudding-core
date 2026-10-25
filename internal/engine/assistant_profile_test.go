@@ -20,7 +20,7 @@ func TestAssistantProfileReachesProviderAndRefreshesOnNextTurn(t *testing.T) {
 	if err := db.PutProviderProfile(ctx, &store.ProviderProfile{ID: "capture", Protocol: "openai-compatible", Models: []store.ProviderModel{{ID: "first"}, {ID: "second"}}}); err != nil {
 		t.Fatal(err)
 	}
-	opened, err := db.OpenAssistant(ctx, "Puddy", "capture", "first")
+	opened, err := db.OpenAssistant(ctx, "Puddy", "capture", "first", store.AssistantAppearance{"version": 1, "palette": "original", "body": "classic", "eyes": "classic", "mouth": "classic", "headwear": "antenna", "arms": "classic", "eyewear": "classic", "faceSticker": "blush"})
 	if err != nil {
 		t.Fatal(err)
 	}

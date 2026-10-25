@@ -25,7 +25,7 @@ ALTER TABLE assistant_memories DROP COLUMN source_turn_id;`)
 func TestAssistantMemoriesLifecycleAndIsolation(t *testing.T) {
 	s, path := openTestStore(t)
 	ctx := context.Background()
-	profile, err := s.OpenAssistant(ctx, "小布", "mock", "mock")
+	profile, err := s.OpenAssistant(ctx, "小布", "mock", "mock", store.AssistantAppearance{"version": 1, "palette": "original", "body": "classic", "eyes": "classic", "mouth": "classic", "headwear": "antenna", "arms": "classic", "eyewear": "classic", "faceSticker": "blush"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -137,7 +137,7 @@ func TestAssistantMemoriesLifecycleAndIsolation(t *testing.T) {
 func TestAssistantPreferenceMemorySharesSettingsAndRevision(t *testing.T) {
 	s, _ := openTestStore(t)
 	ctx := context.Background()
-	p, err := s.OpenAssistant(ctx, "小布", "mock", "mock")
+	p, err := s.OpenAssistant(ctx, "小布", "mock", "mock", store.AssistantAppearance{"version": 1, "palette": "original", "body": "classic", "eyes": "classic", "mouth": "classic", "headwear": "antenna", "arms": "classic", "eyewear": "classic", "faceSticker": "blush"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -176,7 +176,7 @@ func TestAssistantPreferenceMemorySharesSettingsAndRevision(t *testing.T) {
 func TestAssistantMemoryIndexFailureRollsBack(t *testing.T) {
 	s, _ := openTestStore(t)
 	ctx := context.Background()
-	p, err := s.OpenAssistant(ctx, "小布", "mock", "mock")
+	p, err := s.OpenAssistant(ctx, "小布", "mock", "mock", store.AssistantAppearance{"version": 1, "palette": "original", "body": "classic", "eyes": "classic", "mouth": "classic", "headwear": "antenna", "arms": "classic", "eyewear": "classic", "faceSticker": "blush"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -199,7 +199,7 @@ func TestAssistantMemoryMigrationFrom53(t *testing.T) {
 	if _, err := s.SaveAssistant(ctx, assistantInput(0)); err != nil {
 		t.Fatal(err)
 	}
-	p, err := s.OpenAssistant(ctx, "小布", "mock", "mock")
+	p, err := s.OpenAssistant(ctx, "小布", "mock", "mock", store.AssistantAppearance{"version": 1, "palette": "original", "body": "classic", "eyes": "classic", "mouth": "classic", "headwear": "antenna", "arms": "classic", "eyewear": "classic", "faceSticker": "blush"})
 	if err != nil {
 		t.Fatal(err)
 	}

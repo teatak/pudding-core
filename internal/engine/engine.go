@@ -2253,6 +2253,9 @@ func (e *Engine) executeAllowedTool(ctx context.Context, sessionID, turnID strin
 	if call.Name == tool.AssistantRename {
 		return e.executeAssistantRename(ctx, sessionID, call)
 	}
+	if call.Name == tool.AssistantUserName {
+		return e.executeAssistantName(ctx, sessionID, call, true)
+	}
 	if call.Name == tool.AssistantMemory {
 		return e.executeAssistantMemory(ctx, sessionID, turnID, call)
 	}

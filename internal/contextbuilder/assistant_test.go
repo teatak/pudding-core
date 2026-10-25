@@ -20,7 +20,7 @@ func TestAssistantProfileIsCurrentAndLimitedToItsConversation(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = db.Close() }()
-	opened, err := db.OpenAssistant(ctx, "Puddy", "fixture", "first")
+	opened, err := db.OpenAssistant(ctx, "Puddy", "fixture", "first", store.AssistantAppearance{"version": 1, "palette": "original", "body": "classic", "eyes": "classic", "mouth": "classic", "headwear": "antenna", "arms": "classic", "eyewear": "classic", "faceSticker": "blush"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -47,14 +47,14 @@ func TestAssistantProfileIsCurrentAndLimitedToItsConversation(t *testing.T) {
 	}
 	input := store.SaveAssistantInput{ExpectedRevision: &opened.Assistant.Revision, Name: "小星", UserName: "杨同学",
 		Appearance: opened.Assistant.Appearance, CommunicationPreference: "用中文，先给结论"}
-	input.Appearance.Headwear = "hat"
-	input.Appearance.Eyewear = "goggles"
+	input.Appearance["headwear"] = "hat"
+	input.Appearance["eyewear"] = "goggles"
 	saved, err := db.SaveAssistant(ctx, input)
 	if err != nil {
 		t.Fatal(err)
 	}
 	req := build(sid, "second", "chat")
-	for _, want := range []string{`"name":"小星"`, `"user_name":"杨同学"`, "用中文，先给结论", "red hat", "gold-rimmed goggles"} {
+	for _, want := range []string{`"name":"小星"`, `"user_name":"杨同学"`, "用中文，先给结论", `"headwear":"hat"`, `"eyewear":"goggles"`} {
 		if !strings.Contains(req.System, want) {
 			t.Fatalf("updated profile missing %q", want)
 		}
@@ -109,7 +109,7 @@ func TestAssistantMemoryRetrievalSurvivesRestartAndProjection(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = db.Close() }()
-	p, err := db.OpenAssistant(ctx, "小布", "mock", "mock")
+	p, err := db.OpenAssistant(ctx, "小布", "mock", "mock", store.AssistantAppearance{"version": 1, "palette": "original", "body": "classic", "eyes": "classic", "mouth": "classic", "headwear": "antenna", "arms": "classic", "eyewear": "classic", "faceSticker": "blush"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -182,7 +182,7 @@ func TestAssistantProfileReadFailureIsNotHidden(t *testing.T) {
 	}
 	defer db.Close()
 	ctx := context.Background()
-	opened, err := db.OpenAssistant(ctx, "Puddy", "fixture", "first")
+	opened, err := db.OpenAssistant(ctx, "Puddy", "fixture", "first", store.AssistantAppearance{"version": 1, "palette": "original", "body": "classic", "eyes": "classic", "mouth": "classic", "headwear": "antenna", "arms": "classic", "eyewear": "classic", "faceSticker": "blush"})
 	if err != nil {
 		t.Fatal(err)
 	}

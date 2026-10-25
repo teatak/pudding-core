@@ -3892,7 +3892,7 @@ func TestDeleteAssistantCancelsRunningTurn(t *testing.T) {
 	srv := httptest.NewServer(New(eng, ms, ms, hub).Handler(testToken, nil))
 	t.Cleanup(srv.Close)
 
-	profile := decodeJSON[store.AssistantSnapshot](t, req(t, http.MethodPost, srv.URL+"/assistant/open", map[string]string{"locale": "en", "provider": "mock", "model": "m"}))
+	profile := decodeJSON[store.AssistantSnapshot](t, req(t, http.MethodPost, srv.URL+"/assistant/open", map[string]any{"locale": "en", "provider": "mock", "model": "m", "appearance": store.AssistantAppearance{"version": 1, "palette": "original", "body": "classic", "eyes": "classic", "mouth": "classic", "headwear": "antenna", "arms": "classic", "eyewear": "classic", "faceSticker": "blush"}}))
 	sess := store.Session{ID: profile.Assistant.SessionID}
 	resp := req(t, http.MethodPost, srv.URL+"/sessions/"+sess.ID+"/submit",
 		map[string]string{"clientMessageID": "c1", "text": "hi"})

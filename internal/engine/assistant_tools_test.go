@@ -16,7 +16,7 @@ import (
 	"github.com/teatak/pudding-core/internal/tool"
 )
 
-func TestAssistantRenameScopeAndValidation(t *testing.T) {
+func TestAssistantNameToolsScopeAndValidation(t *testing.T) {
 	ctx := context.Background()
 	db := storetest.New(t)
 	runner := tool.NewBuiltinRunner()
@@ -30,7 +30,7 @@ func TestAssistantRenameScopeAndValidation(t *testing.T) {
 	if err != nil || tool.HasDefinition(defs, tool.AssistantRename) {
 		t.Fatalf("uninitialized assistant leaked a tool: %v", err)
 	}
-	profile, err := db.OpenAssistant(ctx, "小布", "mock", "mock")
+	profile, err := db.OpenAssistant(ctx, "小布", "mock", "mock", store.AssistantAppearance{"version": 1, "palette": "original", "body": "classic", "eyes": "classic", "mouth": "classic", "headwear": "antenna", "arms": "classic", "eyewear": "classic", "faceSticker": "blush"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -51,22 +51,24 @@ func TestAssistantRenameScopeAndValidation(t *testing.T) {
 			}
 		}
 	}
-	call := func(sessionID, args string) tool.Result {
-		return eng.executeAllowedTool(ctx, sessionID, "turn", store.ModeChat, tool.Call{Name: tool.AssistantRename, Args: json.RawMessage(args)})
-	}
-	for _, args := range []string{`{}`, `null`, `{"name":null}`, `{"name":1}`, `{"name":"two\nlines"}`, `{"name":"new","userName":"wrong"}`, `{"name":"new"}{}`, `{"name":"` + strings.Repeat("名", 81) + `"}`} {
-		if result := call(sid, args); result.Ok {
-			t.Fatalf("invalid rename succeeded: %s", args)
+	for _, name := range []string{tool.AssistantRename, tool.AssistantUserName} {
+		call := func(sessionID, args string) tool.Result {
+			return eng.executeAllowedTool(ctx, sessionID, "turn", store.ModeChat, tool.Call{Name: name, Args: json.RawMessage(args)})
 		}
-	}
-	for _, sessionID := range []string{"ordinary", "child"} {
-		for _, mode := range []store.AgentMode{store.ModeChat, store.ModeWork, store.ModeCode} {
-			// The engine's session argument is authoritative, not caller-supplied metadata.
-			result := eng.executeAllowedTool(ctx, sessionID, "turn", mode, tool.Call{
-				SessionID: sid, Name: tool.AssistantRename, Args: json.RawMessage(`{"name":"wrong"}`),
-			})
-			if result.Ok || !strings.Contains(result.Content, "only available in its own conversation") {
-				t.Fatalf("direct call bypassed session scope: %s/%s: %+v", sessionID, mode, result)
+		for _, args := range []string{`{}`, `null`, `{"name":null}`, `{"name":1}`, `{"name":"two\nlines"}`, `{"name":"new","userName":"wrong"}`, `{"name":"new"}{}`, `{"name":"` + strings.Repeat("名", 81) + `"}`} {
+			if result := call(sid, args); result.Ok {
+				t.Fatalf("invalid rename succeeded: %s", args)
+			}
+		}
+		for _, sessionID := range []string{"ordinary", "child"} {
+			for _, mode := range []store.AgentMode{store.ModeChat, store.ModeWork, store.ModeCode} {
+				// The engine's session argument is authoritative, not caller-supplied metadata.
+				result := eng.executeAllowedTool(ctx, sessionID, "turn", mode, tool.Call{
+					SessionID: sid, Name: name, Args: json.RawMessage(`{"name":"wrong"}`),
+				})
+				if result.Ok || !strings.Contains(result.Content, "only available in its own conversation") {
+					t.Fatalf("direct call bypassed session scope: %s/%s: %+v", sessionID, mode, result)
+				}
 			}
 		}
 	}
@@ -82,7 +84,7 @@ func TestOrdinaryAndChildConversationsRejectForgedAssistantToolCalls(t *testing.
 			t.Run(target+"/"+string(mode), func(t *testing.T) {
 				ctx := context.Background()
 				db := storetest.New(t)
-				profile, err := db.OpenAssistant(ctx, "小布", "capture", "test")
+				profile, err := db.OpenAssistant(ctx, "小布", "capture", "test", store.AssistantAppearance{"version": 1, "palette": "original", "body": "classic", "eyes": "classic", "mouth": "classic", "headwear": "antenna", "arms": "classic", "eyewear": "classic", "faceSticker": "blush"})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -97,6 +99,7 @@ func TestOrdinaryAndChildConversationsRejectForgedAssistantToolCalls(t *testing.
 					{Tool: &provider.ToolCallChunk{CallID: "spoofed-session", Name: tool.AssistantRename, ArgsDelta: string(spoofedArgs), Index: 1}},
 					{Tool: &provider.ToolCallChunk{CallID: "read-memory", Name: tool.AssistantMemory, ArgsDelta: `{"action":"search"}`, Index: 2}},
 					{Tool: &provider.ToolCallChunk{CallID: "write-memory", Name: tool.AssistantMemory, ArgsDelta: `{"action":"save","content":"越权记忆"}`, Index: 3}},
+					{Tool: &provider.ToolCallChunk{CallID: "user-name", Name: tool.AssistantUserName, ArgsDelta: `{"name":"越权称呼"}`, Index: 4}},
 					{Done: true, Finish: provider.FinishToolCalls},
 				}}}
 				runner := tool.NewBuiltinRunner()
@@ -137,11 +140,11 @@ func TestOrdinaryAndChildConversationsRejectForgedAssistantToolCalls(t *testing.
 					}
 				}
 				requests := client.snapshot()
-				if results != 4 || len(requests) != 2 {
-					t.Fatalf("expected four rejections and one follow-up request: results=%d requests=%d", results, len(requests))
+				if results != 5 || len(requests) != 2 {
+					t.Fatalf("expected five rejections and one follow-up request: results=%d requests=%d", results, len(requests))
 				}
 				for _, request := range requests {
-					if tool.HasDefinition(request.Tools, tool.AssistantRename) || tool.HasDefinition(request.Tools, tool.AssistantMemory) || strings.Contains(request.System, "## Personal Assistant Profile") {
+					if tool.HasDefinition(request.Tools, tool.AssistantRename) || tool.HasDefinition(request.Tools, tool.AssistantMemory) || tool.HasDefinition(request.Tools, tool.AssistantUserName) || strings.Contains(request.System, "## Personal Assistant Profile") {
 						t.Fatal("ordinary or child conversation received assistant tools/profile")
 					}
 				}
@@ -167,7 +170,7 @@ func TestAssistantRenameToolLoopUpdatesPromptAndPreservesProfile(t *testing.T) {
 	if err := db.PutProviderProfile(ctx, &store.ProviderProfile{ID: "capture", Protocol: "openai-compatible", Models: []store.ProviderModel{{ID: "test", Capabilities: &store.ModelCaps{Tools: true}}}}); err != nil {
 		t.Fatal(err)
 	}
-	profile, err := db.OpenAssistant(ctx, "小布", "capture", "test")
+	profile, err := db.OpenAssistant(ctx, "小布", "capture", "test", store.AssistantAppearance{"version": 1, "palette": "original", "body": "classic", "eyes": "classic", "mouth": "classic", "headwear": "antenna", "arms": "classic", "eyewear": "classic", "faceSticker": "blush"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -219,7 +222,7 @@ func TestAssistantRenameToolLoopUpdatesPromptAndPreservesProfile(t *testing.T) {
 		if i == 1 {
 			wantName = ""
 		}
-		if saved.Assistant.Name != wantName || saved.Assistant.Revision != profile.Assistant.Revision+int64(i)+1 || saved.Assistant.SessionID != sid || saved.Assistant.UserName != profile.Assistant.UserName || saved.Assistant.Appearance != profile.Assistant.Appearance || !reflect.DeepEqual(saved.Memories, profile.Memories) {
+		if saved.Assistant.Name != wantName || saved.Assistant.Revision != profile.Assistant.Revision+int64(i)+1 || saved.Assistant.SessionID != sid || saved.Assistant.UserName != profile.Assistant.UserName || !saved.Assistant.Appearance.Equal(profile.Assistant.Appearance) || !reflect.DeepEqual(saved.Memories, profile.Memories) {
 			t.Fatalf("rename changed unrelated profile data: %+v", saved)
 		}
 	}
@@ -237,7 +240,7 @@ func (s assistantRenameStore) SaveAssistant(ctx context.Context, in store.SaveAs
 func TestAssistantRenameDoesNotHideFailureOrOverwriteConcurrentEdits(t *testing.T) {
 	ctx := context.Background()
 	db := storetest.New(t)
-	profile, err := db.OpenAssistant(ctx, "小布", "mock", "mock")
+	profile, err := db.OpenAssistant(ctx, "小布", "mock", "mock", store.AssistantAppearance{"version": 1, "palette": "original", "body": "classic", "eyes": "classic", "mouth": "classic", "headwear": "antenna", "arms": "classic", "eyewear": "classic", "faceSticker": "blush"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -252,7 +255,7 @@ func TestAssistantRenameDoesNotHideFailureOrOverwriteConcurrentEdits(t *testing.
 	}
 	wrapped.save = func(ctx context.Context, in store.SaveAssistantInput) (*store.AssistantSnapshot, error) {
 		concurrent := in
-		concurrent.Name, concurrent.Appearance.Palette = "新名字", "coral"
+		concurrent.Name, concurrent.Appearance["palette"] = "新名字", "coral"
 		if _, err := db.SaveAssistant(ctx, concurrent); err != nil {
 			return nil, err
 		}
@@ -263,7 +266,84 @@ func TestAssistantRenameDoesNotHideFailureOrOverwriteConcurrentEdits(t *testing.
 		t.Fatal(result)
 	}
 	saved, err := db.GetAssistant(ctx)
-	if err != nil || saved.Assistant.Name != "新名字" || saved.Assistant.Appearance.Palette != "coral" {
+	if err != nil || saved.Assistant.Name != "新名字" || saved.Assistant.Appearance["palette"] != "coral" {
 		t.Fatal("concurrent edit lost", saved, err)
+	}
+}
+
+func TestAssistantUserNameToolUpdatesPromptAndPreservesAppearance(t *testing.T) {
+	ctx := context.Background()
+	db := storetest.New(t)
+	client := &nextPromptClient{responses: [][]provider.Chunk{
+		{{Tool: &provider.ToolCallChunk{CallID: "address", Name: tool.AssistantUserName, ArgsDelta: `{"name":" 杨同学 "}`}}, {Done: true, Finish: provider.FinishToolCalls}},
+		{{Part: provider.PartText, Delta: "好的，杨同学。"}, {Done: true, Finish: provider.FinishStop}},
+		{{Tool: &provider.ToolCallChunk{CallID: "clear", Name: tool.AssistantUserName, ArgsDelta: `{"name":""}`}}, {Done: true, Finish: provider.FinishToolCalls}},
+	}}
+	eng := New(db, event.NewHub(), mapResolver{"capture": client}, db)
+	t.Cleanup(eng.Stop)
+	if err := db.PutProviderProfile(ctx, &store.ProviderProfile{ID: "capture", Protocol: "openai-compatible", Models: []store.ProviderModel{{ID: "test", Capabilities: &store.ModelCaps{Tools: true}}}}); err != nil {
+		t.Fatal(err)
+	}
+	profile, err := db.OpenAssistant(ctx, "小布", "capture", "test", store.AssistantAppearance{"version": 1, "palette": "mint"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	profile, err = db.SaveAssistant(ctx, store.SaveAssistantInput{ExpectedRevision: &profile.Assistant.Revision, Name: "小白", Appearance: profile.Assistant.Appearance, CommunicationPreference: "简短回答"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sid := profile.Assistant.SessionID
+	for i, text := range []string{"叫我杨同学", "忘记我的称呼"} {
+		submitted, err := eng.Submit(ctx, SubmitInput{SessionID: sid, ClientMessageID: text, Text: text})
+		if err != nil {
+			t.Fatal(err)
+		}
+		waitTurnDone(t, db, sid)
+		turn, err := db.GetConversationTurn(ctx, sid, submitted.TurnID)
+		if err != nil || turn.Status != store.TurnCompleted {
+			t.Fatalf("name turn: %+v %v", turn, err)
+		}
+		results := 0
+		for _, message := range turn.Messages {
+			for _, part := range message.Parts {
+				if part.Name == tool.AssistantUserName && part.Type == store.ContentPartToolResult && part.Ok {
+					results++
+				}
+			}
+		}
+		requests := client.snapshot()
+		if results != 1 || len(requests) != (i+1)*2 || !tool.HasDefinition(requests[i*2].Tools, tool.AssistantUserName) {
+			t.Fatal("missing name tool/result", results)
+		}
+		system := requests[i*2+1].System
+		if (i == 0) != strings.Contains(system, `"user_name":"杨同学"`) {
+			t.Fatal("same-turn prompt retained old preferred name")
+		}
+		saved, err := db.GetAssistant(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		wantName := "杨同学"
+		if i == 1 {
+			wantName = ""
+		}
+		if saved.Assistant.UserName != wantName || saved.Assistant.Revision != profile.Assistant.Revision+int64(i)+1 || saved.Assistant.Name != "小白" || !saved.Assistant.Appearance.Equal(profile.Assistant.Appearance) || !reflect.DeepEqual(saved.Assistant.AppearanceHistory, profile.Assistant.AppearanceHistory) || !reflect.DeepEqual(saved.Memories, profile.Memories) {
+			t.Fatalf("preferred name changed unrelated data: %+v", saved)
+		}
+	}
+	wrapped := assistantRenameStore{Store: db, save: func(context.Context, store.SaveAssistantInput) (*store.AssistantSnapshot, error) {
+		return nil, errors.New("storage unavailable")
+	}}
+	eng.store = wrapped
+	call := tool.Call{Name: tool.AssistantUserName, Args: json.RawMessage(`{"name":"杨同学"}`)}
+	if result := eng.executeAssistantName(ctx, sid, call, true); result.Ok || !strings.Contains(result.Content, "storage unavailable") {
+		t.Fatal("storage failure hidden", result)
+	}
+	wrapped.save = func(context.Context, store.SaveAssistantInput) (*store.AssistantSnapshot, error) {
+		return nil, store.ErrAssistantConflict
+	}
+	eng.store = wrapped
+	if result := eng.executeAssistantName(ctx, sid, call, true); result.Ok || !strings.Contains(result.Content, "profile changed") {
+		t.Fatal("conflict hidden", result)
 	}
 }

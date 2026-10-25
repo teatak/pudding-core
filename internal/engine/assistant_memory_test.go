@@ -22,7 +22,7 @@ func TestAssistantMemoryToolLoop(t *testing.T) {
 	if err := db.PutProviderProfile(ctx, &store.ProviderProfile{ID: "capture", Protocol: "openai-compatible", Models: []store.ProviderModel{{ID: "test", Capabilities: &store.ModelCaps{Tools: true}}}}); err != nil {
 		t.Fatal(err)
 	}
-	p, err := db.OpenAssistant(ctx, "小布", "capture", "test")
+	p, err := db.OpenAssistant(ctx, "小布", "capture", "test", store.AssistantAppearance{"version": 1, "palette": "original", "body": "classic", "eyes": "classic", "mouth": "classic", "headwear": "antenna", "arms": "classic", "eyewear": "classic", "faceSticker": "blush"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -97,7 +97,7 @@ func TestAssistantMemoryToolLoop(t *testing.T) {
 func TestAssistantMemoryDirectCallsCannotSpoofScope(t *testing.T) {
 	ctx := context.Background()
 	db := storetest.New(t)
-	p, err := db.OpenAssistant(ctx, "小布", "mock", "mock")
+	p, err := db.OpenAssistant(ctx, "小布", "mock", "mock", store.AssistantAppearance{"version": 1, "palette": "original", "body": "classic", "eyes": "classic", "mouth": "classic", "headwear": "antenna", "arms": "classic", "eyewear": "classic", "faceSticker": "blush"})
 	if err != nil {
 		t.Fatal(err)
 	}

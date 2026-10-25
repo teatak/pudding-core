@@ -185,6 +185,9 @@ func (s *Server) Handler(token string, static http.Handler) http.Handler {
 	s.registerRemote(app)
 	app.Route("/assistant").GET(s.getAssistant).PUT(s.saveAssistant).DELETE(s.deleteAssistant)
 	app.Route("/assistant/open").POST(s.openAssistant)
+	app.Route("/assistant/appearance-history/finish").POST(s.finishAssistantAppearanceEdit)
+	app.Route("/assistant/appearance-favorites").POST(s.saveAssistantAppearanceFavorite)
+	app.Route("/assistant/appearance-favorites/:favoriteID").DELETE(s.deleteAssistantAppearanceFavorite)
 	public := cart.New()
 
 	app.Route("/studio/items/:itemID/runs").POST(s.widgetOnly(s.createWidgetRun))

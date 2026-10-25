@@ -5,6 +5,49 @@ The Go daemon embeds it through this package; desktop generates `web/contracts/`
 `api.ts` and `events.ts` are the TypeScript/Zod client validation definitions for the REST and SSE protocol.
 Server structs and lifecycle semantics remain owned by core; verify both sides when changing a wire field.
 
+The assistant editor submits one explicit `PUT /assistant` without an edit group:
+name and appearance are committed atomically, and an appearance change records the
+previous outfit in history. Draft selections, restores and closing do not write.
+Favorites remain independent and may store an unapplied draft. Profile writes still
+include the retained user name and communication preference under revision checking.
+
+`builtin_assistant_user_name` sets or clears the preferred form of address with
+`{name}`. Like rename and memory tools it is exposed and executable only in the fixed
+assistant conversation, not ordinary or child conversations. It preserves appearance,
+history and memory and uses the existing profile revision. Communication preferences
+are managed through `builtin_assistant_memory` using `communication_preference`.
+No new wire fields or schema change are required for these tools.
+
+Protocol 51 expands appearance history to six distinct previous configurations, newest
+first. Existing history is preserved; no storage migration is needed. Update clients
+with the new array limit before consuming snapshots with more than three entries.
+
+Protocol 50 adds `POST /assistant/appearance-history/finish` with
+`{appearanceEditGroup}` for clients that stage a group of appearance writes. Finishing
+is idempotent and records the opening appearance only if the final appearance differs.
+The current explicit-save editor and one-click seasonal outfits omit the group.
+
+Protocol 49 adds `appearanceHistory` (newest first, at most three distinct previous
+configurations) and `appearanceFavorites` (`id`, `appearance`) to assistant snapshots.
+`PUT /assistant` accepts an optional `appearanceEditGroup` to combine autosaves into one
+edit. `POST /assistant/appearance-favorites` accepts `{appearance}` and returns the snapshot;
+`DELETE /assistant/appearance-favorites/:favoriteID` returns the snapshot. Favorites are
+content-deduplicated, independent of history, and do not alter profile revision, history or
+current appearance. Schema 57 adds both collections with cascading deletion; existing
+assistants start with empty collections. Core treats all saved appearance values as opaque JSON.
+
+Protocol 48 makes assistant appearance a client-owned JSON object with a positive integer
+`version` (maximum safe integer). Core validates only that envelope and a 16 KiB JSON
+size limit; it stores unknown part IDs, nested fields and future versions without
+interpreting them. `POST /assistant/open` now requires the client's default `appearance`
+and uses it only on first creation. Core no longer defines the default outfit or part
+vocabulary. The assistant prompt includes the saved object as untrusted profile data,
+without Core-side part descriptions. Desktop owns version 1 validation and rendering;
+unsupported versions/parts produce a load error rather than silently resetting the profile.
+Schema 56 adds `version: 1` to existing appearance objects without changing selections,
+extensions, profile revision, memories or conversation binding. Update desktop and daemon
+together once for this envelope; later part additions only require a Desktop update.
+
 Protocol 47 adds `DELETE /assistant` (204): permanently delete the personal assistant's
 profile, preferences, indexed memories and bound conversation, including child sessions.
 The endpoint closes admission, cancels and joins active work, and reuses session resource

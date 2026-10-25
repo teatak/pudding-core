@@ -14,9 +14,10 @@ func (s *Server) openAssistant(c *cart.Context) error {
 	s.assistantMu.Lock()
 	defer s.assistantMu.Unlock()
 	var in struct {
-		Locale   string `json:"locale"`
-		Provider string `json:"provider"`
-		Model    string `json:"model"`
+		Appearance store.AssistantAppearance `json:"appearance"`
+		Locale     string                    `json:"locale"`
+		Provider   string                    `json:"provider"`
+		Model      string                    `json:"model"`
 	}
 	if err := decode(c, &in); err != nil {
 		return badRequest(c, "invalid_json")
@@ -33,7 +34,10 @@ func (s *Server) openAssistant(c *cart.Context) error {
 	if (in.Provider == "") != (in.Model == "") {
 		return badRequest(c, "no_model")
 	}
-	out, err := s.store.OpenAssistant(c.Request.Context(), name, in.Provider, in.Model)
+	if err := in.Appearance.Validate(); err != nil {
+		return badRequest(c, "invalid_assistant")
+	}
+	out, err := s.store.OpenAssistant(c.Request.Context(), name, in.Provider, in.Model, in.Appearance)
 	if err != nil {
 		return s.fail(c, err)
 	}
@@ -94,5 +98,25 @@ func (s *Server) deleteAssistant(c *cart.Context) error {
 		return s.fail(c, err)
 	}
 	c.String(http.StatusNoContent, "")
+	return nil
+}
+
+func (s *Server) finishAssistantAppearanceEdit(c *cart.Context) error {
+	s.assistantMu.Lock()
+	defer s.assistantMu.Unlock()
+	var in struct {
+		EditGroup string `json:"appearanceEditGroup"`
+	}
+	if err := decode(c, &in); err != nil {
+		return badRequest(c, "invalid_json")
+	}
+	if in.EditGroup == "" || len(in.EditGroup) > 128 {
+		return badRequest(c, "invalid_assistant")
+	}
+	out, err := s.store.FinishAssistantAppearanceEdit(c.Request.Context(), in.EditGroup)
+	if err != nil {
+		return s.fail(c, err)
+	}
+	c.JSON(http.StatusOK, out)
 	return nil
 }
