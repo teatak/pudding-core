@@ -175,12 +175,14 @@ func (s *Service) selectedSessionConnection(ctx context.Context, sessionID strin
 		}
 		if saved == nil {
 			var selected *Connection
+			reauthorizationRequired := false
 			for _, candidate := range connectionsForPlugin(connections, def.ID) {
 				if !connectionConfiguredFor(def, candidate) {
 					continue
 				}
 				ready, err := s.ReadyConnection(ctx, candidate.ID)
 				if errors.Is(err, ErrConnectionReauthorizationRequired) {
+					reauthorizationRequired = true
 					continue
 				}
 				if err != nil {
@@ -192,12 +194,19 @@ func (s *Service) selectedSessionConnection(ctx context.Context, sessionID strin
 				selected = ready
 			}
 			if selected == nil {
+				if reauthorizationRequired {
+					required.Reason = "connection_reauthorization_required"
+				}
 				return nil, required
 			}
 			return selected, nil
 		}
 		c, err := s.ReadyConnection(ctx, saved.ConnectionID)
-		if errors.Is(err, store.ErrNotFound) || errors.Is(err, ErrConnectionReauthorizationRequired) {
+		if errors.Is(err, ErrConnectionReauthorizationRequired) {
+			required.Reason = "connection_reauthorization_required"
+			return nil, required
+		}
+		if errors.Is(err, store.ErrNotFound) {
 			return nil, required
 		}
 		if err != nil {

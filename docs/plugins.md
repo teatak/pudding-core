@@ -271,3 +271,20 @@ plugin's skill, for example:
 Protocol 27 adds `GET/POST /plugins/sources` and `DELETE /plugins/sources/:sourceID`. A source has `id`, `url`, and `official`; POST accepts `{ "url": "https://example.com/plugins/registry.json" }`. HTTPS URLs without credentials or fragments are normalized, deduplicated and persisted in `config/plugin-sources.yaml` (up to 32 third-party sources). The official source cannot be removed. Removing a source leaves installed plugin files, enablement and connections untouched. Desktop validates and fetches each catalog independently.
 
 `POST /plugins/install` accepts optional `pluginID` and `pluginVersion` assertions alongside `packageJSON`, `packageSHA256`, and `sourceURL`; mismatches fail before writing. Package locks preserve source identity across restarts. An existing plugin cannot be replaced by an installation from a different nonempty source (`409 plugin_source_conflict`), including a catalog trying to adopt a local/MCP plugin. Authored package edits keep their existing workflow. Catalog and update selection must use both local plugin ID and source URL.
+
+## Gmail token refresh
+
+Gmail connections refresh access tokens within two minutes of expiry through
+`https://teatak.com/gmail/refresh`, using the same Google client credentials
+as the authorization exchange. Concurrent calls share the refreshed credentials;
+new credentials are saved for subsequent turns and restarts. Google may omit a
+replacement refresh token, token type, scopes or refresh expiry; these stored
+fields are retained when omitted. Reauthorization of the same Google account
+also retains its refresh token when the exchange omits one.
+
+Only a missing/expired refresh token or Google's `invalid_grant` response
+requires reauthorization. Network errors, rate limits, server errors, malformed
+responses and client configuration errors leave credentials and account bindings
+intact and are reported as refresh failures. A Gmail API 401 alone does not prove
+that the refresh token is revoked. Deploy the OAuth worker's `/gmail/refresh`
+route before distributing this Core change.

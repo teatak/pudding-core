@@ -5,9 +5,13 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
+	"github.com/teatak/pudding-core/internal/plugin"
 	"io"
 	"net/http"
+	"net/url"
 	"testing"
+	"time"
 )
 
 func TestParseGoogleIDToken(t *testing.T) {
@@ -126,5 +130,66 @@ func TestFetchGoogleAccountInfoFromMockServer(t *testing.T) {
 	}
 	if account.ID != "google-user-mock" || account.Login != "mock@gmail.com" || account.AvatarURL != "https://lh3.googleusercontent.com/mock.jpg" {
 		t.Fatalf("unexpected account: %+v", account)
+	}
+}
+
+func TestGmailReauthorizationPreservesRefreshTokenOnlyForSameAccount(t *testing.T) {
+	for _, sameAccount := range []bool{true, false} {
+		t.Run(fmt.Sprint(sameAccount), func(t *testing.T) {
+			srv, _, cfg := newConfigTestServer(t)
+			original := &plugin.Connection{ID: "saved-gmail", PluginID: "gmail", Name: "Gmail", Account: &plugin.ConnectionAccount{ID: "old-account", Login: "old@example.com"}, Auth: plugin.Auth{Type: plugin.AuthTypeOAuth2, MethodID: "google-oauth", AccessToken: "old-access", RefreshToken: "saved-refresh", RefreshExpiresAt: time.Now().Add(24 * time.Hour)}}
+			if err := cfg.PutPluginConnection(context.Background(), original); err != nil {
+				t.Fatal(err)
+			}
+			accountID := "different-account"
+			if sameAccount {
+				accountID = "old-account"
+			}
+			payload, _ := json.Marshal(map[string]string{"sub": accountID, "email": "test@example.com", "picture": "https://example.com/avatar.png"})
+			jwt := "header." + base64.RawURLEncoding.EncodeToString(payload) + ".signature"
+			previous := http.DefaultTransport
+			http.DefaultTransport = googleOAuthRoundTripFunc(func(r *http.Request) (*http.Response, error) {
+				if r.URL.String() != "https://teatak.com/gmail/exchange" {
+					return previous.RoundTrip(r)
+				}
+				data, _ := json.Marshal(map[string]any{"access_token": "new-access", "expires_in": 3600, "id_token": jwt})
+				return &http.Response{StatusCode: 200, Body: io.NopCloser(bytes.NewReader(data)), Header: make(http.Header)}, nil
+			})
+			defer func() { http.DefaultTransport = previous }()
+			started := req(t, http.MethodPost, srv.URL+"/plugin-oauth/start", map[string]string{"pluginID": "gmail", "connectionID": "saved-gmail"})
+			defer started.Body.Close()
+			if started.StatusCode != 200 {
+				t.Fatal(started.StatusCode)
+			}
+			var body struct {
+				AuthorizationURL string `json:"authorizationURL"`
+			}
+			if err := json.NewDecoder(started.Body).Decode(&body); err != nil {
+				t.Fatal(err)
+			}
+			u, err := url.Parse(body.AuthorizationURL)
+			if err != nil {
+				t.Fatal(err)
+			}
+			response := req(t, http.MethodGet, srv.URL+"/oauth/callback/gmail?code=fixture&state="+url.QueryEscape(u.Query().Get("state")), nil)
+			defer response.Body.Close()
+			if response.StatusCode != 200 {
+				t.Fatal(response.StatusCode)
+			}
+			saved, err := cfg.GetPluginConnection(context.Background(), "saved-gmail")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if saved.Auth.AccessToken != "new-access" {
+				t.Fatal("access token not updated")
+			}
+			if sameAccount {
+				if saved.Auth.RefreshToken != "saved-refresh" || !saved.Auth.RefreshExpiresAt.Equal(original.Auth.RefreshExpiresAt) {
+					t.Fatal("lost existing refresh token")
+				}
+			} else if saved.Auth.RefreshToken != "" {
+				t.Fatal("copied refresh token across accounts")
+			}
+		})
 	}
 }

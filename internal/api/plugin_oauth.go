@@ -189,7 +189,7 @@ var pluginOAuthProviders = map[string]pluginOAuthProvider{
 		PluginID:     "gmail",
 		ClientID:     "226317408426-s2jpl76do0qegl9vesjn1osrkbos1t9o.apps.googleusercontent.com",
 		AuthorizeURL: "https://accounts.google.com/o/oauth2/v2/auth",
-		ExchangeURL:  "https://oauth.x-t.top/gmail/exchange",
+		ExchangeURL:  oauthbroker.GmailExchangeURL,
 		Scopes: []string{
 			"openid",
 			"email",
@@ -378,6 +378,9 @@ func (s *Server) pluginOAuthCallback(c *cart.Context) error {
 	if token.ExpiresIn > 0 {
 		auth.ExpiresAt = time.Now().Add(time.Duration(token.ExpiresIn) * time.Second)
 	}
+	if token.RefreshTokenExpiresIn > 0 {
+		auth.RefreshExpiresAt = time.Now().Add(time.Duration(token.RefreshTokenExpiresIn) * time.Second)
+	}
 	targetID := start.ConnectionID
 	name := strings.TrimSpace(start.ConnectionName)
 	var account *plugin.ConnectionAccount
@@ -387,8 +390,13 @@ func (s *Server) pluginOAuthCallback(c *cart.Context) error {
 			connections, err := cfg.ListPluginConnections(c.Request.Context())
 			if err == nil {
 				for _, connection := range connections {
-					if connection == nil || connection.PluginID != start.PluginID || connection.Auth.Type != plugin.AuthTypeOAuth2 || connection.Account == nil || connection.Account.ID != account.ID || connection.ID == targetID {
+					if connection == nil || connection.PluginID != start.PluginID || connection.Auth.Type != plugin.AuthTypeOAuth2 || connection.Account == nil || connection.Account.ID != account.ID {
 						continue
+					}
+					// Google may omit refresh_token when the account already granted access.
+					if auth.RefreshToken == "" {
+						auth.RefreshToken = connection.Auth.RefreshToken
+						auth.RefreshExpiresAt = connection.Auth.RefreshExpiresAt
 					}
 					targetID = connection.ID
 					if strings.TrimSpace(connection.Name) != "" {

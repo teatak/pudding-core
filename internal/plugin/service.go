@@ -65,6 +65,8 @@ func (e *EndpointResolveError) Error() string {
 		return ""
 	}
 	switch e.Reason {
+	case "connection_reauthorization_required":
+		return "the saved connection cannot be refreshed; reconnect or reauthorize this account"
 	case "connection_required":
 		return "a usable connection is required for this chat; inspect the available accounts and call builtin_plugin_load with plugin_id and connection_id to select one matching the user's intent. If the account is ambiguous, ask the user in chat"
 	case "connection_not_found":
@@ -752,7 +754,7 @@ func (s *Service) readyEndpointBinding(ctx context.Context, binding *EndpointBin
 }
 
 func (s *Service) refreshConnectionIfNeeded(ctx context.Context, connection *Connection) (*Connection, error) {
-	if connection == nil || connection.PluginID != "github" || connection.Auth.Type != AuthTypeOAuth2 {
+	if connection == nil || (connection.PluginID != "github" && connection.PluginID != "gmail") || connection.Auth.Type != AuthTypeOAuth2 {
 		return CloneConnection(connection), nil
 	}
 	if githubAppReauthorizationRequired(connection) {
@@ -761,10 +763,6 @@ func (s *Service) refreshConnectionIfNeeded(ctx context.Context, connection *Con
 	if connection.Auth.ExpiresAt.IsZero() || time.Now().Add(2*time.Minute).Before(connection.Auth.ExpiresAt) {
 		return CloneConnection(connection), nil
 	}
-	if strings.TrimSpace(connection.Auth.RefreshToken) == "" {
-		return nil, ErrConnectionReauthorizationRequired
-	}
-
 	s.authMu.Lock()
 	defer s.authMu.Unlock()
 	current, err := s.connectionStore.GetPluginConnection(ctx, connection.ID)
@@ -777,17 +775,34 @@ func (s *Service) refreshConnectionIfNeeded(ctx context.Context, connection *Con
 	if current.Auth.ExpiresAt.IsZero() || time.Now().Add(2*time.Minute).Before(current.Auth.ExpiresAt) {
 		return current, nil
 	}
-	token, err := s.oauthBroker.Refresh(ctx, "github", current.Auth.RefreshToken)
+	if strings.TrimSpace(current.Auth.RefreshToken) == "" || (!current.Auth.RefreshExpiresAt.IsZero() && !time.Now().Before(current.Auth.RefreshExpiresAt)) {
+		return nil, ErrConnectionReauthorizationRequired
+	}
+	token, err := s.oauthBroker.Refresh(ctx, current.PluginID, current.Auth.RefreshToken)
 	if err != nil {
-		return nil, fmt.Errorf("refresh github connection %q: %w", current.ID, err)
+		var failure *oauthbroker.ResponseError
+		if current.PluginID == "gmail" && errors.As(err, &failure) && (failure.StatusCode == 400 || failure.StatusCode == 401) && failure.Code == "invalid_grant" {
+			return nil, ErrConnectionReauthorizationRequired
+		}
+		return nil, fmt.Errorf("refresh %s connection %q: %w", current.PluginID, current.ID, err)
+	}
+	if current.PluginID == "gmail" && token.ExpiresIn <= 0 {
+		return nil, errors.New("gmail token refresh returned no valid expiry")
 	}
 	current.Auth.AccessToken = token.AccessToken
 	if token.RefreshToken != "" {
 		current.Auth.RefreshToken = token.RefreshToken
 	}
-	current.Auth.TokenType = token.TokenType
+	if token.TokenType != "" {
+		current.Auth.TokenType = token.TokenType
+	}
+	if token.Scope != "" {
+		current.Auth.Scopes = strings.Fields(token.Scope)
+	}
 	current.Auth.ExpiresAt = expiryFromDuration(token.ExpiresIn)
-	current.Auth.RefreshExpiresAt = expiryFromDuration(token.RefreshTokenExpiresIn)
+	if token.RefreshTokenExpiresIn > 0 {
+		current.Auth.RefreshExpiresAt = expiryFromDuration(token.RefreshTokenExpiresIn)
+	}
 	if err := s.connectionStore.PutPluginConnection(ctx, current); err != nil {
 		return nil, err
 	}

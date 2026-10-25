@@ -13,6 +13,8 @@ import (
 )
 
 const DefaultBaseURL = "https://teatak.com"
+const GmailExchangeURL = DefaultBaseURL + "/gmail/exchange"
+const GmailRefreshURL = DefaultBaseURL + "/gmail/refresh"
 
 type Client struct {
 	baseURL    string
@@ -49,6 +51,22 @@ type TokenResponse struct {
 type errorResponse struct {
 	Error            string `json:"error"`
 	ErrorDescription string `json:"error_description"`
+}
+
+type ResponseError struct {
+	StatusCode  int
+	Code        string
+	Description string
+}
+
+func (e *ResponseError) Error() string {
+	if e.Description != "" {
+		return e.Description
+	}
+	if e.Code != "" {
+		return e.Code
+	}
+	return fmt.Sprintf("oauth broker request failed: HTTP %d", e.StatusCode)
 }
 
 func New(baseURL string, httpClient *http.Client) *Client {
@@ -89,7 +107,11 @@ func (c *Client) Redeem(ctx context.Context, ticket, verifier string) (*TokenRes
 
 func (c *Client) Refresh(ctx context.Context, provider, refreshToken string) (*TokenResponse, error) {
 	var out TokenResponse
-	if err := c.postJSON(ctx, "/oauth/refresh", map[string]string{
+	target := c.baseURL + "/oauth/refresh"
+	if provider == "gmail" {
+		target = GmailRefreshURL
+	}
+	if err := c.postJSONURL(ctx, target, map[string]string{
 		"provider":      provider,
 		"refresh_token": refreshToken,
 	}, &out); err != nil {
@@ -109,11 +131,15 @@ func (c *Client) Revoke(ctx context.Context, provider, accessToken string) error
 }
 
 func (c *Client) postJSON(ctx context.Context, path string, input, output any) error {
+	return c.postJSONURL(ctx, c.baseURL+path, input, output)
+}
+
+func (c *Client) postJSONURL(ctx context.Context, target string, input, output any) error {
 	body, err := json.Marshal(input)
 	if err != nil {
 		return err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+path, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, target, bytes.NewReader(body))
 	if err != nil {
 		return err
 	}
@@ -131,13 +157,7 @@ func (c *Client) postJSON(ctx context.Context, path string, input, output any) e
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		var failure errorResponse
 		_ = json.Unmarshal(data, &failure)
-		if strings.TrimSpace(failure.ErrorDescription) != "" {
-			return errors.New(failure.ErrorDescription)
-		}
-		if strings.TrimSpace(failure.Error) != "" {
-			return errors.New(failure.Error)
-		}
-		return fmt.Errorf("oauth broker request failed: %s", resp.Status)
+		return &ResponseError{StatusCode: resp.StatusCode, Code: failure.Error, Description: failure.ErrorDescription}
 	}
 	if output == nil || len(bytes.TrimSpace(data)) == 0 {
 		return nil
