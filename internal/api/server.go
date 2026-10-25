@@ -365,6 +365,7 @@ func (s *Server) Handler(token string, static http.Handler) http.Handler {
 	app.Route("/plugin-assets/*path").GET(s.getPluginAsset)
 	app.Route("/plugin-skills/*path").GET(s.getPluginSkill)
 	app.Route("/plugin-connections").GET(s.listPluginConnections)
+	app.Route("/plugin-connections/:id/login").POST(s.loginPluginConnection)
 	app.Route("/plugin-connections/:id").GET(s.getPluginConnection).PUT(s.putPluginConnection).DELETE(s.deletePluginConnection)
 	app.Route("/plugin-oauth/start").POST(s.startPluginOAuth)
 	app.Route("/plugin-oauth/complete").POST(s.completePluginOAuth)

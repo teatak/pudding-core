@@ -324,6 +324,9 @@ func ValidateDefinition(def *Definition) error {
 	if err := ValidateConnectionConfig(def.Connection); err != nil {
 		return err
 	}
+	if err := validateSessionLogins(def); err != nil {
+		return err
+	}
 	if err := ValidateAuthConnectionFields(def.Auth, def.Connection); err != nil {
 		return err
 	}
@@ -422,6 +425,9 @@ func ValidateAuthConfig(auth *AuthConfig) error {
 			return fmt.Errorf("duplicate auth method %q", id)
 		}
 		seen[id] = struct{}{}
+		if method.Session != nil && method.Type != AuthTypeSession {
+			return fmt.Errorf("session configuration requires session auth")
+		}
 		switch strings.TrimSpace(method.Type) {
 		case AuthTypeNone:
 			if auth.Required {
@@ -430,6 +436,10 @@ func ValidateAuthConfig(auth *AuthConfig) error {
 		case AuthTypeBearer, AuthTypeToken, AuthTypeBasic, AuthTypeHeader, AuthTypeOAuth2:
 			if method.TokenExchange != nil {
 				return fmt.Errorf("auth method %q token_exchange is only valid for type %q", id, AuthTypeTokenExchange)
+			}
+		case AuthTypeSession:
+			if method.Session == nil || method.TokenExchange != nil {
+				return fmt.Errorf("session login configuration is required")
 			}
 		case AuthTypeTokenExchange:
 			if err := ValidateTokenExchange(method.TokenExchange); err != nil {

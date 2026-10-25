@@ -59,6 +59,17 @@ func (m *Manager) GetPluginConnection(_ context.Context, id string) (*plugin.Con
 func (m *Manager) PutPluginConnection(_ context.Context, conn *plugin.Connection) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	return m.putPluginConnection(conn, nil)
+}
+
+// The revision check and write share the storage lock, so delayed logins cannot overwrite edits.
+func (m *Manager) PutPluginConnectionIfUnchanged(_ context.Context, conn *plugin.Connection, expected time.Time) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.putPluginConnection(conn, &expected)
+}
+
+func (m *Manager) putPluginConnection(conn *plugin.Connection, expected *time.Time) error {
 	id := strings.TrimSpace(conn.ID)
 	if id == "" || strings.ContainsAny(id, "/ ") {
 		return store.ErrNotFound
@@ -73,6 +84,9 @@ func (m *Manager) PutPluginConnection(_ context.Context, conn *plugin.Connection
 	}
 	now := time.Now()
 	existing := cfg.Connections[id]
+	if expected != nil && ((existing == nil && !expected.IsZero()) || (existing != nil && !existing.UpdatedAt.Equal(*expected))) {
+		return fmt.Errorf("%w: connection changed during login", ErrInvalidSetting)
+	}
 	if existing != nil && (store.CurrentPluginID(existing.PluginID) != conn.PluginID || existing.Auth.MethodID != conn.Auth.MethodID || existing.Auth.Type != conn.Auth.Type) {
 		for _, bindings := range cfg.Bindings {
 			for _, selected := range bindings {

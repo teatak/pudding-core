@@ -28,6 +28,7 @@ const (
 	AuthTypeHeader        = "header"
 	AuthTypeOAuth2        = "oauth2"
 	AuthTypeTokenExchange = "token_exchange"
+	AuthTypeSession       = "session"
 
 	GitHubAppAuthMethodID = "github-app"
 	GitHubPATAuthMethodID = "github-pat"
@@ -84,6 +85,7 @@ type AuthConfig struct {
 }
 
 type AuthMethod struct {
+	Session       *SessionLoginSpec  `json:"session,omitempty" yaml:"session,omitempty"`
 	ID            string             `json:"id,omitempty" yaml:"id,omitempty"`
 	Type          string             `json:"type" yaml:"type"`
 	Provider      string             `json:"provider,omitempty" yaml:"provider,omitempty"`
@@ -245,20 +247,21 @@ type ConnectionDetailView struct {
 }
 
 type Auth struct {
-	MethodID         string    `json:"methodID,omitempty" yaml:"method_id,omitempty"`
-	Type             string    `json:"type" yaml:"type"` // none | bearer | token | basic | header | oauth2
-	Variant          string    `json:"variant,omitempty" yaml:"variant,omitempty"`
-	Token            string    `json:"-" yaml:"token,omitempty"`
-	AccessToken      string    `json:"-" yaml:"access_token,omitempty"`
-	RefreshToken     string    `json:"-" yaml:"refresh_token,omitempty"`
-	TokenType        string    `json:"tokenType,omitempty" yaml:"token_type,omitempty"`
-	ExpiresAt        time.Time `json:"expiresAt,omitempty" yaml:"expires_at,omitempty"`
-	RefreshExpiresAt time.Time `json:"refreshExpiresAt,omitempty" yaml:"refresh_expires_at,omitempty"`
-	Scopes           []string  `json:"scopes,omitempty" yaml:"scopes,omitempty"`
-	Prefix           string    `json:"prefix,omitempty" yaml:"prefix,omitempty"`
-	Header           string    `json:"header,omitempty" yaml:"header,omitempty"`
-	Username         string    `json:"-" yaml:"username,omitempty"`
-	Password         string    `json:"-" yaml:"password,omitempty"`
+	SessionEstablished bool      `json:"-" yaml:"session_established,omitempty"`
+	MethodID           string    `json:"methodID,omitempty" yaml:"method_id,omitempty"`
+	Type               string    `json:"type" yaml:"type"` // none | bearer | token | basic | header | oauth2
+	Variant            string    `json:"variant,omitempty" yaml:"variant,omitempty"`
+	Token              string    `json:"-" yaml:"token,omitempty"`
+	AccessToken        string    `json:"-" yaml:"access_token,omitempty"`
+	RefreshToken       string    `json:"-" yaml:"refresh_token,omitempty"`
+	TokenType          string    `json:"tokenType,omitempty" yaml:"token_type,omitempty"`
+	ExpiresAt          time.Time `json:"expiresAt,omitempty" yaml:"expires_at,omitempty"`
+	RefreshExpiresAt   time.Time `json:"refreshExpiresAt,omitempty" yaml:"refresh_expires_at,omitempty"`
+	Scopes             []string  `json:"scopes,omitempty" yaml:"scopes,omitempty"`
+	Prefix             string    `json:"prefix,omitempty" yaml:"prefix,omitempty"`
+	Header             string    `json:"header,omitempty" yaml:"header,omitempty"`
+	Username           string    `json:"-" yaml:"username,omitempty"`
+	Password           string    `json:"-" yaml:"password,omitempty"`
 }
 
 type EndpointBinding struct {
@@ -280,7 +283,7 @@ func ViewConnection(c *Connection) ConnectionView {
 	if c == nil {
 		return ConnectionView{}
 	}
-	reauthorizationRequired := githubAppReauthorizationRequired(c)
+	reauthorizationRequired := githubAppReauthorizationRequired(c) || (c.Auth.Type == AuthTypeSession && (!c.Auth.SessionEstablished || (!c.Auth.ExpiresAt.IsZero() && !time.Now().Before(c.Auth.ExpiresAt))))
 	return ConnectionView{
 		ID:                      c.ID,
 		Name:                    c.Name,
@@ -288,7 +291,7 @@ func ViewConnection(c *Connection) ConnectionView {
 		AuthType:                c.Auth.Type,
 		AuthMethodID:            c.Auth.MethodID,
 		AuthVariant:             c.Auth.Variant,
-		TokenSet:                !reauthorizationRequired && (c.Auth.Token != "" || c.Auth.AccessToken != "" || c.Auth.Password != ""),
+		TokenSet:                !reauthorizationRequired && (c.Auth.Token != "" || c.Auth.AccessToken != "" || c.Auth.Password != "" || c.Auth.SessionEstablished),
 		Account:                 cloneConnectionAccount(c.Account),
 		ReauthorizationRequired: reauthorizationRequired,
 		Header:                  c.Auth.Header,
@@ -301,9 +304,13 @@ func ViewConnectionDetail(c *Connection) ConnectionDetailView {
 	if c == nil {
 		return ConnectionDetailView{}
 	}
+	fields := cloneStringMap(c.Fields)
+	if c.Auth.Type == AuthTypeSession {
+		fields = nil
+	}
 	return ConnectionDetailView{
 		ConnectionView: ViewConnection(c),
-		Fields:         cloneStringMap(c.Fields),
+		Fields:         fields,
 		EndpointURLs:   cloneStringMap(c.EndpointURLs),
 		Token:          c.Auth.Token,
 		Prefix:         c.Auth.Prefix,
@@ -420,6 +427,7 @@ func CloneEndpoint(in Endpoint) Endpoint {
 
 func CloneAuthMethod(in AuthMethod) AuthMethod {
 	out := in
+	out.Session = cloneSessionLogin(in.Session)
 	if in.TokenExchange != nil {
 		exchange := *in.TokenExchange
 		exchange.BodyFields = cloneStringMap(in.TokenExchange.BodyFields)

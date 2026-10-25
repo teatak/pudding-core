@@ -1238,7 +1238,17 @@ export const pluginIconSpec = z.object({
 });
 export type PluginIconSpec = z.infer<typeof pluginIconSpec>;
 
+export const pluginSessionLogin = z.object({
+  endpoint: z.string(), path: z.string(), encoding: z.enum(["form", "json"]),
+  inputs: z.array(z.object({ id: z.string(), label: z.string().optional(), secret: z.boolean().optional(), required: z.boolean().optional() })),
+  parameters: z.record(z.string(), z.string()).optional(),
+  bodyFields: z.record(z.string(), z.string()), outputs: z.record(z.string(), z.string()),
+  accountInput: z.string().optional(), successField: z.string().optional(), errorCodeField: z.string().optional(),
+  challenges: z.record(z.string(), z.array(z.string())).optional(), expiresInField: z.string().optional(),
+});
+
 export const pluginAuthMethod = z.object({
+  session: pluginSessionLogin.optional(),
   id: z.string().optional(),
   type: z.string(),
   provider: z.string().optional(),
@@ -1350,6 +1360,12 @@ export const pluginConnection = z.object({
   updatedAt: z.string().optional(),
 });
 export type PluginConnection = z.infer<typeof pluginConnection>;
+
+export const pluginSessionLoginResponse = z.discriminatedUnion("status", [
+  z.object({ status: z.literal("success"), connection: pluginConnection }),
+  z.object({ status: z.literal("challenge"), code: z.string(), inputs: z.array(z.string()) }),
+  z.object({ status: z.literal("error"), code: z.string() }),
+]);
 
 export const pluginMCPTool = z.object({
   name: z.string(),

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"reflect"
 	"strings"
 	"time"
 
@@ -19,6 +20,7 @@ type pluginConnectionConfig interface {
 	ListPluginConnections(ctx context.Context) ([]*plugin.Connection, error)
 	GetPluginConnection(ctx context.Context, id string) (*plugin.Connection, error)
 	PutPluginConnection(ctx context.Context, conn *plugin.Connection) error
+	PutPluginConnectionIfUnchanged(ctx context.Context, conn *plugin.Connection, expected time.Time) error
 	DeletePluginConnection(ctx context.Context, id string) error
 }
 
@@ -551,6 +553,21 @@ func (s *Server) putPluginConnection(c *cart.Context) error {
 	var existing *plugin.Connection
 	if found, err := cfg.GetPluginConnection(c.Request.Context(), id); err == nil {
 		existing = found
+	}
+	if method.Type == plugin.AuthTypeSession {
+		if existing == nil || existing.PluginID != pluginID || !samePluginConnectionAuthMethod(existing.Auth, method) {
+			return badRequest(c, "session credentials must be acquired through login")
+		}
+		if (req.EndpointURLs != nil && !reflect.DeepEqual(req.EndpointURLs, existing.EndpointURLs)) || len(req.Fields) > 0 {
+			return badRequest(c, "login is required to change session credentials or endpoint")
+		}
+		conn := plugin.CloneConnection(existing)
+		conn.Name = strings.TrimSpace(req.Name)
+		if err := cfg.PutPluginConnectionIfUnchanged(c.Request.Context(), conn, existing.UpdatedAt); err != nil {
+			return s.fail(c, err)
+		}
+		c.JSON(http.StatusOK, plugin.ViewConnection(conn))
+		return nil
 	}
 	fields, err := normalizePluginConnectionFields(def.Connection, req.Fields, existing)
 	if err != nil {

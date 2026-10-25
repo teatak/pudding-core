@@ -795,6 +795,11 @@ func ApplyEndpointAuth(headers http.Header, auth plugin.Auth) error {
 	switch strings.TrimSpace(auth.Type) {
 	case "", "none":
 		return nil
+	case plugin.AuthTypeSession:
+		if !auth.SessionEstablished {
+			return errors.New("session login is required")
+		}
+		return nil
 	case "bearer":
 		token := strings.TrimSpace(auth.Token)
 		if token == "" {
