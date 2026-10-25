@@ -288,3 +288,77 @@ responses and client configuration errors leave credentials and account bindings
 intact and are reported as refresh failures. A Gmail API 401 alone does not prove
 that the refresh token is revoked. Deploy the OAuth worker's `/gmail/refresh`
 route before distributing this Core change.
+
+## Interactive session login
+
+Protocol 52 adds `auth.methods[].type: session` for non-OAuth services that return
+session credentials from a form or JSON login. This is a declarative HTTP flow,
+not executable plugin code. `token_exchange` remains the automatic, single-token
+exchange used at request time.
+
+```yaml
+auth:
+  required: true
+  methods:
+    - id: account-login
+      type: session
+      session:
+        endpoint: private_api
+        path: /login
+        encoding: form
+        inputs:
+          - {id: account, label: Account, required: true}
+          - {id: password, label: Password, required: true, secret: true}
+          - {id: otp, label: Verification code, secret: true}
+        parameters: {action: login}
+        body_fields: {username: account, password: password, otp: otp}
+        success_field: success
+        error_code_field: error.code
+        challenges: {"otp_required": [otp]}
+        outputs: {sid: data.sid}
+        account_input: account
+connection:
+  fields:
+    - id: sid
+      required: true
+      secret: true
+      inject: [{target: header, name: X-Session-ID}]
+endpoints:
+  private_api:
+    kind: rest
+    url: https://server.example/api
+    url_config: {label: Server URL, required: true}
+```
+
+`POST /plugin-connections/:id/login` accepts `{pluginID, name, authMethodID,
+endpointURLs, inputs}`. It returns `{status: "success", connection}`, or
+`{status: "challenge", code, inputs: [fieldID]}`, or `{status: "error", code}`.
+These are settings operations, not model tools. Login inputs are never written
+to connection storage. A challenge identifies declared inputs for the desktop
+form; the next attempt explicitly submits them with the original login inputs.
+It does not create a connection or retain an unfinished server-side login.
+
+Core posts to the selected endpoint plus the declared relative path, with a
+15-second timeout, a 64 KiB response limit and no redirects. Use HTTPS to protect
+passwords in transit; TLS verification stays enabled. Inputs preserve exact
+values, including password whitespace. Raw provider errors and credentials are
+not returned to the desktop. A configured `success_field` must be JSON `true`;
+`outputs` map response JSON paths to declared secret connection fields, with at
+least one required credential. Optional omitted outputs replace, rather than
+inherit, values from the previous account. `expires_in_field`, when supplied,
+must be a positive number of seconds (at most one year).
+
+Core saves the validated fields, account and expiry in one existing atomic
+connection write, checking the prior revision while holding the storage lock.
+A failed login leaves the old connection untouched; concurrent changes yield
+HTTP 409. Session connection detail responses omit managed credential fields.
+Saving a name change does not log in again; changing the endpoint requires login.
+Local credential storage follows the existing restricted-permission connection
+file; `secret` does not promise encryption at rest.
+
+The initial implementation does not retain passwords or trusted-device tokens
+for automatic re-login, run scripts, or replay failed business requests. An
+expired session requires an explicit sign-in in settings. Cookie-based flows,
+multi-request challenges and per-request signatures are not part of this
+contract. Synology uses this flow with SID and optional SynoToken outputs;
+its protocol details stay in the plugin manifest, outside Core.

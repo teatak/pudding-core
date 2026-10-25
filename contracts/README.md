@@ -18,6 +18,14 @@ history and memory and uses the existing profile revision. Communication prefere
 are managed through `builtin_assistant_memory` using `communication_preference`.
 No new wire fields or schema change are required for these tools.
 
+Protocol 52 adds declarative `session` plugin authentication and
+`POST /plugin-connections/:id/login`. Login returns success with a connection
+summary, challenge with declared input IDs, or a sanitized error code. Passwords
+and OTP inputs are transient; managed session credentials are omitted from
+connection detail responses. Core validates outputs and uses a revision-checked
+atomic write. Update Core and Desktop together before installing plugins using
+this method. Existing token exchange and OAuth methods remain unchanged.
+
 Protocol 51 expands appearance history to six distinct previous configurations, newest
 first. Existing history is preserved; no storage migration is needed. Update clients
 with the new array limit before consuming snapshots with more than three entries.

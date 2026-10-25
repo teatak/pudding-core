@@ -321,20 +321,21 @@ func ViewConnectionDetail(c *Connection) ConnectionDetailView {
 
 func CloneAuth(in Auth) Auth {
 	return Auth{
-		MethodID:         in.MethodID,
-		Type:             in.Type,
-		Variant:          in.Variant,
-		Token:            in.Token,
-		AccessToken:      in.AccessToken,
-		RefreshToken:     in.RefreshToken,
-		TokenType:        in.TokenType,
-		ExpiresAt:        in.ExpiresAt,
-		RefreshExpiresAt: in.RefreshExpiresAt,
-		Scopes:           append([]string(nil), in.Scopes...),
-		Prefix:           in.Prefix,
-		Header:           in.Header,
-		Username:         in.Username,
-		Password:         in.Password,
+		SessionEstablished: in.SessionEstablished,
+		MethodID:           in.MethodID,
+		Type:               in.Type,
+		Variant:            in.Variant,
+		Token:              in.Token,
+		AccessToken:        in.AccessToken,
+		RefreshToken:       in.RefreshToken,
+		TokenType:          in.TokenType,
+		ExpiresAt:          in.ExpiresAt,
+		RefreshExpiresAt:   in.RefreshExpiresAt,
+		Scopes:             append([]string(nil), in.Scopes...),
+		Prefix:             in.Prefix,
+		Header:             in.Header,
+		Username:           in.Username,
+		Password:           in.Password,
 	}
 }
 

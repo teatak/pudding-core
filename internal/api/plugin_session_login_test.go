@@ -172,7 +172,7 @@ auth:
 	if err := st.CreateSession(ctx, &store.Session{ID: "chat", Provider: "mock", Model: "mock"}); err != nil {
 		t.Fatal(err)
 	}
-	fresh := plugin.NewService(home, config.NewManager(home))
+	fresh := plugin.NewService(home, config.NewManager(home)).WithSessionConnections(st)
 	binding, err := fresh.ResolveEndpoint(ctx, "chat", "appliance_api", "")
 	if err != nil {
 		t.Fatal(err)

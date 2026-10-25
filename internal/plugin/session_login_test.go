@@ -36,8 +36,12 @@ func TestValidateSessionLogin(t *testing.T) {
 			}
 		})
 	}
-	clone := CloneAuthMethod(loginDefinition().Auth.Methods[0])
+	original := loginDefinition().Auth.Methods[0]
+	clone := CloneAuthMethod(original)
 	clone.Session.Outputs["sid"] = "new.path"
+	if original.Session.Outputs["sid"] != "result.session" {
+		t.Fatal("clone shared session output map")
+	}
 }
 func TestAcquireSessionJSONAndFailureBoundaries(t *testing.T) {
 	spec := loginDefinition().Auth.Methods[0].Session
@@ -88,5 +92,23 @@ func TestAcquireSessionJSONAndFailureBoundaries(t *testing.T) {
 	cancel()
 	if result := AcquireSession(ctx, http.DefaultClient, spec, provider.URL, map[string]string{"password": " secret "}); result.Status != "error" {
 		t.Fatal("ignored cancellation")
+	}
+}
+
+func TestSessionCredentialRotationKeepsAccountBinding(t *testing.T) {
+	original := &Connection{ID: "nas", PluginID: "fixture", Auth: Auth{Type: AuthTypeSession, SessionEstablished: true}, Account: &ConnectionAccount{Login: "alice"}, Fields: map[string]string{"sid": "old"}, EndpointURLs: map[string]string{"api": "https://nas.test/api"}}
+	rotated := CloneConnection(original)
+	rotated.Fields["sid"] = "new"
+	if connectionIdentity(original) != connectionIdentity(rotated) {
+		t.Fatal("credential rotation invalidated account binding")
+	}
+	rotated.Account.Login = "bob"
+	if connectionIdentity(original) == connectionIdentity(rotated) {
+		t.Fatal("different account kept binding")
+	}
+	rotated = CloneConnection(original)
+	rotated.EndpointURLs["api"] = "https://other.test/api"
+	if connectionIdentity(original) == connectionIdentity(rotated) {
+		t.Fatal("different server kept binding")
 	}
 }

@@ -52,6 +52,10 @@ func connectionIdentity(c *Connection) string {
 			identity.AccountID = c.Account.Login
 		}
 	}
+	if c.Auth.Type == AuthTypeSession && identity.AccountID != "" {
+		// Session credential rotation does not change the account grant.
+		identity.Fields = nil
+	}
 	if identity.AccountID == "" {
 		// Without a verified account identity, replacement credentials may be a
 		// different account. Re-select instead of silently carrying its chat grant.
