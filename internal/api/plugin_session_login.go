@@ -35,7 +35,10 @@ func (s *Server) loginPluginConnection(c *cart.Context) error {
 	}
 	def, err := s.getPluginDefinition(c.Request.Context(), req.PluginID)
 	if err != nil {
-		return badRequest(c, "plugin not found")
+		if errors.Is(err, plugin.ErrNotFound) {
+			return badRequest(c, "plugin not found")
+		}
+		return s.fail(c, err)
 	}
 	method, ok := plugin.FindAuthMethod(def, req.AuthMethodID, plugin.AuthTypeSession)
 	if !ok || method.Type != plugin.AuthTypeSession {

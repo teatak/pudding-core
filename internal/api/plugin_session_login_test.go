@@ -78,7 +78,7 @@ endpoints:
   appliance_api:
     kind: rest
     url: https://example.invalid/api
-    url_config: {required: true}
+    url_config: {required: true, label: Server}
 auth:
   required: true
   methods:
@@ -107,7 +107,9 @@ auth:
 	if err := os.WriteFile(filepath.Join(dir, "plugin.yaml"), []byte(definition), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := plugin.LoadUserDefinitions(filepath.Join(home,"plugins")); err != nil { t.Fatal(err) }
+	if _, err := plugin.LoadUserDefinitions(filepath.Join(home, "plugins")); err != nil {
+		t.Fatal(err)
+	}
 	st := storetest.New(t)
 	hub := event.NewHub()
 	plugins := plugin.NewService(home, cfg)
