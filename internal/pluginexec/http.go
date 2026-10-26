@@ -157,7 +157,10 @@ func (r *Executor) GraphQL(ctx context.Context, binding *plugin.EndpointBinding,
 	return r.Do(ctx, payload)
 }
 
-func (r *Executor) Do(ctx context.Context, payload RequestPayload) map[string]any {
+func (r *Executor) Do(ctx context.Context, payload RequestPayload) (result map[string]any) {
+	secrets := endpointCredentials(payload.Auth, payload.ConnectionFields, payload.ConnectionFieldDefs)
+	defer func() { redactEndpointResult(result, secrets) }()
+
 	if payload.MaxResponseBytes <= 0 {
 		payload.MaxResponseBytes = endpointMaxResponseBytes
 	}
@@ -178,6 +181,7 @@ func (r *Executor) Do(ctx context.Context, payload RequestPayload) map[string]an
 	if err != nil {
 		return (map[string]any{"ok": false, "reason": "token_exchange_failed", "error": err.Error()})
 	}
+	secrets = append(secrets, endpointCredentials(resolvedAuth, nil, nil)...)
 	if err := ApplyEndpointAuth(req.Header, resolvedAuth); err != nil {
 		return (map[string]any{"ok": false, "reason": "auth_config_error", "error": err.Error()})
 	}

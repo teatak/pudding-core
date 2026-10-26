@@ -389,3 +389,11 @@ an endpoint's exception. TLS settings are supplied by saved connection bindings,
 not tool or widget arguments. Trust-policy changes invalidate schema caches and
 saved connection grants. The setting survives restart and never applies to a
 browser navigation or a NAS link opened outside Core.
+
+
+When an exception uses a plugin's default address, Core stores that effective
+address explicitly in `endpointURLs`. A plugin upgrade changing its default
+address cannot move the exception to another server. Managed credentials are
+redacted from textual HTTP results, including request URLs, echoed response
+headers/JSON and network errors, before returning them to tools or widgets.
+The outgoing request retains the real credentials.

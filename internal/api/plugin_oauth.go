@@ -279,11 +279,7 @@ func (s *Server) startPluginOAuth(c *cart.Context) error {
 	if endpointURLsInput == nil && existing != nil {
 		endpointURLsInput = existing.EndpointURLs
 	}
-	endpointURLs, err := plugin.NormalizeConnectionEndpointURLs(def, endpointURLsInput)
-	if err != nil {
-		return badRequest(c, err.Error())
-	}
-	endpointTLS, err := plugin.NormalizeConnectionEndpointInsecureTLS(def, endpointURLs, req.EndpointInsecureTLS, existing)
+	endpointURLs, endpointTLS, err := plugin.NormalizeConnectionEndpoints(def, endpointURLsInput, req.EndpointInsecureTLS, existing)
 	if err != nil {
 		return badRequest(c, err.Error())
 	}

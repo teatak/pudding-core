@@ -104,3 +104,30 @@ func NormalizeConnectionEndpointInsecureTLS(def *Definition, endpointURLs map[st
 	}
 	return out, nil
 }
+
+// NormalizeConnectionEndpoints also pins default addresses used by TLS
+// exceptions. A later plugin update cannot move an exception to a new server.
+func NormalizeConnectionEndpoints(def *Definition, values map[string]string, tlsValues map[string]bool, existing *Connection) (map[string]string, map[string]bool, error) {
+	urls, err := NormalizeConnectionEndpointURLs(def, values)
+	if err != nil {
+		return nil, nil, err
+	}
+	settings, err := NormalizeConnectionEndpointInsecureTLS(def, urls, tlsValues, existing)
+	if err != nil {
+		return nil, nil, err
+	}
+	for name := range settings {
+		if urls[name] != "" {
+			continue
+		}
+		address := strings.TrimRight(def.Endpoints[name].URL, "/")
+		if err := validateConnectionEndpointURL(address); err != nil {
+			return nil, nil, fmt.Errorf("endpoint %s URL: %w", name, err)
+		}
+		if urls == nil {
+			urls = map[string]string{}
+		}
+		urls[name] = address
+	}
+	return urls, settings, nil
+}

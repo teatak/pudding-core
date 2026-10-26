@@ -75,6 +75,7 @@ connection:
     - {id: sid, required: true, secret: true, inject: [{target: query, name: _sid}]}
     - {id: csrf, secret: true, inject: [{target: header, name: X-CSRF}]}
 endpoints:
+  optional_api: {kind: rest, url: 'https://optional.example/api', url_config: {label: Optional server}}
   appliance_api:
     kind: rest
     url: https://example.invalid/api
@@ -195,11 +196,14 @@ auth:
 		}
 	}
 	before := calls
-	rename := req(t, http.MethodPut, srv.URL+"/plugin-connections/nas", map[string]any{"pluginID": "appliance", "name": "Renamed", "authMethodID": "login", "authType": "session"})
+	rename := req(t, http.MethodPut, srv.URL+"/plugin-connections/nas", map[string]any{"pluginID": "appliance", "name": "Renamed", "authMethodID": "login", "authType": "session", "endpointURLs": map[string]string{"appliance_api": provider.URL + "/api", "optional_api": ""}})
 	if rename.StatusCode != 200 {
 		t.Fatal(rename.StatusCode, decodeJSON[map[string]any](t, rename))
 	}
-	rename.Body.Close()
+	renamed := decodeJSON[plugin.ConnectionView](t, rename)
+	if !renamed.UpdatedAt.After(saved.UpdatedAt) {
+		t.Fatal("rename response has stale revision")
+	}
 	if calls != before {
 		t.Fatal("rename performed login")
 	}

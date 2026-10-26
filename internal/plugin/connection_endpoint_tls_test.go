@@ -46,3 +46,22 @@ func TestConnectionEndpointTLSNormalization(t *testing.T) {
 		t.Fatal("trust policy change did not invalidate saved grant")
 	}
 }
+
+func TestTLSExceptionPinsDefaultAddressAcrossPluginUpdates(t *testing.T) {
+	def := &Definition{ID: "nas", Endpoints: map[string]Endpoint{"api": {Kind: EndpointKindREST, URL: "https://old-default.test/api", URLConfig: &EndpointURLConfig{Label: "Server"}}}}
+	urls, settings, err := NormalizeConnectionEndpoints(def, nil, map[string]bool{"api": true}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	connection := &Connection{PluginID: "nas", EndpointURLs: urls, EndpointInsecureTLS: settings}
+	endpoint := def.Endpoints["api"]
+	endpoint.URL = "https://new-default.test/api"
+	def.Endpoints["api"] = endpoint
+	binding := endpointBindingForConnection(def, "api", endpoint, connection)
+	if !binding.InsecureTLS || binding.Endpoint.URL != "https://old-default.test/api" {
+		t.Fatal("certificate exception followed plugin's changed default address", binding)
+	}
+	if len(urls) != 1 || len(settings) != 1 {
+		t.Fatal("missing explicit URL for TLS exception")
+	}
+}

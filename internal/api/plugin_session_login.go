@@ -56,14 +56,15 @@ func (s *Server) loginPluginConnection(c *cart.Context) error {
 		}
 		expected = existing.UpdatedAt
 	}
-	endpointURLs, err := plugin.NormalizeConnectionEndpointURLs(def, req.EndpointURLs)
+	endpointURLsInput := req.EndpointURLs
+	if endpointURLsInput == nil && existing != nil {
+		endpointURLsInput = existing.EndpointURLs
+	}
+	endpointURLs, endpointTLS, err := plugin.NormalizeConnectionEndpoints(def, endpointURLsInput, req.EndpointInsecureTLS, existing)
 	if err != nil {
 		return badRequest(c, err.Error())
 	}
-	endpointTLS, err := plugin.NormalizeConnectionEndpointInsecureTLS(def, endpointURLs, req.EndpointInsecureTLS, existing)
-	if err != nil {
-		return badRequest(c, err.Error())
-	}
+
 	baseURL := def.Endpoints[method.Session.Endpoint].URL
 	if value := endpointURLs[method.Session.Endpoint]; value != "" {
 		baseURL = value

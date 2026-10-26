@@ -559,19 +559,16 @@ func (s *Server) putPluginConnection(c *cart.Context) error {
 	if endpointURLsInput == nil && existing != nil && existing.PluginID == pluginID {
 		endpointURLsInput = existing.EndpointURLs
 	}
-	endpointURLs, err := plugin.NormalizeConnectionEndpointURLs(def, endpointURLsInput)
+	endpointURLs, endpointTLS, err := plugin.NormalizeConnectionEndpoints(def, endpointURLsInput, req.EndpointInsecureTLS, existing)
 	if err != nil {
 		return badRequest(c, err.Error())
 	}
-	endpointTLS, err := plugin.NormalizeConnectionEndpointInsecureTLS(def, endpointURLs, req.EndpointInsecureTLS, existing)
-	if err != nil {
-		return badRequest(c, err.Error())
-	}
+
 	if method.Type == plugin.AuthTypeSession {
 		if existing == nil || existing.PluginID != pluginID || !samePluginConnectionAuthMethod(existing.Auth, method) {
 			return badRequest(c, "session credentials must be acquired through login")
 		}
-		if (req.EndpointURLs != nil && !reflect.DeepEqual(req.EndpointURLs, existing.EndpointURLs)) || !reflect.DeepEqual(endpointTLS, existing.EndpointInsecureTLS) || len(req.Fields) > 0 {
+		if !reflect.DeepEqual(endpointURLs, existing.EndpointURLs) || !reflect.DeepEqual(endpointTLS, existing.EndpointInsecureTLS) || len(req.Fields) > 0 {
 			return badRequest(c, "login is required to change session credentials or endpoint")
 		}
 		conn := plugin.CloneConnection(existing)
@@ -579,7 +576,11 @@ func (s *Server) putPluginConnection(c *cart.Context) error {
 		if err := cfg.PutPluginConnectionIfUnchanged(c.Request.Context(), conn, existing.UpdatedAt); err != nil {
 			return s.fail(c, err)
 		}
-		c.JSON(http.StatusOK, plugin.ViewConnection(conn))
+		updated, err := cfg.GetPluginConnection(c.Request.Context(), id)
+		if err != nil {
+			return s.fail(c, err)
+		}
+		c.JSON(http.StatusOK, plugin.ViewConnection(updated))
 		return nil
 	}
 	fields, err := normalizePluginConnectionFields(def.Connection, req.Fields, existing)
