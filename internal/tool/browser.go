@@ -344,7 +344,7 @@ func (r *BuiltinRunner) browserClose(ctx context.Context, call Call) Result {
 				return browserToolError(out, err)
 			}
 		}
-		remaining, err := r.browser.ListTabs(ctx, call.SessionID)
+		remaining, err := r.browserTabs(ctx, call.SessionID)
 		if err != nil {
 			return browserToolError(out, err)
 		}
@@ -392,17 +392,37 @@ func (r *BuiltinRunner) browserReady(call Call, out Result) (Result, bool) {
 
 func (r *BuiltinRunner) browserResolveTabID(ctx context.Context, sessionID, tabID string) (string, error) {
 	tabID = strings.TrimSpace(tabID)
-	if tabID != "" {
-		return tabID, nil
+	if tabID == "" {
+		tabs, err := r.browserTabs(ctx, sessionID)
+		if err != nil {
+			return "", err
+		}
+		if len(tabs) != 1 {
+			return "", browser.ErrTabRequired
+		}
+		tabID = tabs[0].ID
 	}
-	tabs, err := r.browserTabs(ctx, sessionID)
+	// Recover only the requested page. Listing or closing saved tabs must not
+	// start their renderers, and explicit IDs must work before the UI opens them.
+	_, err := r.browser.GetTab(ctx, sessionID, tabID)
+	if !errors.Is(err, browser.ErrTabNotFound) || r.browserState == nil {
+		return tabID, err
+	}
+	state, err := r.browserState.GetBrowserTabState(ctx, sessionID, tabID)
+	if errors.Is(err, store.ErrNotFound) {
+		return "", browser.ErrTabNotFound
+	}
 	if err != nil {
 		return "", err
 	}
-	if len(tabs) != 1 {
-		return "", browser.ErrTabRequired
+	tab, err := r.browser.Recover(ctx, sessionID, browser.RecoverHint{
+		TabID: state.TabID, URL: state.URL, Title: state.Title,
+		FaviconURL: state.FaviconURL, Mode: state.Mode, CreatedAt: state.CreatedAt,
+	})
+	if err != nil {
+		return "", err
 	}
-	return tabs[0].ID, nil
+	return tab.ID, r.syncBrowserState(ctx, sessionID, tab)
 }
 
 func (r *BuiltinRunner) browserTabs(ctx context.Context, sessionID string) ([]browser.TabSnapshot, error) {
@@ -426,19 +446,10 @@ func (r *BuiltinRunner) browserTabs(ctx context.Context, sessionID string) ([]br
 		if _, ok := live[state.TabID]; ok {
 			continue
 		}
-		tab, err := r.browser.Recover(ctx, sessionID, browser.RecoverHint{
-			TabID:      state.TabID,
-			URL:        state.URL,
-			Title:      state.Title,
-			FaviconURL: state.FaviconURL,
-			Mode:       state.Mode,
-			CreatedAt:  state.CreatedAt,
-		})
-		if errors.Is(err, browser.ErrTabNotFound) {
-			continue
-		}
-		if err != nil {
-			return nil, err
+		tab := browser.TabSnapshot{
+			ID: state.TabID, SessionID: sessionID, URL: state.URL,
+			Title: state.Title, FaviconURL: state.FaviconURL,
+			Mode: r.browser.ProcessMode(ctx, sessionID), CreatedAt: state.CreatedAt, UpdatedAt: state.UpdatedAt,
 		}
 		live[tab.ID] = struct{}{}
 		tabs = append(tabs, tab)

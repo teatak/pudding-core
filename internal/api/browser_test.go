@@ -212,6 +212,16 @@ func TestBrowserRecoveryDiscardsExpiredFilePreviewWithoutBlockingWebTabs(t *test
 			if resp.StatusCode != http.StatusOK {
 				t.Fatalf("expired file preview blocked recovery: status=%d", resp.StatusCode)
 			}
+			if endpoint == "tabs" {
+				if svc.recoverCount != 0 {
+					t.Fatal("listing restored a page")
+				}
+				resp = req(t, http.MethodPost, srv.URL+"/sessions/preview_restart/browser/tabs/expired_file/recover", nil)
+				resp.Body.Close()
+				if resp.StatusCode == http.StatusOK {
+					t.Fatal("expired preview was restored")
+				}
+			}
 			states, err := st.ListBrowserStates(ctx, "preview_restart")
 			if err != nil || len(states) != 1 || states[0].TabID != "web" {
 				t.Fatalf("only inaccessible preview should be forgotten: states=%+v err=%v", states, err)
@@ -223,14 +233,14 @@ func TestBrowserRecoveryDiscardsExpiredFilePreviewWithoutBlockingWebTabs(t *test
 	}
 }
 
-func TestListBrowserTabsRecoversAllStoredTabs(t *testing.T) {
+func TestListBrowserTabsDefersStoredTabsUntilSelected(t *testing.T) {
 	srv, st, browserSvc := newBrowserTestServer(t)
 	browserSvc.supportsMetadataRecovery = true
 	ctx := context.Background()
 	if err := st.CreateSession(ctx, &store.Session{ID: "sess_restore_multi", Provider: "mock", Model: "mock"}); err != nil {
 		t.Fatal(err)
 	}
-	for index, tabID := range []string{"tab_restore_a", "tab_restore_b"} {
+	for index, tabID := range []string{"tab_restore_a", "tab_restore_b", "tab_restore_c"} {
 		if _, err := st.PutBrowserState(ctx, store.BrowserStateInput{
 			SessionID: "sess_restore_multi",
 			TabID:     tabID,
@@ -244,11 +254,38 @@ func TestListBrowserTabsRecoversAllStoredTabs(t *testing.T) {
 	listed := decodeJSON[struct {
 		Tabs []browser.TabSnapshot `json:"tabs"`
 	}](t, resp)
-	if resp.StatusCode != http.StatusOK || len(listed.Tabs) != 2 {
+	if resp.StatusCode != http.StatusOK || len(listed.Tabs) != 3 {
 		t.Fatalf("stored tabs were not recovered status=%d tabs=%+v", resp.StatusCode, listed.Tabs)
 	}
-	if browserSvc.recoverCount != 2 {
-		t.Fatalf("expected two recovered tabs, count=%d", browserSvc.recoverCount)
+	if browserSvc.recoverCount != 0 {
+		t.Fatalf("listing loaded saved pages, count=%d", browserSvc.recoverCount)
+	}
+	for _, tab := range listed.Tabs {
+		if tab.TargetID != "" {
+			t.Fatal("saved tab has a live target", tab)
+		}
+	}
+	resp = req(t, http.MethodPost, srv.URL+"/sessions/sess_restore_multi/browser/tabs/tab_restore_a/recover", nil)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || len(browserSvc.tabs) != 1 {
+		t.Fatalf("selection must load exactly one tab: status=%d tabs=%v", resp.StatusCode, browserSvc.tabs)
+	}
+	resp = req(t, http.MethodPost, srv.URL+"/sessions/sess_restore_multi/browser/tabs/tab_restore_b/release", nil)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent || len(browserSvc.tabs) != 1 {
+		t.Fatal("closing a dormant tab started a page", resp.StatusCode, browserSvc.tabs)
+	}
+	resp = req(t, http.MethodGet, srv.URL+"/sessions/sess_restore_multi/browser/tabs", nil)
+	listed = decodeJSON[struct {
+		Tabs []browser.TabSnapshot `json:"tabs"`
+	}](t, resp)
+	if resp.StatusCode != http.StatusOK || len(listed.Tabs) != 2 {
+		t.Fatalf("closing lost a dormant neighbour: %+v", listed)
+	}
+	for _, tab := range listed.Tabs {
+		if tab.ID == "tab_restore_b" {
+			t.Fatal("closed tab resurrected")
+		}
 	}
 }
 
@@ -1231,7 +1268,7 @@ func (f *fakeBrowserService) GetTab(_ context.Context, sessionID, tabID string) 
 }
 
 func (f *fakeBrowserService) Recover(_ context.Context, sessionID string, hint browser.RecoverHint) (browser.TabSnapshot, error) {
-	if err := f.recoverErrors[hint.TabID]; err != nil {
+	if err := f.recoverErrors[hint.TabID]; err != nil && hint.URL != "" {
 		return browser.TabSnapshot{}, err
 	}
 	if hint.TabID == "" {
