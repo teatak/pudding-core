@@ -46,7 +46,6 @@ type electronBridgeObserveRequest struct {
 type electronBridgeScreenshotRequest struct {
 	SessionID string `json:"sessionID"`
 	TabID     string `json:"tabID,omitempty"`
-	FullPage  bool   `json:"fullPage,omitempty"`
 }
 
 type electronBridgeClickRequest struct {
@@ -373,7 +372,7 @@ func (s *ElectronBridgeService) Observe(ctx context.Context, sessionID, tabID st
 	return out.result(), nil
 }
 
-func (s *ElectronBridgeService) Screenshot(ctx context.Context, sessionID, tabID string, opts ScreenshotOptions) (ScreenshotResult, error) {
+func (s *ElectronBridgeService) Screenshot(ctx context.Context, sessionID, tabID string) (ScreenshotResult, error) {
 	tabID, err := s.resolveTabID(ctx, sessionID, tabID, false)
 	if err != nil {
 		return ScreenshotResult{}, err
@@ -382,7 +381,6 @@ func (s *ElectronBridgeService) Screenshot(ctx context.Context, sessionID, tabID
 	if err := s.post(ctx, "/browser/tabs/screenshot", electronBridgeScreenshotRequest{
 		SessionID: sessionID,
 		TabID:     tabID,
-		FullPage:  opts.FullPage,
 	}, &out); err != nil {
 		return ScreenshotResult{}, err
 	}

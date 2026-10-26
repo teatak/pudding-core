@@ -1086,7 +1086,7 @@ export const browserObserveRequest = z.object({
   maxTextChars: z.number().optional(),
   maxElements: z.number().optional(),
 });
-export const browserScreenshotRequest = z.object({ fullPage: z.boolean().optional() });
+export const browserScreenshotRequest = z.object({}).strict();
 export const browserClickRequest = z.object({
   selector: z.string().optional(),
   x: z.number().optional(),

@@ -608,8 +608,8 @@ func builtinRunnerDefinitions() []provider.ToolDef {
 		},
 		{
 			Name:        BrowserScreenshot,
-			Description: "Capture a screenshot of a managed browser tab and route it as an image attachment.",
-			InputSchema: json.RawMessage(`{"type":"object","properties":{"tabID":{"type":"string","description":"Tab ID. Required when more than one tab exists."},"fullPage":{"type":"boolean","description":"Capture beyond the viewport when supported. Defaults false."}},"additionalProperties":false}`),
+			Description: "Capture only the current viewport of a managed browser tab and route it as an image attachment. For more content, scroll and capture again. Full-page screenshots are not supported.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"tabID":{"type":"string","description":"Tab ID. Required when more than one tab exists."}},"additionalProperties":false}`),
 			Capability:  store.ModeWork,
 		},
 		{

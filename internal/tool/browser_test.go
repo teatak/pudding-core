@@ -9,12 +9,21 @@ import (
 	"image/png"
 	"os"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/teatak/pudding-core/internal/attachment"
 	"github.com/teatak/pudding-core/internal/browser"
 )
+
+func TestBuiltinBrowserScreenshotRejectsFullPage(t *testing.T) {
+	runner := NewBuiltinRunner(WithHomeDir(t.TempDir()), WithBrowser(&fakeToolBrowser{}))
+	res := runner.Call(context.Background(), Call{SessionID: "sess_browser", Name: BrowserScreenshot, Args: json.RawMessage(`{"tabID":"tab_1","fullPage":true}`)})
+	if res.Ok || !strings.Contains(res.Content, "Full-page screenshots are not supported") || len(res.Attachments) != 0 {
+		t.Fatalf("expected explicit full-page rejection: %+v", res)
+	}
+}
 
 func TestBuiltinBrowserScreenshotRoutesAttachment(t *testing.T) {
 	home := t.TempDir()
@@ -30,7 +39,7 @@ func TestBuiltinBrowserScreenshotRoutesAttachment(t *testing.T) {
 			DataBase64: base64.StdEncoding.EncodeToString(imageBytes),
 			Size:       int64(len(imageBytes)),
 			Width:      2504, Height: 1988, ViewportWidth: 1252, ViewportHeight: 994, DeviceScaleFactor: 2,
-			CaptureBounds: browser.Bounds{Y: -200, Width: 1252, Height: 994},
+			CaptureBounds: browser.Bounds{Width: 1252, Height: 994},
 			CapturedAt:    time.Now().UTC(),
 		},
 	}))
@@ -38,7 +47,7 @@ func TestBuiltinBrowserScreenshotRoutesAttachment(t *testing.T) {
 	res := runner.Call(context.Background(), Call{
 		SessionID: "sess_browser",
 		Name:      BrowserScreenshot,
-		Args:      json.RawMessage(`{"tabID":"tab_1","fullPage":true}`),
+		Args:      json.RawMessage(`{"tabID":"tab_1"}`),
 	})
 	if !res.Ok {
 		t.Fatalf("screenshot should succeed: %+v", res)
@@ -53,14 +62,14 @@ func TestBuiltinBrowserScreenshotRoutesAttachment(t *testing.T) {
 	if payload["attachmentKey"] == "" || payload["url"] == "" || payload["exportTool"] != AttachmentExport || payload["exportHint"] == "" {
 		t.Fatalf("missing attachment metadata: %+v", payload)
 	}
-	if payload["width"] != float64(2504) || payload["height"] != float64(1988) || payload["modelWidth"] != float64(2048) || payload["modelHeight"] != float64(1626) || payload["viewportWidth"] != float64(1252) || payload["viewportHeight"] != float64(994) || payload["deviceScaleFactor"] != float64(2) || payload["fullPage"] != true || payload["coordinateSpace"] != "viewport_css_pixels" || payload["coordinateHint"] == "" {
+	if payload["width"] != float64(2504) || payload["height"] != float64(1988) || payload["modelWidth"] != float64(2048) || payload["modelHeight"] != float64(1626) || payload["viewportWidth"] != float64(1252) || payload["viewportHeight"] != float64(994) || payload["deviceScaleFactor"] != float64(2) || payload["fullPage"] != false || payload["coordinateSpace"] != "viewport_css_pixels" || payload["coordinateHint"] == "" {
 		t.Fatalf("screenshot lost coordinate metadata: %+v", payload)
 	}
-	// A model-image point at its center maps to the scrolled CSS viewport,
+	// A model-image point at its center maps to the current CSS viewport,
 	// independently of Retina pixels and the provider image downscale.
 	bounds := payload["captureBounds"].(map[string]any)
 	y := bounds["y"].(float64) + payload["modelHeight"].(float64)/2*bounds["height"].(float64)/payload["modelHeight"].(float64)
-	if y != 297 {
+	if y != 497 {
 		t.Fatalf("incorrect image-to-viewport mapping: y=%v", y)
 	}
 	path, ok, err := attachment.NewService(home).Path("sess_browser", res.Attachments[0].AttachmentKey)
@@ -331,7 +340,7 @@ func (f *fakeToolBrowser) Observe(_ context.Context, sessionID, tabID string, _ 
 	return browser.ObserveResult{Tab: tab, Title: "Example", URL: "https://example.com", Text: "Example"}, nil
 }
 
-func (f *fakeToolBrowser) Screenshot(context.Context, string, string, browser.ScreenshotOptions) (browser.ScreenshotResult, error) {
+func (f *fakeToolBrowser) Screenshot(context.Context, string, string) (browser.ScreenshotResult, error) {
 	return f.screenshot, nil
 }
 

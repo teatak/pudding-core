@@ -384,11 +384,11 @@ func TestScreenshotUsesCDPPageCapture(t *testing.T) {
 		case "Page.getLayoutMetrics":
 			return cdpTestReply{Result: map[string]any{
 				"cssVisualViewport": map[string]any{"clientWidth": 1, "clientHeight": 1},
-				"cssContentSize":    map[string]any{"x": 0, "y": 0, "width": 1, "height": 1},
+				"cssContentSize":    map[string]any{"x": 0, "y": 0, "width": 20000, "height": 20000},
 			}}
 		case "Page.captureScreenshot":
 			clip, _ := request.Params["clip"].(map[string]any)
-			if clip["width"] != float64(1) || request.Params["captureBeyondViewport"] != true {
+			if clip != nil || request.Params["captureBeyondViewport"] != false {
 				t.Errorf("unexpected screenshot params: %+v", request.Params)
 			}
 			return cdpTestReply{Result: map[string]any{"data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="}}
@@ -399,7 +399,7 @@ func TestScreenshotUsesCDPPageCapture(t *testing.T) {
 			return cdpTestReply{}
 		}
 	})
-	result, err := manager.Screenshot(context.Background(), "sess_type", "tab_type", ScreenshotOptions{FullPage: true})
+	result, err := manager.Screenshot(context.Background(), "sess_type", "tab_type")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -407,28 +407,6 @@ func TestScreenshotUsesCDPPageCapture(t *testing.T) {
 		t.Fatalf("unexpected screenshot dimensions: %+v", result)
 	}
 	if got := strings.Join(cdpTestMethods(calls()), ","); got != "Runtime.evaluate,Page.getLayoutMetrics,Page.captureScreenshot,Runtime.evaluate,Page.getNavigationHistory" {
-		t.Fatalf("unexpected CDP calls: %s", got)
-	}
-}
-
-func TestFullPageScreenshotRejectsOversizedContentBeforeCapture(t *testing.T) {
-	manager, calls := newCDPTestManager(t, func(request cdpTestRequest) cdpTestReply {
-		switch request.Method {
-		case "Page.getLayoutMetrics":
-			return cdpTestReply{Result: map[string]any{
-				"cssVisualViewport": map[string]any{"clientWidth": 1280, "clientHeight": 720},
-				"cssContentSize":    map[string]any{"x": 0, "y": 0, "width": 20000, "height": 20000},
-			}}
-		default:
-			t.Errorf("unexpected CDP method after oversized metrics: %s", request.Method)
-			return cdpTestReply{}
-		}
-	})
-	_, err := manager.Screenshot(context.Background(), "sess_type", "tab_type", ScreenshotOptions{FullPage: true})
-	if err == nil || !strings.Contains(err.Error(), "exceeds limit") {
-		t.Fatalf("expected screenshot size limit error, got %v", err)
-	}
-	if got := strings.Join(cdpTestMethods(calls()), ","); got != "Runtime.evaluate,Page.getLayoutMetrics" {
 		t.Fatalf("unexpected CDP calls: %s", got)
 	}
 }
@@ -447,7 +425,7 @@ func TestScreenshotRejectsInvalidPNG(t *testing.T) {
 			return cdpTestReply{}
 		}
 	})
-	_, err := manager.Screenshot(context.Background(), "sess_type", "tab_type", ScreenshotOptions{})
+	_, err := manager.Screenshot(context.Background(), "sess_type", "tab_type")
 	if err == nil || !strings.Contains(err.Error(), "invalid png") {
 		t.Fatalf("expected invalid PNG error, got %v", err)
 	}

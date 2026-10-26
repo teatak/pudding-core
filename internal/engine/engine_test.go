@@ -4675,7 +4675,7 @@ func (b *engineTestBrowser) Observe(_ context.Context, sessionID, tabID string, 
 	}, nil
 }
 
-func (b *engineTestBrowser) Screenshot(context.Context, string, string, browser.ScreenshotOptions) (browser.ScreenshotResult, error) {
+func (b *engineTestBrowser) Screenshot(context.Context, string, string) (browser.ScreenshotResult, error) {
 	return browser.ScreenshotResult{}, nil
 }
 

@@ -102,16 +102,20 @@ func (r *BuiltinRunner) browserScreenshot(ctx context.Context, call Call) Result
 	}
 	var args struct {
 		TabID    string `json:"tabID"`
-		FullPage bool   `json:"fullPage"`
+		FullPage bool   `json:"fullPage"` // Decode only to reject unsupported legacy requests.
 	}
 	if err := decodeStructToolArgs(call.Args, &args); err != nil {
 		return toolJSONError(out, "invalid_arguments", err.Error())
 	}
+	if args.FullPage {
+		return toolJSONError(out, "invalid_arguments", "Full-page screenshots are not supported. Capture the viewport and scroll for more content.")
+	}
+
 	tabID, err := r.browserResolveTabID(ctx, call.SessionID, args.TabID)
 	if err != nil {
 		return browserToolError(out, err)
 	}
-	result, err := r.browser.Screenshot(ctx, call.SessionID, tabID, browser.ScreenshotOptions{FullPage: args.FullPage})
+	result, err := r.browser.Screenshot(ctx, call.SessionID, tabID)
 	if err != nil {
 		return browserToolError(out, err)
 	}
@@ -148,7 +152,7 @@ func (r *BuiltinRunner) browserScreenshot(ctx context.Context, call Call) Result
 		"viewportHeight":    result.ViewportHeight,
 		"deviceScaleFactor": result.DeviceScaleFactor,
 		"captureBounds":     result.CaptureBounds,
-		"fullPage":          args.FullPage,
+		"fullPage":          false,
 		"coordinateSpace":   "viewport_css_pixels",
 		"coordinateHint":    "Click x/y and observation bounds use CSS pixels relative to the current viewport. Map this image to click coordinates: x = captureBounds.x + imageX * captureBounds.width / modelWidth; y = captureBounds.y + imageY * captureBounds.height / modelHeight. If the image is displayed resized, substitute its displayed width/height for modelWidth/modelHeight. Only click points inside the viewport; scroll and observe again for offscreen targets. Capture again after scrolling or navigation.",
 		"capturedAt":        result.CapturedAt,

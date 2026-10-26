@@ -353,7 +353,7 @@ func TestElectronBridgeServiceToolEndpoints(t *testing.T) {
 				Elements:   []ObservedElement{{Index: 0, Tag: "a", Text: "link", Bounds: Bounds{X: 30, Y: 40, Width: 100, Height: 25}}},
 			})
 		case "/browser/tabs/screenshot":
-			if req["fullPage"] != true {
+			if req["fullPage"] != nil {
 				t.Fatalf("unexpected screenshot request: %+v", req)
 			}
 			writeElectronBridgeTestJSON(w, electronBridgeScreenshotResponse{
@@ -363,7 +363,7 @@ func TestElectronBridgeServiceToolEndpoints(t *testing.T) {
 				Size:          8,
 				Width:         1,
 				Height:        1,
-				CaptureBounds: Bounds{Y: -120, Width: 800, Height: 600},
+				CaptureBounds: Bounds{Width: 800, Height: 600},
 			})
 		case "/browser/tabs/click":
 			if req["selector"] != "#go" || req["method"] != "pointer" {
@@ -405,7 +405,7 @@ func TestElectronBridgeServiceToolEndpoints(t *testing.T) {
 	if got, err := service.Observe(context.Background(), "sess_a", "tab_a", ObserveOptions{MaxTextChars: 123, MaxElements: 4}); err != nil || got.Text != "hello" || len(got.Elements) != 1 || got.Viewport.ScrollY != 120 || got.Viewport.DevicePixelRatio != 2 || got.Elements[0].Bounds.X != 30 {
 		t.Fatalf("unexpected observe result: got=%+v err=%v", got, err)
 	}
-	if got, err := service.Screenshot(context.Background(), "sess_a", "tab_a", ScreenshotOptions{FullPage: true}); err != nil || got.MIME != "image/png" || got.Width != 1 || got.CaptureBounds.Y != -120 {
+	if got, err := service.Screenshot(context.Background(), "sess_a", "tab_a"); err != nil || got.MIME != "image/png" || got.Width != 1 || got.CaptureBounds.Y != 0 {
 		t.Fatalf("unexpected screenshot result: got=%+v err=%v", got, err)
 	}
 	if got, err := service.Click(context.Background(), "sess_a", "tab_a", ClickInput{Selector: "#go", Method: "pointer"}); err != nil || got.Action != "click" {

@@ -31,6 +31,20 @@ func newBrowserTestServer(t *testing.T) (*httptest.Server, store.Store, *fakeBro
 	return srv, ms, browserSvc
 }
 
+func TestBrowserScreenshotRejectsFullPage(t *testing.T) {
+	srv, st, _ := newBrowserTestServer(t)
+	if err := st.CreateSession(context.Background(), &store.Session{ID: "sess_capture", Provider: "mock", Model: "mock"}); err != nil {
+		t.Fatal(err)
+	}
+	opened := req(t, http.MethodPost, srv.URL+"/sessions/sess_capture/browser/open", map[string]string{"url": "example.org"})
+	tab := decodeJSON[browser.TabSnapshot](t, opened)
+	resp := req(t, http.MethodPost, srv.URL+"/sessions/sess_capture/browser/tabs/"+tab.ID+"/screenshot", map[string]bool{"fullPage": true})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected full-page rejection, got %d", resp.StatusCode)
+	}
+}
+
 func TestBrowserTabsAreSessionScoped(t *testing.T) {
 	srv, st, browserSvc := newBrowserTestServer(t)
 	ctx := context.Background()
@@ -1349,7 +1363,7 @@ func (f *fakeBrowserService) Observe(context.Context, string, string, browser.Ob
 	return browser.ObserveResult{}, nil
 }
 
-func (f *fakeBrowserService) Screenshot(context.Context, string, string, browser.ScreenshotOptions) (browser.ScreenshotResult, error) {
+func (f *fakeBrowserService) Screenshot(context.Context, string, string) (browser.ScreenshotResult, error) {
 	return browser.ScreenshotResult{}, nil
 }
 

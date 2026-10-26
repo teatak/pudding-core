@@ -35,7 +35,7 @@ type browserObserveReq struct {
 }
 
 type browserScreenshotReq struct {
-	FullPage bool `json:"fullPage"`
+	FullPage bool `json:"fullPage"` // Decode only to reject unsupported legacy requests.
 }
 
 type browserActionResp = browser.ActionResult
@@ -835,7 +835,11 @@ func (s *Server) screenshotBrowserTab(c *cart.Context) error {
 	if err := decode(c, &req); err != nil && !errors.Is(err, io.EOF) {
 		return badRequest(c, "invalid json body")
 	}
-	result, err := s.browser.Screenshot(c.Request.Context(), sessionID, tabID, browser.ScreenshotOptions{FullPage: req.FullPage})
+	if req.FullPage {
+		return badRequest(c, "Full-page screenshots are not supported. Capture the viewport and scroll for more content.")
+	}
+
+	result, err := s.browser.Screenshot(c.Request.Context(), sessionID, tabID)
 	if err != nil {
 		return s.browserError(c, err)
 	}

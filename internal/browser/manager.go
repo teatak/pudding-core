@@ -62,7 +62,7 @@ type Service interface {
 	Forward(ctx context.Context, sessionID, tabID string) (TabSnapshot, error)
 	Reload(ctx context.Context, sessionID, tabID string) (TabSnapshot, error)
 	Observe(ctx context.Context, sessionID, tabID string, opts ObserveOptions) (ObserveResult, error)
-	Screenshot(ctx context.Context, sessionID, tabID string, opts ScreenshotOptions) (ScreenshotResult, error)
+	Screenshot(ctx context.Context, sessionID, tabID string) (ScreenshotResult, error)
 	Click(ctx context.Context, sessionID, tabID string, in ClickInput) (ActionResult, error)
 	Type(ctx context.Context, sessionID, tabID string, in TypeInput) (ActionResult, error)
 	Scroll(ctx context.Context, sessionID, tabID string, in ScrollInput) (ActionResult, error)
@@ -175,10 +175,6 @@ type ObservedElement struct {
 	InputType string `json:"inputType,omitempty"`
 	Disabled  bool   `json:"disabled,omitempty"`
 	Bounds    Bounds `json:"bounds"`
-}
-
-type ScreenshotOptions struct {
-	FullPage bool
 }
 
 type ScreenshotResult struct {
@@ -841,7 +837,7 @@ func (m *Manager) Observe(ctx context.Context, sessionID, tabID string, opts Obs
 	return out, nil
 }
 
-func (m *Manager) Screenshot(ctx context.Context, sessionID, tabID string, opts ScreenshotOptions) (ScreenshotResult, error) {
+func (m *Manager) Screenshot(ctx context.Context, sessionID, tabID string) (ScreenshotResult, error) {
 	proc, binding, _, err := m.liveTarget(ctx, sessionID, tabID, false)
 	if err != nil {
 		return ScreenshotResult{}, err
@@ -866,15 +862,7 @@ func (m *Manager) Screenshot(ctx context.Context, sessionID, tabID string, opts 
 		CSSLayoutViewport struct {
 			ClientWidth  float64 `json:"clientWidth"`
 			ClientHeight float64 `json:"clientHeight"`
-			PageX        float64 `json:"pageX"`
-			PageY        float64 `json:"pageY"`
 		} `json:"cssLayoutViewport"`
-		CSSContentSize struct {
-			X      float64 `json:"x"`
-			Y      float64 `json:"y"`
-			Width  float64 `json:"width"`
-			Height float64 `json:"height"`
-		} `json:"cssContentSize"`
 	}
 	if err := json.Unmarshal(metricsRaw, &metrics); err != nil {
 		return ScreenshotResult{}, err
@@ -888,30 +876,7 @@ func (m *Manager) Screenshot(ctx context.Context, sessionID, tabID string, opts 
 	captureParams := map[string]any{
 		"format":                "png",
 		"fromSurface":           true,
-		"captureBeyondViewport": opts.FullPage,
-	}
-	if opts.FullPage {
-		if metrics.CSSContentSize.Width <= 0 || metrics.CSSContentSize.Height <= 0 {
-			return ScreenshotResult{}, errors.New("browser screenshot content dimensions unavailable")
-		}
-		if metrics.CSSContentSize.Width > maxScreenshotDimension ||
-			metrics.CSSContentSize.Height > maxScreenshotDimension ||
-			metrics.CSSContentSize.Width*metrics.CSSContentSize.Height > maxScreenshotPixels {
-			return ScreenshotResult{}, fmt.Errorf(
-				"browser full-page screenshot exceeds limit: %.0fx%.0f (max dimension %d, max pixels %d)",
-				metrics.CSSContentSize.Width,
-				metrics.CSSContentSize.Height,
-				maxScreenshotDimension,
-				maxScreenshotPixels,
-			)
-		}
-		captureParams["clip"] = map[string]any{
-			"x":      metrics.CSSContentSize.X,
-			"y":      metrics.CSSContentSize.Y,
-			"width":  metrics.CSSContentSize.Width,
-			"height": metrics.CSSContentSize.Height,
-			"scale":  1,
-		}
+		"captureBeyondViewport": false,
 	}
 	raw, err := proc.cdpCall(ctx, m.client, binding.targetID, "Page.captureScreenshot", captureParams)
 	if err != nil {
@@ -948,9 +913,6 @@ func (m *Manager) Screenshot(ctx context.Context, sessionID, tabID string, opts 
 	deviceScaleFactor := float64(0)
 	if imageConfig.Width > 0 {
 		cssWidth := viewportWidth
-		if opts.FullPage && metrics.CSSContentSize.Width > 0 {
-			cssWidth = metrics.CSSContentSize.Width
-		}
 		if cssWidth > 0 {
 			deviceScaleFactor = float64(imageConfig.Width) / cssWidth
 		}
@@ -958,13 +920,6 @@ func (m *Manager) Screenshot(ctx context.Context, sessionID, tabID string, opts 
 	target, _ := proc.target(ctx, m.client, binding.targetID)
 	m.touch(binding.id)
 	captureBounds := Bounds{Width: viewportWidth, Height: viewportHeight}
-	if opts.FullPage {
-		captureBounds = Bounds{
-			X:     metrics.CSSContentSize.X - metrics.CSSLayoutViewport.PageX,
-			Y:     metrics.CSSContentSize.Y - metrics.CSSLayoutViewport.PageY,
-			Width: metrics.CSSContentSize.Width, Height: metrics.CSSContentSize.Height,
-		}
-	}
 	return ScreenshotResult{
 		Tab:               m.snapshotFromLiveTarget(ctx, binding, target),
 		MIME:              "image/png",
