@@ -138,14 +138,16 @@ func ErrorRetryable(err error) bool {
 }
 
 type electronBridgeObserveResponse struct {
-	Tab        electronBridgeSnapshot `json:"tab"`
-	Title      string                 `json:"title"`
-	URL        string                 `json:"url"`
-	ReadyState string                 `json:"readyState"`
-	Text       string                 `json:"text"`
-	TextChars  int                    `json:"textChars"`
-	Truncated  bool                   `json:"truncated"`
-	Elements   []ObservedElement      `json:"elements"`
+	Tab              electronBridgeSnapshot `json:"tab"`
+	Title            string                 `json:"title"`
+	URL              string                 `json:"url"`
+	ReadyState       string                 `json:"readyState"`
+	Viewport         Viewport               `json:"viewport"`
+	Text             string                 `json:"text"`
+	TextChars        int                    `json:"textChars"`
+	Truncated        bool                   `json:"truncated"`
+	Elements         []ObservedElement      `json:"elements"`
+	ScrollContainers []ScrollContainer      `json:"scrollContainers"`
 }
 
 type electronBridgeScreenshotResponse struct {
@@ -158,6 +160,7 @@ type electronBridgeScreenshotResponse struct {
 	ViewportWidth     int                    `json:"viewportWidth,omitempty"`
 	ViewportHeight    int                    `json:"viewportHeight,omitempty"`
 	DeviceScaleFactor float64                `json:"deviceScaleFactor,omitempty"`
+	CaptureBounds     Bounds                 `json:"captureBounds"`
 	CapturedAt        time.Time              `json:"capturedAt"`
 }
 
@@ -609,14 +612,16 @@ func parseElectronBridgeTime(value string, fallback time.Time) time.Time {
 
 func (out electronBridgeObserveResponse) result() ObserveResult {
 	return ObserveResult{
-		Tab:        out.Tab.tab(),
-		Title:      out.Title,
-		URL:        out.URL,
-		ReadyState: out.ReadyState,
-		Text:       out.Text,
-		TextChars:  out.TextChars,
-		Truncated:  out.Truncated,
-		Elements:   out.Elements,
+		Tab:              out.Tab.tab(),
+		Title:            out.Title,
+		URL:              out.URL,
+		ReadyState:       out.ReadyState,
+		Viewport:         out.Viewport,
+		Text:             out.Text,
+		TextChars:        out.TextChars,
+		Truncated:        out.Truncated,
+		Elements:         out.Elements,
+		ScrollContainers: out.ScrollContainers,
 	}
 }
 
@@ -639,6 +644,7 @@ func (out electronBridgeScreenshotResponse) result() ScreenshotResult {
 		ViewportWidth:     out.ViewportWidth,
 		ViewportHeight:    out.ViewportHeight,
 		DeviceScaleFactor: out.DeviceScaleFactor,
+		CaptureBounds:     out.CaptureBounds,
 		CapturedAt:        capturedAt,
 	}
 }

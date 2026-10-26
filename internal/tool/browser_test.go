@@ -1,9 +1,12 @@
 package tool
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"image"
+	"image/png"
 	"os"
 	"strconv"
 	"testing"
@@ -15,21 +18,27 @@ import (
 
 func TestBuiltinBrowserScreenshotRoutesAttachment(t *testing.T) {
 	home := t.TempDir()
-	imageBytes := []byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n', 0, 0, 0, 0, 'I', 'E', 'N', 'D'}
+	var imageData bytes.Buffer
+	if err := png.Encode(&imageData, image.NewNRGBA(image.Rect(0, 0, 2504, 1988))); err != nil {
+		t.Fatal(err)
+	}
+	imageBytes := imageData.Bytes()
 	runner := NewBuiltinRunner(WithHomeDir(home), WithBrowser(&fakeToolBrowser{
 		screenshot: browser.ScreenshotResult{
 			Tab:        browser.TabSnapshot{ID: "tab_1", SessionID: "sess_browser", URL: "https://example.com", Title: "Example"},
 			MIME:       "image/png",
 			DataBase64: base64.StdEncoding.EncodeToString(imageBytes),
 			Size:       int64(len(imageBytes)),
-			CapturedAt: time.Now().UTC(),
+			Width:      2504, Height: 1988, ViewportWidth: 1252, ViewportHeight: 994, DeviceScaleFactor: 2,
+			CaptureBounds: browser.Bounds{Y: -200, Width: 1252, Height: 994},
+			CapturedAt:    time.Now().UTC(),
 		},
 	}))
 
 	res := runner.Call(context.Background(), Call{
 		SessionID: "sess_browser",
 		Name:      BrowserScreenshot,
-		Args:      json.RawMessage(`{"tabID":"tab_1"}`),
+		Args:      json.RawMessage(`{"tabID":"tab_1","fullPage":true}`),
 	})
 	if !res.Ok {
 		t.Fatalf("screenshot should succeed: %+v", res)
@@ -43,6 +52,16 @@ func TestBuiltinBrowserScreenshotRoutesAttachment(t *testing.T) {
 	payload := decodeToolResult(t, res)
 	if payload["attachmentKey"] == "" || payload["url"] == "" || payload["exportTool"] != AttachmentExport || payload["exportHint"] == "" {
 		t.Fatalf("missing attachment metadata: %+v", payload)
+	}
+	if payload["width"] != float64(2504) || payload["height"] != float64(1988) || payload["modelWidth"] != float64(2048) || payload["modelHeight"] != float64(1626) || payload["viewportWidth"] != float64(1252) || payload["viewportHeight"] != float64(994) || payload["deviceScaleFactor"] != float64(2) || payload["fullPage"] != true || payload["coordinateSpace"] != "viewport_css_pixels" || payload["coordinateHint"] == "" {
+		t.Fatalf("screenshot lost coordinate metadata: %+v", payload)
+	}
+	// A model-image point at its center maps to the scrolled CSS viewport,
+	// independently of Retina pixels and the provider image downscale.
+	bounds := payload["captureBounds"].(map[string]any)
+	y := bounds["y"].(float64) + payload["modelHeight"].(float64)/2*bounds["height"].(float64)/payload["modelHeight"].(float64)
+	if y != 297 {
+		t.Fatalf("incorrect image-to-viewport mapping: y=%v", y)
 	}
 	path, ok, err := attachment.NewService(home).Path("sess_browser", res.Attachments[0].AttachmentKey)
 	if err != nil || !ok {

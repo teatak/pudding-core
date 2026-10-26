@@ -972,6 +972,8 @@ export const browserTab = z.object({
 });
 export type BrowserTab = z.infer<typeof browserTab>;
 
+export const browserBounds = z.object({ x: z.number(), y: z.number(), width: z.number(), height: z.number() });
+
 export const observedBrowserElement = z.object({
   index: z.number(),
   tag: z.string(),
@@ -982,6 +984,7 @@ export const observedBrowserElement = z.object({
   selector: z.string().optional(),
   inputType: z.string().optional(),
   disabled: z.boolean().optional(),
+  bounds: browserBounds,
 });
 
 export const browserObservation = z.object({
@@ -989,10 +992,12 @@ export const browserObservation = z.object({
   title: z.string(),
   url: z.string(),
   readyState: z.string(),
+  viewport: z.object({ width: z.number(), height: z.number(), devicePixelRatio: z.number(), scrollX: z.number(), scrollY: z.number() }),
   text: z.string(),
   textChars: z.number(),
   truncated: z.boolean(),
   elements: z.array(observedBrowserElement),
+  scrollContainers: z.array(z.object({ selector: z.string(), bounds: browserBounds, scrollX: z.number(), scrollY: z.number(), maxScrollX: z.number(), maxScrollY: z.number() })),
 });
 export type BrowserObservation = z.infer<typeof browserObservation>;
 
@@ -1006,6 +1011,7 @@ export const browserScreenshot = z.object({
   viewportWidth: z.number().optional(),
   viewportHeight: z.number().optional(),
   deviceScaleFactor: z.number().optional(),
+  captureBounds: browserBounds,
   capturedAt: z.string(),
 });
 export type BrowserScreenshot = z.infer<typeof browserScreenshot>;

@@ -122,27 +122,43 @@ func (r *BuiltinRunner) browserScreenshot(ctx context.Context, call Call) Result
 	if err != nil {
 		return toolJSONError(out, "invalid_screenshot", err.Error())
 	}
-	stored, err := attachment.NewService(r.homeDir).StoreReader(call.SessionID, "browser-screenshot.png", result.MIME, bytes.NewReader(data))
+	attachments := attachment.NewService(r.homeDir)
+	stored, err := attachments.StoreReader(call.SessionID, "browser-screenshot.png", result.MIME, bytes.NewReader(data))
 	if err != nil {
 		return toolJSONError(out, "attachment_store_failed", err.Error())
 	}
 	stored.Origin = attachment.OriginTool
+	modelImage, err := attachments.ModelImageForProvider(call.SessionID, stored.AttachmentKey, stored.MIME)
+	if err != nil {
+		return toolJSONError(out, "invalid_screenshot", err.Error())
+	}
 	out.Ok = true
 	out.Attachments = []store.Attachment{stored}
 	out.ContextAttachments = []store.Attachment{stored}
 	out.Content = jsonString(map[string]any{
-		"ok":            true,
-		"tab":           result.Tab,
-		"mime":          result.MIME,
-		"size":          result.Size,
-		"capturedAt":    result.CapturedAt,
-		"attachmentKey": stored.AttachmentKey,
-		"url":           stored.URL,
-		"exportTool":    AttachmentExport,
-		"exportHint":    attachmentExportToolHint,
+		"ok":                true,
+		"tab":               result.Tab,
+		"mime":              result.MIME,
+		"size":              result.Size,
+		"width":             result.Width,
+		"height":            result.Height,
+		"modelWidth":        modelImage.Width,
+		"modelHeight":       modelImage.Height,
+		"viewportWidth":     result.ViewportWidth,
+		"viewportHeight":    result.ViewportHeight,
+		"deviceScaleFactor": result.DeviceScaleFactor,
+		"captureBounds":     result.CaptureBounds,
+		"fullPage":          args.FullPage,
+		"coordinateSpace":   "viewport_css_pixels",
+		"coordinateHint":    "Click x/y and observation bounds use CSS pixels relative to the current viewport. Map this image to click coordinates: x = captureBounds.x + imageX * captureBounds.width / modelWidth; y = captureBounds.y + imageY * captureBounds.height / modelHeight. If the image is displayed resized, substitute its displayed width/height for modelWidth/modelHeight. Only click points inside the viewport; scroll and observe again for offscreen targets. Capture again after scrolling or navigation.",
+		"capturedAt":        result.CapturedAt,
+		"attachmentKey":     stored.AttachmentKey,
+		"url":               stored.URL,
+		"exportTool":        AttachmentExport,
+		"exportHint":        attachmentExportToolHint,
 	})
 	out.SummaryKind = SummaryReturnedFields
-	out.SummaryCount = 9
+	out.SummaryCount = 20
 	return out
 }
 

@@ -127,14 +127,41 @@ type ObserveOptions struct {
 }
 
 type ObserveResult struct {
-	Tab        TabSnapshot       `json:"tab"`
-	Title      string            `json:"title"`
-	URL        string            `json:"url"`
-	ReadyState string            `json:"readyState"`
-	Text       string            `json:"text"`
-	TextChars  int               `json:"textChars"`
-	Truncated  bool              `json:"truncated"`
-	Elements   []ObservedElement `json:"elements"`
+	Tab              TabSnapshot       `json:"tab"`
+	Title            string            `json:"title"`
+	URL              string            `json:"url"`
+	ReadyState       string            `json:"readyState"`
+	Viewport         Viewport          `json:"viewport"`
+	Text             string            `json:"text"`
+	TextChars        int               `json:"textChars"`
+	Truncated        bool              `json:"truncated"`
+	Elements         []ObservedElement `json:"elements"`
+	ScrollContainers []ScrollContainer `json:"scrollContainers"`
+}
+
+// Bounds are CSS pixels relative to the current viewport.
+type Bounds struct {
+	X      float64 `json:"x"`
+	Y      float64 `json:"y"`
+	Width  float64 `json:"width"`
+	Height float64 `json:"height"`
+}
+
+type Viewport struct {
+	Width            float64 `json:"width"`
+	Height           float64 `json:"height"`
+	DevicePixelRatio float64 `json:"devicePixelRatio"`
+	ScrollX          float64 `json:"scrollX"`
+	ScrollY          float64 `json:"scrollY"`
+}
+
+type ScrollContainer struct {
+	Selector   string  `json:"selector"`
+	Bounds     Bounds  `json:"bounds"`
+	ScrollX    float64 `json:"scrollX"`
+	ScrollY    float64 `json:"scrollY"`
+	MaxScrollX float64 `json:"maxScrollX"`
+	MaxScrollY float64 `json:"maxScrollY"`
 }
 
 type ObservedElement struct {
@@ -147,6 +174,7 @@ type ObservedElement struct {
 	Selector  string `json:"selector,omitempty"`
 	InputType string `json:"inputType,omitempty"`
 	Disabled  bool   `json:"disabled,omitempty"`
+	Bounds    Bounds `json:"bounds"`
 }
 
 type ScreenshotOptions struct {
@@ -163,6 +191,7 @@ type ScreenshotResult struct {
 	ViewportWidth     int         `json:"viewportWidth,omitempty"`
 	ViewportHeight    int         `json:"viewportHeight,omitempty"`
 	DeviceScaleFactor float64     `json:"deviceScaleFactor,omitempty"`
+	CaptureBounds     Bounds      `json:"captureBounds"`
 	CapturedAt        time.Time   `json:"capturedAt"`
 }
 
@@ -837,6 +866,8 @@ func (m *Manager) Screenshot(ctx context.Context, sessionID, tabID string, opts 
 		CSSLayoutViewport struct {
 			ClientWidth  float64 `json:"clientWidth"`
 			ClientHeight float64 `json:"clientHeight"`
+			PageX        float64 `json:"pageX"`
+			PageY        float64 `json:"pageY"`
 		} `json:"cssLayoutViewport"`
 		CSSContentSize struct {
 			X      float64 `json:"x"`
@@ -926,6 +957,14 @@ func (m *Manager) Screenshot(ctx context.Context, sessionID, tabID string, opts 
 	}
 	target, _ := proc.target(ctx, m.client, binding.targetID)
 	m.touch(binding.id)
+	captureBounds := Bounds{Width: viewportWidth, Height: viewportHeight}
+	if opts.FullPage {
+		captureBounds = Bounds{
+			X:     metrics.CSSContentSize.X - metrics.CSSLayoutViewport.PageX,
+			Y:     metrics.CSSContentSize.Y - metrics.CSSLayoutViewport.PageY,
+			Width: metrics.CSSContentSize.Width, Height: metrics.CSSContentSize.Height,
+		}
+	}
 	return ScreenshotResult{
 		Tab:               m.snapshotFromLiveTarget(ctx, binding, target),
 		MIME:              "image/png",
@@ -936,6 +975,7 @@ func (m *Manager) Screenshot(ctx context.Context, sessionID, tabID string, opts 
 		ViewportWidth:     int(viewportWidth),
 		ViewportHeight:    int(viewportHeight),
 		DeviceScaleFactor: deviceScaleFactor,
+		CaptureBounds:     captureBounds,
 		CapturedAt:        time.Now().UTC(),
 	}, nil
 }
@@ -2492,6 +2532,9 @@ func observeScript(maxText, maxElements int) string {
 	return fmt.Sprintf(`(() => {
   const maxText = %d;
   const maxElements = %d;
+  const offset = 0;
+  const includeText = true;
+  const includeControls = true;
   const isPasswordInput = (el) => el instanceof HTMLInputElement && String(el.type || "").toLowerCase() === "password";
   const pickText = (el) => ((el.innerText || (isPasswordInput(el) ? "" : el.value) || el.getAttribute("aria-label") || el.textContent || "").trim().replace(/\s+/g, " "));
   const visible = (el) => {
@@ -2501,41 +2544,82 @@ func observeScript(maxText, maxElements int) string {
   };
   const selectorFor = (el) => {
     if (!el || !el.tagName) return "";
-    if (el.id) return "#" + CSS.escape(el.id);
-    const name = el.getAttribute("name");
-    if (name) return el.tagName.toLowerCase() + "[name=\"" + name.replace(/"/g, "\\\"") + "\"]";
-    return el.tagName.toLowerCase();
+    const unique = (selector) => document.querySelectorAll(selector).length === 1;
+    if (el.id && unique("#" + CSS.escape(el.id))) return "#" + CSS.escape(el.id);
+    for (const attr of ["name", "aria-label"]) {
+      const value = el.getAttribute(attr);
+      if (!value || value.length > 160) continue;
+      const selector = el.tagName.toLowerCase() + "[" + attr + "=" + CSS.escape(value) + "]";
+      if (unique(selector)) return selector;
+    }
+    const parts = [];
+    for (let node = el; node && node.nodeType === 1; node = node.parentElement) {
+      if (node.id && unique("#" + CSS.escape(node.id))) {
+        return ["#" + CSS.escape(node.id), ...parts].join(" > ");
+      }
+      const tag = node.tagName.toLowerCase();
+      const simple = [tag, ...parts].join(" > ");
+      if (unique(simple)) return simple;
+      const siblings = node.parentElement ? Array.from(node.parentElement.children).filter(s => s.tagName === node.tagName) : [node];
+      parts.unshift(tag + ":nth-of-type(" + (siblings.indexOf(node) + 1) + ")");
+      if (unique(parts.join(" > "))) break;
+    }
+    return parts.join(" > ");
   };
-  const nodes = Array.from(document.querySelectorAll("a,button,input,textarea,select,[role=button],[contenteditable=true]"));
+  const controls = "a,button,input,textarea,select,canvas,[role=button],[role=link],[role=tab],[role=menuitem],[role=gridcell],[role=checkbox],[role=radio],[role=slider],[contenteditable=true]";
+  const nodes = includeControls ? document.querySelectorAll(controls + ",tr,[role=row],[tabindex],[onclick],[jsaction]") : [];
   const elements = [];
+  let totalElements = 0;
   for (const el of nodes) {
-    if (elements.length >= maxElements) break;
     if (!visible(el)) continue;
+    if (!el.matches(controls) && !(el.tabIndex >= 0 || typeof el.onclick === "function" || /(^|;)\s*click\s*:/.test(el.getAttribute("jsaction") || "") || window.getComputedStyle(el).cursor === "pointer")) continue;
+    const index = totalElements++;
+    if (index < offset || elements.length >= maxElements) continue;
     const text = pickText(el).slice(0, 160);
     const href = el.href || "";
-    const ariaLabel = el.getAttribute("aria-label") || "";
+    const ariaLabel = (el.getAttribute("aria-label") || "").trim().replace(/\s+/g, " ").slice(0, 160);
+    const role = el.getAttribute("role");
+    const inputType = el.getAttribute("type");
+    const disabled = Boolean(el.disabled || el.getAttribute("aria-disabled") === "true");
+    const rect = el.getBoundingClientRect();
+    const round = (n) => Math.round(n * 100) / 100;
     elements.push({
-      index: elements.length,
+      index,
       tag: el.tagName.toLowerCase(),
-      text,
-      href,
-      role: el.getAttribute("role") || "",
-      ariaLabel,
+      ...(text ? {text} : {}),
+      ...(href ? {href} : {}),
+      ...(role && role !== el.tagName.toLowerCase() ? {role} : {}),
+      ...(ariaLabel && ariaLabel !== text ? {ariaLabel} : {}),
       selector: selectorFor(el),
-      inputType: el.getAttribute("type") || "",
-      disabled: Boolean(el.disabled || el.getAttribute("aria-disabled") === "true")
+      ...(inputType ? {inputType} : {}),
+      bounds: {x: round(rect.x), y: round(rect.y), width: round(rect.width), height: round(rect.height)},
+      ...(disabled ? {disabled: true} : {})
     });
   }
-  const fullText = (document.body ? document.body.innerText : "").trim();
+  const fullText = includeText && document.body ? document.body.innerText.trim() : "";
   const text = fullText.slice(0, maxText);
+  const scrollContainers = [];
+  if (includeControls) for (const el of document.querySelectorAll("*")) {
+    const maxScrollX = Math.max(0, el.scrollWidth - el.clientWidth);
+    const maxScrollY = Math.max(0, el.scrollHeight - el.clientHeight);
+    if ((!maxScrollX && !maxScrollY) || !visible(el)) continue;
+    const rect = el.getBoundingClientRect();
+    if (rect.bottom <= 0 || rect.right <= 0 || rect.top >= innerHeight || rect.left >= innerWidth) continue;
+    const style = window.getComputedStyle(el);
+    if (el !== document.scrollingElement && !((maxScrollX && /^(auto|scroll)$/.test(style.overflowX)) || (maxScrollY && /^(auto|scroll)$/.test(style.overflowY)))) continue;
+    scrollContainers.push({selector: selectorFor(el), bounds: {x: rect.x, y: rect.y, width: rect.width, height: rect.height}, scrollX: el.scrollLeft, scrollY: el.scrollTop, maxScrollX, maxScrollY});
+    if (scrollContainers.length >= maxElements) break;
+  }
   return JSON.stringify({
     title: document.title,
     url: location.href,
     readyState: document.readyState,
-    text,
-    textChars: fullText.length,
-    truncated: fullText.length > text.length,
-    elements
+    viewport: {width: innerWidth, height: innerHeight, devicePixelRatio, scrollX, scrollY},
+    ...(includeText ? {text, textChars: fullText.length, truncated: fullText.length > text.length} : {}),
+    ...(includeControls ? {
+      elements, totalElements, scrollContainers,
+      nextOffset: offset + elements.length < totalElements ? offset + elements.length : null
+    } : {})
   });
 })()`, maxText, maxElements)
 }
@@ -2774,42 +2858,55 @@ func scrollTargetScript(in ScrollInput) string {
   const selector = %s;
   const deltaX = %s;
   const deltaY = %s;
-  const target = selector ? document.querySelector(selector) : window;
+  let target = selector ? document.querySelector(selector) : null;
+  if (!selector) {
+    for (let node = document.elementFromPoint(innerWidth / 2, innerHeight / 2); node; node = node.parentElement) {
+      const style = getComputedStyle(node);
+      const canScroll = (delta, position, maximum, overflow) => delta && /^(auto|scroll)$/.test(overflow) && (delta > 0 ? position < maximum : position > 0);
+      if (canScroll(deltaY, node.scrollTop, node.scrollHeight - node.clientHeight, style.overflowY) || canScroll(deltaX, node.scrollLeft, node.scrollWidth - node.clientWidth, style.overflowX)) {
+        target = node;
+        break;
+      }
+    }
+    target ||= document.scrollingElement;
+  }
   if (!target) throw new Error("scroll target not found");
   let cursorX = window.innerWidth / 2;
   let cursorY = window.innerHeight / 2;
-  if (target !== window) {
+  if (target !== document.scrollingElement) {
     const rect = target.getBoundingClientRect();
-	    if (rect.width <= 0 || rect.height <= 0 || rect.right <= 0 || rect.bottom <= 0 || rect.left >= window.innerWidth || rect.top >= window.innerHeight) {
-	      throw new Error("scroll target is outside the viewport");
-	    }
-	    cursorX = Math.max(0, Math.min(window.innerWidth - 1, rect.left + rect.width / 2));
-	    cursorY = Math.max(0, Math.min(window.innerHeight - 1, rect.top + rect.height / 2));
-	    const hit = document.elementFromPoint(cursorX, cursorY);
-	    if (!hit || (hit !== target && !target.contains(hit))) throw new Error("scroll target is not hittable");
+    if (rect.width <= 0 || rect.height <= 0 || rect.right <= 0 || rect.bottom <= 0 || rect.left >= window.innerWidth || rect.top >= window.innerHeight) {
+      throw new Error("scroll target is outside the viewport");
+    }
+    cursorX = Math.max(0, Math.min(window.innerWidth - 1, rect.left + rect.width / 2));
+    cursorY = Math.max(0, Math.min(window.innerHeight - 1, rect.top + rect.height / 2));
+    const hit = document.elementFromPoint(cursorX, cursorY);
+    if (!hit || (hit !== target && !target.contains(hit))) throw new Error("scroll target is not hittable");
   }
-	const startX = target === window ? window.scrollX : target.scrollLeft;
-	const startY = target === window ? window.scrollY : target.scrollTop;
-	target.scrollBy({left: deltaX, top: deltaY, behavior: "instant"});
-	return JSON.stringify({ok: true, x: cursorX, y: cursorY, startX, startY});
+  const startX = target.scrollLeft;
+  const startY = target.scrollTop;
+  globalThis[Symbol.for("pudding.page.scrollTarget")] = target;
+  target.scrollBy({left: deltaX, top: deltaY, behavior: "instant"});
+  return JSON.stringify({ok: true, x: cursorX, y: cursorY, cursorX, cursorY, startX, startY});
 })()`, jsString(in.Selector), strconv.FormatFloat(in.DeltaX, 'f', -1, 64), strconv.FormatFloat(in.DeltaY, 'f', -1, 64))
 }
 
 func scrollResultScript(in ScrollInput, target scrollTarget) string {
 	return fmt.Sprintf(`(() => {
-  const selector = %s;
-  const target = selector ? document.querySelector(selector) : window;
+  const scrollTarget = globalThis[Symbol.for("pudding.page.scrollTarget")];
+  if (!scrollTarget?.isConnected) throw new Error("scroll target no longer exists");
   return JSON.stringify({
     ok: true,
     x: window.scrollX,
     y: window.scrollY,
-    targetX: target && target !== window ? target.scrollLeft : window.scrollX,
-    targetY: target && target !== window ? target.scrollTop : window.scrollY,
+    targetX: scrollTarget.scrollLeft,
+    targetY: scrollTarget.scrollTop,
+    moved: scrollTarget.scrollLeft !== %s || scrollTarget.scrollTop !== %s,
     cursorX: %s,
     cursorY: %s,
     method: "target"
   });
-})()`, jsString(in.Selector), strconv.FormatFloat(target.X, 'f', -1, 64), strconv.FormatFloat(target.Y, 'f', -1, 64))
+})()`, strconv.FormatFloat(target.StartX, 'f', -1, 64), strconv.FormatFloat(target.StartY, 'f', -1, 64), strconv.FormatFloat(target.X, 'f', -1, 64), strconv.FormatFloat(target.Y, 'f', -1, 64))
 }
 
 func jsString(value string) string {

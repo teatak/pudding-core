@@ -602,7 +602,7 @@ func builtinRunnerDefinitions() []provider.ToolDef {
 		},
 		{
 			Name:        BrowserObserve,
-			Description: "Observe a managed browser tab: title, URL, visible page text, and interactive elements.",
+			Description: "Observe a managed browser tab: title, URL, page text, interactive elements including clickable rows, viewport CSS dimensions, element bounds, and visible scroll containers with selectors and scroll ranges.",
 			InputSchema: json.RawMessage(`{"type":"object","properties":{"tabID":{"type":"string","description":"Tab ID. Required when more than one tab exists."},"maxTextChars":{"type":"integer","description":"Optional max page text characters, default 6000, cap 20000."},"maxElements":{"type":"integer","description":"Optional max interactive elements, default 30, cap 100."}},"additionalProperties":false}`),
 			Capability:  store.ModeWork,
 		},
@@ -638,7 +638,7 @@ func builtinRunnerDefinitions() []provider.ToolDef {
 		},
 		{
 			Name:        BrowserClick,
-			Description: "Click an element in a managed browser tab by CSS selector or viewport coordinates using focus-preserving CDP target activation.",
+			Description: "Click an element in a managed browser tab by CSS selector or viewport CSS pixel coordinates using focus-preserving CDP target activation. Prefer selectors from observe. Screenshot pixels may be scaled: use screenshot captureBounds and modelWidth/modelHeight to map image points to viewport coordinates. Success confirms input delivery; observe afterward to verify the intended effect.",
 			InputSchema: json.RawMessage(`{"type":"object","properties":{"tabID":{"type":"string","description":"Tab ID. Required when more than one tab exists."},"selector":{"type":"string","description":"CSS selector to click."},"x":{"type":"number","description":"Viewport X coordinate, used when selector is omitted."},"y":{"type":"number","description":"Viewport Y coordinate, used when selector is omitted."},"method":{"type":"string","enum":["auto","pointer"],"description":"Click implementation. Both values use focus-preserving target activation through CDP; auto is the default."}},"additionalProperties":false}`),
 			Capability:  store.ModeWork,
 		},
@@ -650,7 +650,7 @@ func builtinRunnerDefinitions() []provider.ToolDef {
 		},
 		{
 			Name:        BrowserScroll,
-			Description: "Scroll a managed browser tab or one of its scrollable elements.",
+			Description: "Scroll a managed browser tab. Without selector, scroll the container under the viewport center, chaining to an ancestor when at its boundary. Use a scrollContainers selector from observe to choose another region. Result moved reports whether scrolling changed the target position; moved=false can mean the boundary was reached.",
 			InputSchema: json.RawMessage(`{"type":"object","properties":{"tabID":{"type":"string","description":"Tab ID. Required when more than one tab exists."},"selector":{"type":"string","description":"Optional CSS selector for a scrollable element."},"deltaX":{"type":"number","description":"Horizontal scroll delta in pixels."},"deltaY":{"type":"number","description":"Vertical scroll delta in pixels. Defaults to 600 when both deltas are omitted."}},"additionalProperties":false}`),
 			Capability:  store.ModeWork,
 		},
