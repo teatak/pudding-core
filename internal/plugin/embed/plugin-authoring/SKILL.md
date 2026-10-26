@@ -10,6 +10,8 @@ request only needs reusable instructions and does not expose an external
 endpoint. Runtime-provided UI plugins such as Widget Authoring are registered by the desktop
 runtime and are not created through this flow.
 
+Public authoring reference: [Hub plugin development](https://github.com/teatak/pudding-hub/blob/main/docs/plugin-development.md) / [中文](https://github.com/teatak/pudding-hub/blob/main/docs/plugin-development.zh-CN.md). Keep this bundled Skill self-contained for runtime use; Hub owns the complete developer guide.
+
 ## Storage And Lifecycle
 
 Installed plugins live under the Pudding data directory:

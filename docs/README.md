@@ -4,6 +4,11 @@
 
 当前行为以源码、公共契约和测试为准；当前参考用于说明，归档用于追溯。[AGENTS.md](../AGENTS.md) 提供简短的协作说明和文档入口。
 
+## 插件与小组件开发文档
+
+面向作者的文档统一在 [Hub 中文入口](https://github.com/teatak/pudding-hub/blob/main/docs/README.zh-CN.md)／[English](https://github.com/teatak/pudding-hub/blob/main/docs/README.md)，包括插件配置与连接、小组件 SDK、运行时授权和打包分发。本仓保留协议、存储、执行与兼容迁移说明。
+
+
 ## 当前参考
 
 | 文档 | 内容 |

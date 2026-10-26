@@ -1,5 +1,8 @@
 # 内置插件设计
 
+Ordinary plugin package authoring lives in the [Hub guide](https://github.com/teatak/pudding-hub/blob/main/docs/plugin-development.md) / [中文](https://github.com/teatak/pudding-hub/blob/main/docs/plugin-development.zh-CN.md). This document describes built-in/runtime implementation.
+
+
 状态: 已实施
 
 ## 目标

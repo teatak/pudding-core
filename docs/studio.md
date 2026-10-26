@@ -1,5 +1,7 @@
 # Studio item contract
 
+Widget authoring and SDK documentation live in [Hub](https://github.com/teatak/pudding-hub/blob/main/docs/widget-development.md) / [中文](https://github.com/teatak/pudding-hub/blob/main/docs/widget-development.zh-CN.md). This document covers Core persistence and API implementation.
+
 Protocol 34 adds recoverable Widget creation to `POST /studio/items`: retain the
 same `clientRequestID` and creation parameters after an uncertain result. Optional
 `initialFiles` installs a complete starter draft atomically; replay returns the
