@@ -232,7 +232,7 @@ func (s *Server) listBrowserTabs(c *cart.Context) error {
 	}
 	tabs = s.filterBrowserTabs(sessionID, tabs)
 	if !s.browserTabGateClosed(sessionID) {
-		tabs, err = s.recoverStoredBrowserTabs(c.Request.Context(), sessionID, tabs)
+		tabs, err = s.listStoredBrowserTabs(c.Request.Context(), sessionID, tabs)
 		if err != nil {
 			return s.browserError(c, err)
 		}
@@ -673,6 +673,31 @@ func (s *Server) filterBrowserTabs(sessionID string, tabs []browser.TabSnapshot)
 	return out
 }
 
+// Listing restores metadata only. A visible tab uses the explicit recover route;
+// automation recovers its own target before issuing a page operation.
+func (s *Server) listStoredBrowserTabs(ctx context.Context, sessionID string, tabs []browser.TabSnapshot) ([]browser.TabSnapshot, error) {
+	states, err := s.store.ListBrowserStates(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	live := make(map[string]bool, len(tabs))
+	for _, tab := range tabs {
+		live[tab.ID] = true
+	}
+	out := append([]browser.TabSnapshot{}, tabs...)
+	for _, state := range states {
+		if live[state.TabID] || s.browserTabClosed(sessionID, state.TabID) || !s.browserTabAllowed(sessionID, state.TabID) {
+			continue
+		}
+		out = append(out, browser.TabSnapshot{
+			ID: state.TabID, SessionID: sessionID, URL: state.URL,
+			Title: state.Title, FaviconURL: state.FaviconURL,
+			Mode: s.browserProcessMode(ctx, sessionID), CreatedAt: state.CreatedAt, UpdatedAt: state.UpdatedAt,
+		})
+	}
+	return out, nil
+}
+
 func (s *Server) recoverStoredBrowserTabs(ctx context.Context, sessionID string, tabs []browser.TabSnapshot) ([]browser.TabSnapshot, error) {
 	states, err := s.store.ListBrowserStates(ctx, sessionID)
 	if err != nil {
@@ -733,6 +758,10 @@ func (s *Server) restoreStoredLiveBrowserTabGate(ctx context.Context, sessionID 
 	}
 	if len(matched) == 0 {
 		return false, nil
+	}
+	matched, err = s.listStoredBrowserTabs(ctx, sessionID, matched)
+	if err != nil {
+		return false, err
 	}
 	s.replaceBrowserTabGate(sessionID, matched)
 	return true, nil
@@ -946,6 +975,10 @@ func (s *Server) releaseBrowserTab(c *cart.Context) error {
 	tabs, err := s.browser.ListTabs(c.Request.Context(), sessionID)
 	if err != nil {
 		return s.browserError(c, err)
+	}
+	tabs, err = s.listStoredBrowserTabs(c.Request.Context(), sessionID, s.filterBrowserTabs(sessionID, tabs))
+	if err != nil {
+		return s.fail(c, err)
 	}
 	s.replaceBrowserTabGate(sessionID, tabs)
 	if err := s.store.DeleteBrowserState(c.Request.Context(), sessionID, tabID); err != nil {
