@@ -44,7 +44,7 @@ func (e *Engine) OpenWidgetPage(ctx context.Context, itemID, scope, revision, ta
 		return page, nil, nil
 	}
 	definition.TargetID = target
-	run := &WidgetRun{ID: store.NewID("run"), ItemID: itemID, Title: item.Name, WidgetRunCreate: definition, Status: "paused", Reason: "restored", Receipts: []*WidgetReceipt{}, runtimeID: plugin.RuntimeIDFromContext(ctx), started: time.Now(), expires: time.Now().Add(45 * time.Second)}
+	run := &WidgetRun{ID: store.NewID("run"), ItemID: itemID, Title: item.Name, WidgetRunCreate: definition, Status: "paused", Reason: "restored", Receipts: []*WidgetReceipt{}, runtimeID: plugin.RuntimeIDFromContext(ctx), expires: time.Now().Add(45 * time.Second)}
 	if e.widgetRuns.entries == nil {
 		e.widgetRuns.entries = map[string]*WidgetRun{}
 	}
