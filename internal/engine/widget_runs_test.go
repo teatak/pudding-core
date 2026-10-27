@@ -51,6 +51,49 @@ func notificationEngine(t *testing.T) (*Engine, *storetest.Store, context.Contex
 	}
 	return e, st, ctx, run
 }
+func TestWidgetRunElapsedTimeAndManualPause(t *testing.T) {
+	e, _, ctx, run := notificationEngine(t)
+	later := time.Now().Add(2 * time.Hour)
+	// Keep the page lease alive, as real desktop heartbeats do.
+	e.widgetRuns.entries[run.ID].expires = later.Add(45 * time.Second)
+	e.widgetTick(later)
+	got, err := e.WidgetRun(ctx, run.ID, false)
+	if err != nil || got.Status != "running" {
+		t.Fatal("elapsed time paused an active page", got, err)
+	}
+	if _, err = e.ChangeWidgetRun(ctx, run.ID, "pause"); err != nil {
+		t.Fatal(err)
+	}
+	e.widgetTick(later)
+	if _, err = e.AuthorizeWidgetRun(ctx, run.ID, "sess_1", ""); !errors.Is(err, ErrWidgetRun) {
+		t.Fatal("manual pause did not block participation", err)
+	}
+	if _, err = e.ChangeWidgetRun(ctx, run.ID, "resume"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = e.AuthorizeWidgetRun(ctx, run.ID, "sess_1", ""); err != nil {
+		t.Fatal("manual resume failed", err)
+	}
+}
+
+func TestWidgetRunInternalTurnLimit(t *testing.T) {
+	e, _, ctx, run := notificationEngine(t)
+	e.widgetRuns.entries[run.ID].calls = 200
+	e.widgetTick(time.Now())
+	got, err := e.WidgetRun(ctx, run.ID, false)
+	if err != nil || got.Status != "paused" || got.Reason != "execution_limit" {
+		t.Fatal("internal turn limit was lost", got, err)
+	}
+	if _, err = e.ChangeWidgetRun(ctx, run.ID, "resume"); err != nil {
+		t.Fatal(err)
+	}
+	e.widgetTick(time.Now())
+	got, err = e.WidgetRun(ctx, run.ID, false)
+	if err != nil || got.Status != "running" || got.Reason != "" {
+		t.Fatal("resume did not reset turn count", got, err)
+	}
+}
+
 func TestWidgetInformScopesAndImmutableReceipts(t *testing.T) {
 	e, st, ctx, run := notificationEngine(t)
 	n := WidgetNotification{ID: "started", Audience: WidgetAudience{Kind: "all"}, Delivery: "inform", Topic: "started", Message: "Read the form"}

@@ -120,3 +120,21 @@ func (s *Server) setWidgetParticipants(c *cart.Context) error {
 	c.JSON(http.StatusOK, run)
 	return nil
 }
+
+// The daemon credential remains private to Desktop; MCP callers never receive it.
+func (s *Server) authorizeExternalWidgetRun(c *cart.Context) error {
+	id, _ := c.Param("runID")
+	var in struct {
+		ExternalID     string `json:"externalID"`
+		NotificationID string `json:"notificationID"`
+	}
+	if err := decodeStudioRequest(c, &in); err != nil {
+		return badRequest(c, err.Error())
+	}
+	p, err := s.engine.AuthorizeExternalWidgetRun(c.Request.Context(), id, in.ExternalID, in.NotificationID)
+	if err != nil {
+		return badRequest(c, err.Error())
+	}
+	c.JSON(http.StatusOK, p)
+	return nil
+}

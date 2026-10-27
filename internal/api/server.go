@@ -194,6 +194,7 @@ func (s *Server) Handler(token string, static http.Handler) http.Handler {
 	app.Route("/widget-runs/:runID").GET(s.getWidgetRun).PATCH(s.updateWidgetRun)
 	app.Route("/widget-runs/:runID/notifications").POST(s.notifyWidgetRun)
 	app.Route("/widget-runs/:runID/requests").PUT(s.setWidgetRequests)
+	app.Route("/widget-runs/:runID/authorize-external").POST(s.authorizeExternalWidgetRun)
 	app.Route("/widget-runs/:runID/participants").PUT(s.setWidgetParticipants)
 	app.Route("/sessions/:id/widget-runs/:runID/authorize").POST(s.authorizeWidgetRun)
 	app.Route("/studio/items/install").POST(s.installWidgetPackage)

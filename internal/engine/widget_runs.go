@@ -19,9 +19,10 @@ var ErrWidgetRun = errors.New("widget run unavailable or invalid request")
 // Execution targets, receipts and in-flight work are process-local. Page snapshots
 // retain only participant definitions; restoration creates a fresh paused run.
 type WidgetParticipant struct {
-	ID        string `json:"id"`
-	SessionID string `json:"sessionID,omitempty"`
-	Name      string `json:"name"`
+	ID         string `json:"id"`
+	SessionID  string `json:"sessionID,omitempty"`
+	ExternalID string `json:"externalID,omitempty"`
+	Name       string `json:"name"`
 }
 type WidgetRunCreate struct {
 	TargetID       string              `json:"targetID"`
@@ -72,7 +73,6 @@ type WidgetRun struct {
 	Receipts  []*WidgetReceipt `json:"receipts"`
 	runtimeID string
 	expires   time.Time
-	started   time.Time
 	calls     int
 }
 type widgetRuns struct {
@@ -117,7 +117,7 @@ func (e *Engine) CreateWidgetRun(ctx context.Context, itemID string, in WidgetRu
 	if count >= 16 {
 		return nil, ErrWidgetRun
 	}
-	run := &WidgetRun{ID: store.NewID("run"), ItemID: itemID, Title: item.Name, WidgetRunCreate: in, Status: "running", Receipts: []*WidgetReceipt{}, runtimeID: runtimeID, started: time.Now(), expires: time.Now().Add(45 * time.Second)}
+	run := &WidgetRun{ID: store.NewID("run"), ItemID: itemID, Title: item.Name, WidgetRunCreate: in, Status: "running", Receipts: []*WidgetReceipt{}, runtimeID: runtimeID, expires: time.Now().Add(45 * time.Second)}
 	page, err := e.store.GetWidgetPageByTarget(ctx, in.TargetID)
 	if err != nil || page.ItemID != itemID || page.RevisionHash != in.RevisionHash {
 		return nil, ErrWidgetRun
@@ -142,11 +142,18 @@ func (e *Engine) resolveWidgetParticipants(ctx context.Context, requested, previ
 	result := make([]WidgetParticipant, 0, len(requested))
 	seen := map[string]bool{}
 	for _, input := range requested {
-		if seen[input.SessionID] {
+		key := input.SessionID + "\x00" + input.ExternalID
+		if seen[key] || (input.SessionID != "" && input.ExternalID != "") {
 			return nil, ErrWidgetRun
 		}
-		seen[input.SessionID] = true
-		p := WidgetParticipant{SessionID: input.SessionID, Name: "Human"}
+		seen[key] = true
+		p := WidgetParticipant{SessionID: input.SessionID, ExternalID: input.ExternalID, Name: "Human"}
+		if p.ExternalID != "" {
+			if !strings.HasPrefix(p.ExternalID, "external-") || len(p.ExternalID) > 100 || strings.TrimSpace(input.Name) == "" || len(input.Name) > 200 {
+				return nil, ErrWidgetRun
+			}
+			p.Name = strings.TrimSpace(input.Name)
+		}
 		if p.SessionID != "" {
 			session, err := e.store.GetSession(ctx, p.SessionID)
 			if err != nil || session.ArchivedAt != nil {
@@ -155,7 +162,7 @@ func (e *Engine) resolveWidgetParticipants(ctx context.Context, requested, previ
 			p.Name = session.Title
 		}
 		for _, old := range previous {
-			if old.SessionID == p.SessionID {
+			if old.SessionID == p.SessionID && old.ExternalID == p.ExternalID {
 				p.ID = old.ID
 				break
 			}
@@ -279,7 +286,6 @@ func (e *Engine) ChangeWidgetRun(ctx context.Context, id, action string) (*Widge
 		}
 		run.Status = "running"
 		run.Reason = ""
-		run.started = time.Now()
 		run.calls = 0
 	default:
 		return nil, ErrWidgetRun
@@ -295,6 +301,18 @@ func participant(run *WidgetRun, id string) *WidgetParticipant {
 	return nil
 }
 func (e *Engine) AuthorizeWidgetRun(ctx context.Context, id, sessionID, notificationID string) (*WidgetParticipant, error) {
+	return e.authorizeWidgetActor(ctx, id, sessionID, "", notificationID)
+}
+
+// Called only by the authenticated desktop host, never directly by an MCP client.
+func (e *Engine) AuthorizeExternalWidgetRun(ctx context.Context, id, externalID, notificationID string) (*WidgetParticipant, error) {
+	if externalID == "" {
+		return nil, ErrWidgetRun
+	}
+	return e.authorizeWidgetActor(ctx, id, "", externalID, notificationID)
+}
+
+func (e *Engine) authorizeWidgetActor(ctx context.Context, id, sessionID, externalID, notificationID string) (*WidgetParticipant, error) {
 	e.widgetRuns.Lock()
 	defer e.widgetRuns.Unlock()
 	run, err := e.widgetRunLocked(ctx, id)
@@ -302,10 +320,12 @@ func (e *Engine) AuthorizeWidgetRun(ctx context.Context, id, sessionID, notifica
 		return nil, ErrWidgetRun
 	}
 	for _, p := range run.Participants {
-		if p.SessionID == sessionID && sessionID != "" {
-			s, err := e.store.GetSession(ctx, sessionID)
-			if err != nil || s.ArchivedAt != nil {
-				return nil, ErrWidgetRun
+		if (sessionID != "" && p.SessionID == sessionID) || (externalID != "" && p.ExternalID == externalID) {
+			if sessionID != "" {
+				s, err := e.store.GetSession(ctx, sessionID)
+				if err != nil || s.ArchivedAt != nil {
+					return nil, ErrWidgetRun
+				}
 			}
 			if notificationID != "" {
 				valid := false
@@ -529,7 +549,7 @@ func (e *Engine) widgetTick(now time.Time) {
 		if run.Status != "running" {
 			continue
 		}
-		if now.Sub(run.started) > 30*time.Minute || run.calls >= 200 {
+		if run.calls >= 200 {
 			run.Status = "paused"
 			run.Reason = "execution_limit"
 			e.pauseWidgetTurnsLocked(run)

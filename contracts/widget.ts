@@ -88,6 +88,7 @@ export const widgetBridgeRequest = z
       "storageRead",
       "storageWrite",
       "interactionCandidates",
+      "interactionRemoveCandidate",
       "interactionConnect",
       "interactionControl",
       "interactionNotify",
@@ -184,6 +185,7 @@ export type WidgetData = z.infer<typeof widgetData>;
 export const widgetParticipant = z.object({
   id: z.string(),
   sessionID: z.string().optional(),
+  externalID: z.string().optional(),
   name: z.string(),
 });
 export const widgetNotification = z
@@ -254,6 +256,8 @@ export const widgetSessionCandidates = z.object({
   sessions: z.array(z.object({
     id: z.string(), name: z.string(),
     participantID: z.string().optional(),
+    kind: z.enum(["session", "external"]).optional(),
+    connected: z.boolean().optional(),
     // Host presentation metadata, derived from the session and provider config.
     // Credentials and routing settings are never exposed to a widget.
     model: z.object({ id: z.string(), name: z.string(), icon: z.string() }),
