@@ -78,8 +78,10 @@ func TestCoreDefinitionsUseSmallStableCodeSurface(t *testing.T) {
 			t.Fatalf("App tool %s leaked into Code Core", name)
 		}
 	}
-	if len(first) > 36 {
-		t.Fatalf("Code Core tool count = %d, want <= 36", len(first))
+	// Three assignment tools are available only in the fixed assistant; the
+	// engine removes them from ordinary and child sessions.
+	if len(first) > 39 {
+		t.Fatalf("Code Core tool count = %d, want <= 39", len(first))
 	}
 }
 

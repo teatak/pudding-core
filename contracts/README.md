@@ -385,3 +385,20 @@ Page naming is an additive protocol extension: Studio items may include `nameMod
 
 
 External widget participants are an additive widget-run extension. Participant definitions may carry `externalID` and a host-provided `name` instead of `sessionID`; the two routing identities are mutually exclusive. Desktop assigns these identities to authenticated local MCP connections and explicitly selects participants through the widget UI. `POST /widget-runs/:runID/authorize-external` accepts `{externalID, notificationID?}` under the existing daemon credential and runtime header, and checks the same run lifecycle and active-request constraints as internal-session authorization. This route is for the trusted desktop host; the external MCP token never authorizes daemon routes. External notifications remain in run receipts and do not create internal model turns. Public guest snapshots remove both routing IDs and use `kind: "external"`.
+
+Protocol 54 adds `GET /sessions/:id/assistant-tasks` (`{tasks}`) and optional
+`assistantSessionID` / `assistantTaskActive` source markers on session snapshots.
+The three fixed-assistant-only tools `builtin_assistant_task_dispatch`,
+`builtin_assistant_task_list` and `builtin_assistant_task_send` coordinate ordinary
+root work conversations; they neither create subagent relations nor transfer
+personal profiles, memories or permission grants. New work conversations use the
+assistant's configured provider/model; existing targets keep their own settings.
+Only one assignment may be active at a time. A task's status/result is derived
+from its own dispatched input/turn, including retries or explicit steering,
+not from the target conversation's latest unrelated reply. The sidebar shows the
+assistant avatar only while that assignment is queued/running (including waiting
+for approval/input); its persistent source link remains after settlement.
+Schema 58 stores assignment and dispatch identities. Result receipts are canonical
+assistant messages; settled results wake the assistant once, including after
+restart. Independent work conversations survive deletion of the assistant; their
+coordination links and source markers are removed with its bound conversation.

@@ -58,17 +58,19 @@ func (m *Manager) readWidgetSources() (widgetSourcesYAML, error) {
 	if len(cfg.URLs) > 32 {
 		return cfg, fmt.Errorf("at most 32 widget sources are allowed")
 	}
-	for i, raw := range cfg.URLs {
+	urls := make([]string, 0, len(cfg.URLs))
+	for _, raw := range cfg.URLs {
 		canonical, err := NormalizeWidgetRegistryURL(raw)
 		if err != nil {
 			return cfg, err
 		}
 		if seen[canonical] {
-			return cfg, fmt.Errorf("duplicate widget source")
+			continue
 		}
 		seen[canonical] = true
-		cfg.URLs[i] = canonical
+		urls = append(urls, canonical)
 	}
+	cfg.URLs = urls
 	return cfg, nil
 }
 

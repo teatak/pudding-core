@@ -58,17 +58,19 @@ func (m *Manager) readPluginSources() (pluginSourcesYAML, error) {
 	if len(cfg.URLs) > 32 {
 		return cfg, fmt.Errorf("at most 32 plugin sources are allowed")
 	}
-	for i, raw := range cfg.URLs {
+	urls := make([]string, 0, len(cfg.URLs))
+	for _, raw := range cfg.URLs {
 		canonical, err := NormalizePluginRegistryURL(raw)
 		if err != nil {
 			return cfg, err
 		}
 		if seen[canonical] {
-			return cfg, fmt.Errorf("duplicate plugin source")
+			continue
 		}
 		seen[canonical] = true
-		cfg.URLs[i] = canonical
+		urls = append(urls, canonical)
 	}
+	cfg.URLs = urls
 	return cfg, nil
 }
 

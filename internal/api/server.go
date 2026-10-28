@@ -186,6 +186,7 @@ func (s *Server) Handler(token string, static http.Handler) http.Handler {
 	s.registerRemote(app)
 	app.Route("/assistant").GET(s.getAssistant).PUT(s.saveAssistant).DELETE(s.deleteAssistant)
 	app.Route("/assistant/open").POST(s.openAssistant)
+	app.Route("/sessions/:id/assistant-tasks").GET(s.listAssistantTasks)
 	app.Route("/assistant/appearance-history/finish").POST(s.finishAssistantAppearanceEdit)
 	app.Route("/assistant/appearance-favorites").POST(s.saveAssistantAppearanceFavorite)
 	app.Route("/assistant/appearance-favorites/:favoriteID").DELETE(s.deleteAssistantAppearanceFavorite)
@@ -685,6 +686,9 @@ func (s *Server) listSessions(c *cart.Context) error {
 	if err != nil {
 		return s.fail(c, err)
 	}
+	if err := s.enrichAssistantTaskSources(c.Request.Context(), sessions); err != nil {
+		return s.fail(c, err)
+	}
 	for _, session := range sessions {
 		s.enrichSessionProcesses(session)
 	}
@@ -696,6 +700,9 @@ func (s *Server) getSession(c *cart.Context) error {
 	id, _ := c.Param("id")
 	sess, err := s.store.GetSession(c.Request.Context(), id)
 	if err != nil {
+		return s.fail(c, err)
+	}
+	if err := s.enrichAssistantTaskSources(c.Request.Context(), []*store.Session{sess}); err != nil {
 		return s.fail(c, err)
 	}
 	s.enrichSessionProcesses(sess)
@@ -757,6 +764,9 @@ func (s *Server) patchSession(c *cart.Context) error {
 			return s.browserError(c, err)
 		}
 	}
+	if err := s.enrichAssistantTaskSources(c.Request.Context(), []*store.Session{sess}); err != nil {
+		return s.fail(c, err)
+	}
 	s.enrichSessionProcesses(sess)
 	c.JSON(http.StatusOK, sess)
 	return nil
@@ -784,6 +794,9 @@ func (s *Server) unloadSessionPlugin(c *cart.Context) error {
 		if err != nil {
 			return s.fail(c, err)
 		}
+	}
+	if err := s.enrichAssistantTaskSources(c.Request.Context(), []*store.Session{sess}); err != nil {
+		return s.fail(c, err)
 	}
 	s.enrichSessionProcesses(sess)
 	c.JSON(http.StatusOK, sess)
@@ -1138,6 +1151,7 @@ func (s *Server) patchQueuedInput(c *cart.Context) error {
 	}
 	if res.Input != nil && (res.Input.Status == store.QueuedInputQueued || res.Input.Status == store.QueuedInputCancelled) {
 		s.engine.TryDrainQueued(id)
+		s.engine.AssignedWorkChanged()
 	}
 	c.JSON(http.StatusOK, res.Input)
 	return nil

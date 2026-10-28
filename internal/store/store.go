@@ -42,8 +42,10 @@ var (
 const EventsRetainPerSession = 1000
 
 type Session struct {
-	ID    string `json:"id"`
-	Title string `json:"title"`
+	ID                  string `json:"id"`
+	Title               string `json:"title"`
+	AssistantSessionID  string `json:"assistantSessionID,omitempty"`
+	AssistantTaskActive bool   `json:"assistantTaskActive,omitempty"`
 	// Provider 是 provider profile 名;会话创建时必须显式写入。
 	Provider          string    `json:"provider"`
 	Model             string    `json:"model"`
@@ -2336,6 +2338,7 @@ func browserHistoryVisibleURL(rawURL string) string {
 // 事件 seq 由 Store 在事务内按 session 单调分配。
 // SQLite 实现要求 WAL + 单 writer;schema 契约见 schema.sql。
 type Store interface {
+	AssistantTaskStore
 	AssistantStore
 	// SetEventPublisher publishes persisted events after commit in seq order.
 	// The publisher must be nonblocking and must not call Store methods.

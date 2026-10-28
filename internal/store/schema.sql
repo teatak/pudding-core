@@ -540,3 +540,22 @@ CREATE TABLE IF NOT EXISTS assistant_sessions (
     assistant_id TEXT PRIMARY KEY REFERENCES assistants(id) ON DELETE CASCADE,
     session_id TEXT NOT NULL UNIQUE REFERENCES sessions(id) ON DELETE CASCADE
 );
+
+CREATE TABLE IF NOT EXISTS assistant_tasks (
+ id TEXT PRIMARY KEY,
+ assistant_session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+ session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+ title TEXT NOT NULL,
+ created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS assistant_tasks_owner ON assistant_tasks(assistant_session_id);
+CREATE INDEX IF NOT EXISTS assistant_tasks_target ON assistant_tasks(session_id);
+CREATE TABLE IF NOT EXISTS assistant_task_dispatches (
+ id INTEGER PRIMARY KEY,
+ task_id TEXT NOT NULL REFERENCES assistant_tasks(id) ON DELETE CASCADE,
+ source_turn_id TEXT NOT NULL REFERENCES turns(id) ON DELETE CASCADE,
+ call_id TEXT NOT NULL,
+ client_message_id TEXT NOT NULL UNIQUE,
+ created_at INTEGER NOT NULL,
+ UNIQUE(source_turn_id,call_id)
+);

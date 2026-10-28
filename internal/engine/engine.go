@@ -1067,6 +1067,7 @@ func (e *Engine) Recover(ctx context.Context) error {
 	for _, sessionID := range sessions {
 		e.TryDrainQueued(sessionID)
 	}
+	e.wakeForAssistantTasks()
 	return nil
 }
 
@@ -1289,6 +1290,7 @@ func (e *Engine) finishTurnWithInterrupted(
 
 	e.TryDrainQueued(sessionID)
 	e.childTurnFinished(sessionID, status)
+	e.wakeForAssistantTasks()
 	if status == store.TurnCompleted {
 		e.scheduleAutoCompact(sessionID)
 	}
@@ -1377,7 +1379,7 @@ func (e *Engine) streamTurn(ctx context.Context, sessionID, turnID string, resol
 		}
 		return store.TurnFailed, detail, currentMode
 	}
-	if _, err := e.collectChildResults(ctx, sessionID); err != nil {
+	if _, err := e.collectWorkResults(ctx, sessionID); err != nil {
 		return failed(collaborationContextError(err))
 	}
 	baseReq, err := e.buildProviderRequest(ctx, sessionID, resolved, currentMode)
@@ -1504,7 +1506,7 @@ func (e *Engine) streamTurn(ctx context.Context, sessionID, turnID string, resol
 			if err := e.waitForChildren(ctx, sessionID); err != nil {
 				return failed(collaborationContextError(err))
 			}
-			if collected, err := e.collectChildResults(ctx, sessionID); err != nil {
+			if collected, err := e.collectWorkResults(ctx, sessionID); err != nil {
 				return failed(collaborationContextError(err))
 			} else if collected {
 				parts.Reset()
@@ -1571,7 +1573,7 @@ func (e *Engine) streamTurn(ctx context.Context, sessionID, turnID string, resol
 			consecutiveToolOnlyLoops = 0
 			continue
 		}
-		if collected, err := e.collectChildResults(ctx, sessionID); err != nil {
+		if collected, err := e.collectWorkResults(ctx, sessionID); err != nil {
 			return failed(collaborationContextError(err))
 		} else if collected {
 			parts.Reset()
@@ -2249,6 +2251,9 @@ func (e *Engine) executePendingTools(ctx context.Context, sessionID, turnID stri
 }
 
 func (e *Engine) executeAllowedTool(ctx context.Context, sessionID, turnID string, mode store.AgentMode, call tool.Call) tool.Result {
+	if tool.IsAssistantTaskTool(call.Name) {
+		return e.executeAssistantTask(ctx, sessionID, turnID, call)
+	}
 	call.Name = tool.NormalizeLegacyContentTool(call.Name)
 	if call.Name == tool.AssistantRename {
 		return e.executeAssistantRename(ctx, sessionID, call)

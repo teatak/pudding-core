@@ -12,11 +12,11 @@ const AssistantMemory = "builtin_assistant_memory"
 const AssistantUserName = "builtin_assistant_user_name"
 
 func IsAssistantTool(name string) bool {
-	return name == AssistantRename || name == AssistantMemory || name == AssistantUserName
+	return IsAssistantTaskTool(name) || name == AssistantRename || name == AssistantMemory || name == AssistantUserName
 }
 
 func AssistantDefinitions() []provider.ToolDef {
-	return []provider.ToolDef{AssistantRenameDefinition(), AssistantMemoryDefinition(), AssistantUserNameDefinition()}
+	return append([]provider.ToolDef{AssistantRenameDefinition(), AssistantMemoryDefinition(), AssistantUserNameDefinition()}, AssistantTaskDefinitions()...)
 }
 
 func AssistantUserNameDefinition() provider.ToolDef {

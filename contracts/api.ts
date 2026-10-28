@@ -81,6 +81,8 @@ export const createScheduledTaskRequest = z.object({
 export const patchScheduledTaskRequest = z.object({ revision: z.number(), name: z.string().optional(), prompt: z.string().optional(), schedule: taskSchedule.optional(), enabled: z.boolean().optional() });
 
 export const session = z.object({
+  assistantTaskActive: z.boolean().optional(),
+  assistantSessionID: z.string().optional(),
   id: z.string(),
   title: z.string(),
   provider: z.string(), // provider profile 名;session 创建时必须显式写入
@@ -109,6 +111,12 @@ export const childSession = z.object({
 });
 export type ChildSession = z.infer<typeof childSession>;
 export const listChildSessionsResponse = z.object({ children: z.array(childSession) });
+
+export const assistantTask = z.object({
+ taskID:z.string(), assistantSessionID:z.string(), sessionID:z.string(), title:z.string(), sourceTurnID:z.string(), clientMessageID:z.string(), turnID:z.string().optional(), status:z.enum(["queued","running","completed","failed","cancelled"]), summary:z.string().optional(), resultCollected:z.boolean(), createdAt:z.string(), pendingApprovals:z.number().int().nonnegative(), pendingUserInputs:z.number().int().nonnegative(),
+});
+export type AssistantTask = z.infer<typeof assistantTask>;
+export const assistantTasksResponse = z.object({tasks:z.array(assistantTask)});
 
 
 export const approveApprovalResponse = z.object({

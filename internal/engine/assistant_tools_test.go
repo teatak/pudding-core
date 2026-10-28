@@ -100,6 +100,9 @@ func TestOrdinaryAndChildConversationsRejectForgedAssistantToolCalls(t *testing.
 					{Tool: &provider.ToolCallChunk{CallID: "read-memory", Name: tool.AssistantMemory, ArgsDelta: `{"action":"search"}`, Index: 2}},
 					{Tool: &provider.ToolCallChunk{CallID: "write-memory", Name: tool.AssistantMemory, ArgsDelta: `{"action":"save","content":"越权记忆"}`, Index: 3}},
 					{Tool: &provider.ToolCallChunk{CallID: "user-name", Name: tool.AssistantUserName, ArgsDelta: `{"name":"越权称呼"}`, Index: 4}},
+					{Tool: &provider.ToolCallChunk{CallID: "assign", Name: tool.AssistantTaskDispatch, ArgsDelta: `{"title":"fake","prompt":"fake"}`, Index: 5}},
+					{Tool: &provider.ToolCallChunk{CallID: "tasks", Name: tool.AssistantTaskList, ArgsDelta: `{}`, Index: 6}},
+					{Tool: &provider.ToolCallChunk{CallID: "follow", Name: tool.AssistantTaskSend, ArgsDelta: `{"task_id":"fake","prompt":"fake"}`, Index: 7}},
 					{Done: true, Finish: provider.FinishToolCalls},
 				}}}
 				runner := tool.NewBuiltinRunner()
@@ -140,8 +143,8 @@ func TestOrdinaryAndChildConversationsRejectForgedAssistantToolCalls(t *testing.
 					}
 				}
 				requests := client.snapshot()
-				if results != 5 || len(requests) != 2 {
-					t.Fatalf("expected five rejections and one follow-up request: results=%d requests=%d", results, len(requests))
+				if results != 8 || len(requests) != 2 {
+					t.Fatalf("expected eight rejections and one follow-up request: results=%d requests=%d", results, len(requests))
 				}
 				for _, request := range requests {
 					if tool.HasDefinition(request.Tools, tool.AssistantRename) || tool.HasDefinition(request.Tools, tool.AssistantMemory) || tool.HasDefinition(request.Tools, tool.AssistantUserName) || strings.Contains(request.System, "## Personal Assistant Profile") {
