@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/teatak/pudding-core/internal/plugin"
+	"gopkg.in/yaml.v3"
 )
 
 const (
@@ -69,6 +70,21 @@ func (r *BuiltinRunner) pluginSave(ctx context.Context, call Call) Result {
 		Plugin:        plugin.PackagePlugin{ID: request.PluginID, Version: request.Version},
 		Files:         files,
 	}
+	for _, file := range files {
+		if file.Path != plugin.PluginFileName {
+			continue
+		}
+		var definition struct {
+			APIVersion string `yaml:"api_version"`
+		}
+		if err := yaml.Unmarshal([]byte(file.Content), &definition); err != nil {
+			return toolJSONError(out, "invalid_plugin_definition", err.Error())
+		}
+		if definition.APIVersion != "" {
+			pkg.SchemaVersion = plugin.PluginPackageAPISchemaVersion
+			pkg.Plugin.APIVersion = definition.APIVersion
+		}
+	}
 	packageJSON, err := json.Marshal(pkg)
 	if err != nil {
 		return toolJSONError(out, "plugin_package_failed", err.Error())
@@ -77,6 +93,8 @@ func (r *BuiltinRunner) pluginSave(ctx context.Context, call Call) Result {
 	if err != nil {
 		reason := "plugin_save_failed"
 		switch {
+		case errors.Is(err, plugin.ErrIncompatibleAPI):
+			reason = "plugin_api_incompatible"
 		case errors.Is(err, plugin.ErrBuiltinPlugin):
 			reason = "plugin_not_editable"
 		case errors.Is(err, plugin.ErrAlreadyExists):

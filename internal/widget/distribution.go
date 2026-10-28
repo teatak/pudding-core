@@ -51,7 +51,7 @@ func DecodeDistribution(data []byte, expectedHash string) (Distribution, string,
 	if !distributionID.MatchString(d.ID) || len(d.ID) > 240 || !distributionVersion.MatchString(d.Version) || len(d.Version) > 80 {
 		return d, "", errors.New("invalid widget package identity")
 	}
-	if d.Requires.ProtocolVersion < policy.Distribution.MinProtocolVersion || d.Requires.ProtocolVersion > contracts.Runtime().ProtocolVersion || d.Requires.SDKVersion != policy.SDKVersion {
+	if d.Requires.ProtocolVersion < policy.Distribution.MinProtocolVersion || d.Requires.ProtocolVersion > contracts.Runtime().ProtocolVersion || !contracts.SupportsVersion(d.Requires.SDKVersion, policy.SDKVersion) {
 		return d, "", errors.New("unsupported widget host requirements")
 	}
 	if len(d.Title) == 0 || len(d.Title) > 20 || len(d.Description) > 20 || len(d.Channel) > 64 {
@@ -70,9 +70,14 @@ func DecodeDistribution(data []byte, expectedHash string) (Distribution, string,
 	if d.Icon != "" && !ValidIconImage(d.Icon) {
 		return d, "", errors.New("invalid widget icon")
 	}
-	_, sourceHash, err := d.Source.Validate()
+	manifest, sourceHash, err := d.Source.Validate()
 	if err != nil {
 		return d, "", err
+	}
+	declared, _ := contracts.ParseAPIVersion(d.Requires.SDKVersion)
+	actual, _ := contracts.ParseAPIVersion(manifest.SDKVersion)
+	if declared != actual {
+		return d, "", errors.New("widget package and source SDK requirements differ")
 	}
 	if len(d.FileHashes) != len(d.Source.Files) {
 		return d, "", errors.New("invalid widget file inventory")

@@ -141,6 +141,10 @@ func (s *Server) installPlugin(c *cart.Context) error {
 	}
 	def, err := s.plugins.InstallPackage(c.Request.Context(), []byte(req.PackageJSON), req.PackageSHA256, req.SourceURL)
 	if err != nil {
+		if errors.Is(err, plugin.ErrIncompatibleAPI) {
+			c.JSON(http.StatusConflict, map[string]string{"error": "plugin_api_incompatible"})
+			return nil
+		}
 		if errors.Is(err, plugin.ErrPackageTooLarge) {
 			c.JSON(http.StatusRequestEntityTooLarge, map[string]string{"error": "plugin_package_too_large"})
 			return nil
@@ -257,6 +261,10 @@ func (s *Server) putPluginEnabled(c *cart.Context) error {
 	}
 	id, _ := c.Param("id")
 	def, err := plugins.SetEnabled(c.Request.Context(), id, *req.Enabled)
+	if errors.Is(err, plugin.ErrIncompatibleAPI) {
+		c.JSON(http.StatusConflict, map[string]string{"error": "plugin_api_incompatible"})
+		return nil
+	}
 	if errors.Is(err, plugin.ErrInvalidID) {
 		return badRequest(c, "invalid plugin id")
 	}

@@ -1,5 +1,35 @@
 # Public client contracts
 
+## Extension compatibility and Hub sources
+
+Widget SDK and Plugin API are independent stable semantic versions. Their current
+versions are `widget.json.sdkVersion` and `plugin.json.apiVersion` (both 1.1.0).
+An extension declares the minimum version it needs; the host accepts the same
+major with a requirement no newer than its own version. Compatible additions
+increment minor, compatible fixes increment patch, and breaking changes increment
+major. Preview channels belong to extension releases, not API version syntax.
+Do not add a Pudding application-version requirement.
+
+Legacy Widget SDK `"1"` maps to 1.0.0; legacy plugins without `api_version` use
+1.0.0, and existing catalog `pudding_plugin: "^1.0.0"` remains accepted. This does
+not retroactively certify every historical package against every old host.
+Widget source and distribution SDK declarations must agree. Plugin package v2
+records `plugin.api_version`, matching `plugin.yaml.api_version`; package v1 stays
+readable. Installation rejects unsupported requirements before replacement.
+Installed incompatible widgets cannot execute and show an update instruction;
+plugins stay listed but cannot enable or resolve endpoints. Files, connections,
+storage and saved enablement preferences remain intact. Build receipts describe
+the actual compiler SDK and must match the running host; they are not minimum
+package requirements.
+
+`hub.mjs`/`hub.d.mts` define the public root Hub index. Each stable source ID has
+one current catalog per type. Persisted source references contain the index URL
+and `source` query parameter, not the catalog directory. Only the index resolves
+that identity to its current download URL. Existing official install ownership
+is retained through exact aliases; another index or source ID cannot adopt it.
+The Hub keeps a generated copy of this public validator for PR checks without
+requiring access to a separate Core checkout.
+
 `runtime.json` is the single source for `protocolVersion` and browser capacity limits.
 The Go daemon embeds it through this package; desktop generates `web/contracts/` from the same pinned revision.
 `api.ts` and `events.ts` are the TypeScript/Zod client validation definitions for the REST and SSE protocol.

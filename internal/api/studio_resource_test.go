@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"github.com/teatak/pudding-core/contracts"
 	"net/http"
 	"strings"
 	"testing"
@@ -55,7 +56,7 @@ func TestWidgetVersionsRetainIdentityAndRequireBuild(t *testing.T) {
 	if resource.ActiveRevision != first {
 		t.Fatal("unbuilt source replaced working widget")
 	}
-	response = req(t, "POST", base+"/build-receipts", map[string]any{"revisionHash": resource.HeadRevision, "sdkVersion": "1", "compilerVersion": "test", "dependencyHash": strings.Repeat("a", 64), "ok": true})
+	response = req(t, "POST", base+"/build-receipts", map[string]any{"revisionHash": resource.HeadRevision, "sdkVersion": contracts.Widget().SDKVersion, "compilerVersion": "test", "dependencyHash": strings.Repeat("a", 64), "ok": true})
 	if response.StatusCode != 200 {
 		t.Fatal(response.StatusCode)
 	}

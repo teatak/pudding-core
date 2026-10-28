@@ -1,3 +1,4 @@
+import { parseVersion } from "./compatibility.mjs";
 import { z } from "zod";
 import { studioItem, studioItemRevision, studioIconImage } from "./studio";
 
@@ -45,7 +46,7 @@ export const widgetOperation = z
 export const widgetManifest = z
   .object({
     schemaVersion: z.literal(1),
-    sdkVersion: z.literal("1"),
+    sdkVersion: z.string().refine(value => parseVersion(value) !== null, "Invalid SDK version"),
     entry: z.string(),
     sources: z.record(z.string(), widgetSource),
     operations: z.record(z.string(), widgetOperation),

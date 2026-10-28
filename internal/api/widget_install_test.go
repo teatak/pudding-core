@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"github.com/teatak/pudding-core/contracts"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -91,7 +92,7 @@ func TestWidgetInstallUpgradeProtectsEditsAndData(t *testing.T) {
 	call("POST", "/studio/items/install", request(pkg, "copy", "copy-0001", nil), 400)
 	// Use normal build/activation APIs, then store shared data.
 	base := "/studio/items/" + w.ID
-	call("POST", base+"/build-receipts", map[string]any{"revisionHash": w.HeadRevision, "sdkVersion": "1", "compilerVersion": "test", "dependencyHash": fmt.Sprintf("%064d", 1), "ok": true}, 200)
+	call("POST", base+"/build-receipts", map[string]any{"revisionHash": w.HeadRevision, "sdkVersion": contracts.Widget().SDKVersion, "compilerVersion": "test", "dependencyHash": fmt.Sprintf("%064d", 1), "ok": true}, 200)
 	json.Unmarshal(call("POST", base+"/activate", map[string]any{"revisionHash": w.HeadRevision, "expectedRevision": w.Revision}, 200), &w)
 	call("PUT", base+"/data", map[string]any{"revisionHash": w.ActiveRevision, "expectedVersion": 0, "data": map[string]any{"tasks": []string{"Keep me"}}}, 200)
 	// An artwork-only update must persist without changing running source.

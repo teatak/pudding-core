@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/teatak/pudding-core/contracts"
 	"github.com/teatak/pudding-core/internal/home"
 	"github.com/teatak/pudding-core/internal/oauthbroker"
 	"github.com/teatak/pudding-core/internal/store"
@@ -22,6 +23,7 @@ var (
 	ErrNotFound                          = errors.New("plugin: not found")
 	ErrAlreadyExists                     = errors.New("plugin: already exists")
 	ErrBuiltinPlugin                     = errors.New("plugin: builtin plugin cannot be uninstalled")
+	ErrIncompatibleAPI                   = errors.New("plugin: incompatible API version; update the plugin or host")
 	ErrDisabled                          = errors.New("plugin: disabled")
 	ErrEnablementConfig                  = errors.New("plugin: enablement config unavailable")
 	ErrConnectionReauthorizationRequired = errors.New("plugin: connection reauthorization required")
@@ -145,6 +147,7 @@ func (s *Service) ListDefinitions(ctx context.Context) ([]*Definition, error) {
 	out := make([]*Definition, 0, len(builtins)+len(defs))
 	seen := make(map[string]bool, len(builtins)+len(defs))
 	for _, def := range builtins {
+		def.APIVersion = contracts.PluginAPIVersion()
 		if s.builtinToolAvailable != nil && len(def.Tools) > 0 {
 			tools := def.Tools[:0]
 			for _, item := range def.Tools {
@@ -201,6 +204,7 @@ func decorateRuntimeDefinition(def *Definition) *Definition {
 	if resolved == nil {
 		return nil
 	}
+	resolved.APIVersion = contracts.PluginAPIVersion()
 	resolved.ID = strings.TrimSpace(resolved.ID)
 	resolved.Name = strings.TrimSpace(resolved.Name)
 	resolved.Kind = normalizedDefinitionKind(resolved.Kind)
@@ -252,6 +256,10 @@ func applyEnabledOverride(def *Definition, enabled map[string]bool) {
 	if def == nil {
 		return
 	}
+	if !contracts.SupportsPluginAPI(def.APIVersion) {
+		def.Enabled = false
+		return
+	}
 	if value, ok := enabled[def.ID]; ok {
 		def.Enabled = value
 	}
@@ -281,6 +289,9 @@ func (s *Service) SetEnabled(ctx context.Context, id string, enabled bool) (*Def
 	def, err := s.definition(ctx, id)
 	if err != nil {
 		return nil, err
+	}
+	if enabled && !contracts.SupportsPluginAPI(def.APIVersion) {
+		return nil, ErrIncompatibleAPI
 	}
 	if s.enablement == nil {
 		return nil, ErrEnablementConfig

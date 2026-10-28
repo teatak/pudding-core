@@ -51,3 +51,15 @@ func TestPluginSourcesPersistAndRemainIndependent(t *testing.T) {
 		t.Fatal("overwrote unsupported config")
 	}
 }
+
+func TestOfficialPluginIndexReferenceDoesNotAddADuplicateSource(t *testing.T) {
+	m := NewManager(t.TempDir())
+	source, err := m.AddPluginSource(context.Background(), "https://teatak.github.io/pudding-hub/index.json?source=teatak%2Fpudding-hub")
+	if err != nil || !source.Official || source.URL != OfficialPluginRegistry {
+		t.Fatal(source, err)
+	}
+	sources, err := m.PluginSources(context.Background())
+	if err != nil || len(sources) != 1 {
+		t.Fatal(sources, err)
+	}
+}

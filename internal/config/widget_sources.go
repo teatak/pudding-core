@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"github.com/teatak/pudding-core/contracts"
 	"net/url"
 	"os"
 	"strings"
@@ -34,7 +35,7 @@ func NormalizeWidgetRegistryURL(raw string) (string, error) {
 	if u.Port() == "443" {
 		u.Host = strings.TrimSuffix(u.Host, ":443")
 	}
-	return u.String(), nil
+	return contracts.CatalogSourceIdentity("widget", u.String()), nil
 }
 
 func widgetSource(raw string) WidgetSource {

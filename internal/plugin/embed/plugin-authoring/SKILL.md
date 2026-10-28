@@ -32,6 +32,7 @@ Installed files live under `<home>/plugins/<plugin-id>/`. The usual development 
 A minimal service definition looks like this. The example address is a placeholder, not a usable API:
 
 ```yaml
+api_version: 1.1.0
 id: example-service
 name: Example Service
 version: 0.1.0
@@ -186,6 +187,7 @@ Call builtin_plugin_save with the complete UTF-8 package-managed file set:
 - create refuses to replace an existing plugin.
 - update requires an installed, non-builtin, non-runtime plugin.
 - plugin_id must match plugin.yaml.id; version must agree when declared.
+- Declare the minimum stable Plugin API in plugin.yaml.api_version (current baseline: 1.1.0). Major changes are incompatible; compatible additions increment the minor version. The save tool records the declaration in the package. Legacy files without a declaration remain supported; never bind compatibility to the Pudding app version.
 - files is a complete replacement, not a patch. Include unchanged files that must remain.
 - Exclude installation locks, private MCP overrides and connection files.
 - Include README or other notes only when a runtime Skill needs them.

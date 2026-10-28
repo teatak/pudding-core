@@ -1,0 +1,21 @@
+[
+ {"required":"1","provided":"1.1.0","sdk":true,"plugin":true},
+ {"required":"1.0.0","provided":"1.1.0","sdk":true,"plugin":true},
+ {"required":"1.1.0","provided":"1.1.0","sdk":true,"plugin":true},
+ {"required":"1.2.0","provided":"1.1.0","sdk":false,"plugin":false},
+ {"required":"1.1.1","provided":"1.1.0","sdk":false,"plugin":false},
+ {"required":"2.0.0","provided":"1.1.0","sdk":false,"plugin":false},
+ {"required":"1.0.0","provided":"2.0.0","sdk":false,"plugin":false},
+ {"required":"1.9.0","provided":"1.10.0","sdk":true,"plugin":true},
+ {"required":"^1.0.0","provided":"1.1.0","sdk":false,"plugin":true},
+ {"required":"^1.0.0","provided":"2.0.0","sdk":false,"plugin":false},
+ {"required":"^0.2.0","provided":"0.3.0","sdk":false,"plugin":false},
+ {"required":"^0.2.0","provided":"0.2.1","sdk":false,"plugin":true},
+ {"required":"^0.0.1","provided":"0.0.2","sdk":false,"plugin":false},
+ {"required":"","provided":"1.1.0","sdk":false,"plugin":true},
+ {"required":"01.0.0","provided":"1.1.0","sdk":false,"plugin":false},
+ {"required":"1.0","provided":"1.1.0","sdk":false,"plugin":false},
+ {"required":"1.0.0-preview.1","provided":"1.1.0","sdk":false,"plugin":false},
+ {"required":">=1.0.0","provided":"1.1.0","sdk":false,"plugin":false},
+ {"required":"9007199254740992.0.0","provided":"1.1.0","sdk":false,"plugin":false}
+]

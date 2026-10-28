@@ -35,6 +35,7 @@ import (
 	"github.com/teatak/pudding-core/internal/store"
 	"github.com/teatak/pudding-core/internal/tool"
 	"github.com/teatak/pudding-core/internal/turnfiles"
+	"github.com/teatak/pudding-core/internal/widget"
 	"golang.org/x/sync/singleflight"
 )
 
@@ -1737,6 +1738,10 @@ func (s *Server) putUserPrompt(c *cart.Context) error {
 }
 
 func (s *Server) fail(c *cart.Context, err error) error {
+	if errors.Is(err, widget.ErrIncompatibleSDK) {
+		c.JSON(http.StatusConflict, map[string]string{"error": "widget_sdk_incompatible", "detail": err.Error()})
+		return nil
+	}
 	if errors.Is(err, store.ErrNotFound) {
 		c.JSON(http.StatusNotFound, map[string]string{"error": "not_found"})
 		return nil

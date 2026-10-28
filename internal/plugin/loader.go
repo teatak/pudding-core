@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/teatak/pudding-core/contracts"
 	"gopkg.in/yaml.v3"
 )
 
@@ -25,6 +26,7 @@ var connectionFieldIDPattern = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_-]*$`)
 var endpointPlatformPattern = regexp.MustCompile(`^[a-z][a-z0-9_-]*$`)
 
 type fileDefinition struct {
+	APIVersion  string                 `yaml:"api_version,omitempty"`
 	Kind        string                 `yaml:"kind,omitempty"`
 	ID          string                 `yaml:"id"`
 	Name        string                 `yaml:"name"`
@@ -131,6 +133,7 @@ func LoadDefinitionDir(dir string) (*Definition, error) {
 		return nil, fmt.Errorf("plugin: parse %s: %w", path, err)
 	}
 	def := &Definition{
+		APIVersion:  strings.TrimSpace(raw.APIVersion),
 		Kind:        normalizedDefinitionKind(raw.Kind),
 		ID:          strings.TrimSpace(raw.ID),
 		Name:        strings.TrimSpace(raw.Name),
@@ -280,6 +283,11 @@ func defaultPluginIconPath(pluginDir string) string {
 func ValidateDefinition(def *Definition) error {
 	if def == nil {
 		return errors.New("definition is nil")
+	}
+	if def.APIVersion != "" {
+		if _, valid := contracts.ParseAPIVersion(def.APIVersion); !valid {
+			return fmt.Errorf("invalid plugin API version %q", def.APIVersion)
+		}
 	}
 	def.Kind = normalizedDefinitionKind(def.Kind)
 	switch def.Kind {

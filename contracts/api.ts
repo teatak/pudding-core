@@ -1300,6 +1300,7 @@ export const pluginConnectionConfig = z.object({
 });
 
 export const pluginDefinition = z.object({
+  apiVersion: z.string().optional(),
   kind: z.enum(["plugin", "mcp"]),
   id: z.string(),
   name: z.string(),

@@ -85,6 +85,8 @@ func DecodeStrict(data []byte, target any) error {
 	return nil
 }
 
+var ErrIncompatibleSDK = errors.New("widget_sdk_incompatible")
+
 func (p Package) Validate() (Manifest, string, error) {
 	var m Manifest
 	policy := contracts.Widget()
@@ -104,8 +106,11 @@ func (p Package) Validate() (Manifest, string, error) {
 	if err := DecodeStrict([]byte(p.Files[ManifestFile]), &m); err != nil {
 		return m, "", fmt.Errorf("widget.json: %w", err)
 	}
-	if m.SchemaVersion != policy.SchemaVersion || m.SDKVersion != policy.SDKVersion {
-		return m, "", errors.New("unsupported widget or SDK version")
+	if m.SchemaVersion != policy.SchemaVersion {
+		return m, "", errors.New("unsupported widget schema version")
+	}
+	if !contracts.SupportsVersion(m.SDKVersion, policy.SDKVersion) {
+		return m, "", fmt.Errorf("%w: requires Widget SDK %s; host supports %s", ErrIncompatibleSDK, m.SDKVersion, policy.SDKVersion)
 	}
 	if !strings.HasPrefix(m.Entry, "src/") || !strings.HasSuffix(m.Entry, ".tsx") || p.Files[m.Entry] == "" {
 		return m, "", errors.New("entry must reference an existing src/*.tsx file")

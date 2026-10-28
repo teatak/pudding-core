@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/teatak/pudding-core/contracts"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -15,12 +16,13 @@ import (
 )
 
 const (
-	PluginPackageKind          = "pudding.plugin.package"
-	PluginPackageSchemaVersion = 1
-	PluginLockFileName         = ".pudding-plugin-lock.json"
-	PluginLockKind             = "pudding.plugin.lock"
-	MaxPackageJSONBytes        = 8 << 20
-	MaxPackageFiles            = 512
+	PluginPackageKind             = "pudding.plugin.package"
+	PluginPackageSchemaVersion    = 1
+	PluginPackageAPISchemaVersion = 2
+	PluginLockFileName            = ".pudding-plugin-lock.json"
+	PluginLockKind                = "pudding.plugin.lock"
+	MaxPackageJSONBytes           = 8 << 20
+	MaxPackageFiles               = 512
 )
 
 var ErrSourceConflict = errors.New("plugin is already installed from another source")
@@ -35,6 +37,7 @@ type Package struct {
 }
 
 type PackagePlugin struct {
+	APIVersion  string `json:"api_version,omitempty"`
 	ID          string `json:"id"`
 	Name        string `json:"name,omitempty"`
 	Version     string `json:"version"`
@@ -81,8 +84,14 @@ func InstallPackage(root string, packageJSON []byte, expectedSHA256, sourceURL s
 	if pkg.Kind != PluginPackageKind {
 		return nil, fmt.Errorf("unsupported plugin package kind %q", pkg.Kind)
 	}
-	if pkg.SchemaVersion != PluginPackageSchemaVersion {
+	if pkg.SchemaVersion != PluginPackageSchemaVersion && pkg.SchemaVersion != PluginPackageAPISchemaVersion {
 		return nil, fmt.Errorf("unsupported plugin package schema %d", pkg.SchemaVersion)
+	}
+	if pkg.SchemaVersion == PluginPackageAPISchemaVersion && pkg.Plugin.APIVersion == "" {
+		return nil, errors.New("plugin API version is required")
+	}
+	if !contracts.SupportsPluginAPI(pkg.Plugin.APIVersion) {
+		return nil, fmt.Errorf("%w: requires Plugin API %s; host supports %s", ErrIncompatibleAPI, pkg.Plugin.APIVersion, contracts.PluginAPIVersion())
 	}
 	pluginID := strings.TrimSpace(pkg.Plugin.ID)
 	if !pluginIDPattern.MatchString(pluginID) {
@@ -149,6 +158,16 @@ func InstallPackage(root string, packageJSON []byte, expectedSHA256, sourceURL s
 	}
 	if tempDef.Version != "" && tempDef.Version != pluginVersion {
 		return nil, fmt.Errorf("package version %q does not match %s version %q", pluginVersion, PluginFileName, tempDef.Version)
+	}
+	if !contracts.SupportsPluginAPI(tempDef.APIVersion) {
+		return nil, fmt.Errorf("%w: requires Plugin API %s; host supports %s", ErrIncompatibleAPI, tempDef.APIVersion, contracts.PluginAPIVersion())
+	}
+	if pkg.SchemaVersion == PluginPackageAPISchemaVersion || pkg.Plugin.APIVersion != "" {
+		declared, _ := contracts.ParseAPIVersion(pkg.Plugin.APIVersion)
+		actual, valid := contracts.ParseAPIVersion(tempDef.APIVersion)
+		if !valid || declared != actual {
+			return nil, errors.New("plugin package and plugin.yaml API requirements differ")
+		}
 	}
 	overrides, err := LoadMCPOverrideFile(filepath.Join(tempDir, MCPOverrideFileName))
 	if err != nil {
@@ -364,5 +383,5 @@ func canonicalSourceURL(raw string) string {
 	if u.Scheme == "https" && u.Port() == "443" {
 		u.Host = strings.TrimSuffix(u.Host, ":443")
 	}
-	return u.String()
+	return contracts.CatalogSourceIdentity("plugin", u.String())
 }

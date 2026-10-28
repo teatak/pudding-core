@@ -46,6 +46,7 @@ const (
 )
 
 type Definition struct {
+	APIVersion     string              `json:"apiVersion,omitempty" yaml:"api_version,omitempty"`
 	Kind           string              `json:"kind" yaml:"kind,omitempty"`
 	ID             string              `json:"id" yaml:"id"`
 	Name           string              `json:"name" yaml:"name"`

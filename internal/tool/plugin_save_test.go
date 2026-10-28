@@ -148,3 +148,27 @@ func jsonReasonIs(content, reason string) bool {
 	var payload map[string]any
 	return json.Unmarshal([]byte(content), &payload) == nil && payload["reason"] == reason
 }
+
+func TestBuiltinPluginSaveUsesDeclaredAPIVersionAndPreservesPreviousPluginOnFailure(t *testing.T) {
+	homeDir := t.TempDir()
+	plugins := plugin.NewService(homeDir, nil)
+	runner := NewBuiltinRunner(WithPluginAuthoring(plugins))
+	save := func(api string, operation string) Result {
+		return callPluginSave(t, runner, pluginSaveRequest{Operation: operation, PluginID: "sample", Version: "1.0.0", Files: []pluginSaveRequestFile{{Path: "plugin.yaml", Content: "id: sample\nname: Sample\nversion: 1.0.0\napi_version: " + api + "\n"}}})
+	}
+	if result := save("1.1.0", "create"); !result.Ok {
+		t.Fatal(result)
+	}
+	def, err := findInstalledPlugin(context.Background(), plugins, "sample")
+	if err != nil || def.APIVersion != "1.1.0" {
+		t.Fatal(def, err)
+	}
+	result := save("2.0.0", "update")
+	if result.Ok || !jsonReasonIs(result.Content, "plugin_api_incompatible") {
+		t.Fatal(result)
+	}
+	def, err = findInstalledPlugin(context.Background(), plugins, "sample")
+	if err != nil || def.APIVersion != "1.1.0" {
+		t.Fatal("original plugin not preserved", def, err)
+	}
+}
