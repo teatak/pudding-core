@@ -24,7 +24,7 @@ export function officialCatalogIdentity(type) {
   return `${base}${type === 'plugin' ? 'plugins' : 'widgets'}/registry.json`;
 }
 export function catalogSourceIdentity(type, value) {
-  const url = httpsURL(value).href;
+  const url = new URL(value).href;
   const folder = type === 'plugin' ? 'plugins' : 'widgets';
   const aliases = [officialCatalogIdentity(type), `${base}extensions/${folder}/registry.json`, `${base}${folder}/registry-v2.json`, hubSourceReference(HUB_INDEX_URL, OFFICIAL_HUB_ID)];
   const reference = new URL(url);

@@ -184,3 +184,38 @@ func TestWidgetInstallUpgradeProtectsEditsAndData(t *testing.T) {
 	call("POST", base+"/archive", map[string]any{"expectedRevision": w.Revision}, 200)
 	call("POST", "/studio/items/install", request(pkg, "install", "install-3", nil), 409)
 }
+
+func TestWidgetOfficialIndexMigrationPreservesInstalledIdentity(t *testing.T) {
+	st := storetest.New(t)
+	handler := New(nil, st, st, nil).WithHome(t.TempDir()).Handler("fixture-token", nil)
+	install := func(version, registry string, previous *store.StudioItem) store.StudioItem {
+		t.Helper()
+		pkg := distributionFixture(t, version, "export default ()=> <p>"+version+"</p>")
+		raw, _ := json.Marshal(pkg)
+		body := map[string]any{"packageJSON": string(raw), "packageHash": fmt.Sprintf("%x", sha256.Sum256(raw)), "packageID": pkg["id"], "version": version, "registryURL": registry, "clientRequestID": "source-move-" + version, "mode": "install", "locale": "en"}
+		if previous != nil {
+			body["mode"] = "upgrade"
+			body["itemID"] = previous.ID
+			body["expectedRevision"] = previous.Revision
+		}
+		encoded, _ := json.Marshal(body)
+		request := httptest.NewRequest("POST", "/studio/items/install", bytes.NewReader(encoded))
+		request.Header.Set("Authorization", "Bearer fixture-token")
+		out := httptest.NewRecorder()
+		handler.ServeHTTP(out, request)
+		if out.Code != 200 {
+			t.Fatal(out.Code, out.Body.String())
+		}
+		var result store.StudioItem
+		if err := json.Unmarshal(out.Body.Bytes(), &result); err != nil {
+			t.Fatal(err)
+		}
+		return result
+	}
+	legacy := "https://teatak.github.io/pudding-hub/widgets/registry.json"
+	original := install("1.0.0", legacy, nil)
+	upgraded := install("1.1.0", "https://teatak.github.io/pudding-hub/index.json?source=teatak%2Fpudding-hub", &original)
+	if upgraded.ID != original.ID || upgraded.Origin.RegistryURL != legacy || upgraded.Origin.Version != "1.1.0" {
+		t.Fatal("catalog migration changed widget ownership", upgraded)
+	}
+}
