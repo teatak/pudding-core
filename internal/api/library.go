@@ -36,10 +36,35 @@ func (s *Server) listLibrary(c *cart.Context) error {
 		return s.fail(c, err)
 	}
 	entries := make([]libraryEntry, 0, len(favorites)+len(saved))
-	savedFavorites := map[string]string{}
+	savedMap := make(map[string]*store.StudioItem, len(saved))
+	for _, item := range saved {
+		savedMap[item.ID] = item
+	}
+	savedFavorites := make(map[string]bool, len(favorites))
 	for _, f := range favorites {
 		if f.Kind == "studio" {
-			savedFavorites[f.SavedItemID] = f.ID
+			item := savedMap[f.SavedItemID]
+			if item == nil {
+				continue
+			}
+			savedFavorites[f.SavedItemID] = true
+			entries = append(entries, libraryEntry{
+				LibraryFavorite: store.LibraryFavorite{
+					ID:              "studio:" + item.ID,
+					Kind:            "studio",
+					SourceSessionID: item.SourceSessionID,
+					SavedItemID:     item.ID,
+					Title:           item.Name,
+					CreatedAt:       f.CreatedAt,
+				},
+				Icon:       item.Icon,
+				IconColor:  item.IconColor,
+				FavoriteID: f.ID,
+				ItemKind:   item.Kind,
+				Revision:   item.Revision,
+				UpdatedAt:  item.UpdatedAt,
+				Available:  true,
+			})
 			continue
 		}
 		entry := libraryEntry{LibraryFavorite: *f, FavoriteID: f.ID, UpdatedAt: f.CreatedAt, Available: true}
@@ -47,11 +72,17 @@ func (s *Server) listLibrary(c *cart.Context) error {
 		entries = append(entries, entry)
 	}
 	for _, item := range saved {
-
+		if savedFavorites[item.ID] {
+			continue
+		}
 		entries = append(entries, libraryEntry{
 			LibraryFavorite: store.LibraryFavorite{ID: "studio:" + item.ID, Kind: "studio", SourceSessionID: item.SourceSessionID, SavedItemID: item.ID, Title: item.Name, CreatedAt: item.CreatedAt},
-			Icon:            item.Icon, IconColor: item.IconColor,
-			FavoriteID: savedFavorites[item.ID], ItemKind: item.Kind, Revision: item.Revision, UpdatedAt: item.UpdatedAt, Available: true,
+			Icon:            item.Icon,
+			IconColor:       item.IconColor,
+			ItemKind:        item.Kind,
+			Revision:        item.Revision,
+			UpdatedAt:       item.UpdatedAt,
+			Available:       true,
 		})
 	}
 	ids := make([]string, 0, len(entries))
