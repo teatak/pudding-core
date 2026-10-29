@@ -25,8 +25,17 @@ func TestSandboxCommandGrantBoundaries(t *testing.T) {
 	if grant == nil || grant.Kind != "sandbox_command" || grant.Execution != CommandExecutionSandbox {
 		t.Fatalf("grant=%+v", grant)
 	}
+	if grant.Identity() != (CommandGrantIdentity{}) {
+		t.Fatal("diagnostic fingerprints generated without opt-in")
+	}
+	diagnosticCall := base
+	diagnosticCall.CommandDiagnostics = true
+	diagnosticGrant := CommandSessionGrantForCall(diagnosticCall)
+	if diagnosticGrant == nil || diagnosticGrant.Key != grant.Key || diagnosticGrant.Identity().Program == "" {
+		t.Fatal("diagnostics changed authorization or failed to generate fingerprints")
+	}
 	risk, _ := ClassifyToolCallForProject(base.Name, base.Args, base.ProjectDirs)
-	if risk.LowRisk || !slices.Contains(risk.ApprovalReasons, "custom_environment") {
+	if !risk.LowRisk || slices.Contains(risk.ApprovalReasons, "custom_environment") {
 		t.Fatalf("risk=%+v", risk)
 	}
 	for _, tc := range []struct {

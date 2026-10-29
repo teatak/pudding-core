@@ -98,11 +98,21 @@ func TestAutoDynamicCommandDispatchKeepsSandboxAndScope(t *testing.T) {
 }
 
 func TestSandboxSessionCommandApprovals(t *testing.T) {
+	t.Run("diagnostics-off", func(t *testing.T) { testSandboxSessionCommandApprovals(t, false) })
+	t.Run("diagnostics-on", func(t *testing.T) { testSandboxSessionCommandApprovals(t, true) })
+}
+
+func testSandboxSessionCommandApprovals(t *testing.T, diagnostics bool) {
 	ctx := context.Background()
 	root := t.TempDir()
 	ms := storetest.New(t)
+	if diagnostics {
+		if err := ms.SetSettings(ctx, map[string]string{"developer_approval_diagnostics": "true"}); err != nil {
+			t.Fatal(err)
+		}
+	}
 	for _, id := range []string{"a", "b"} {
-		if err := ms.CreateProject(ctx, &store.Project{ID: id, RootDirs: []string{root}, ApprovalMode: store.ApprovalAuto}); err != nil {
+		if err := ms.CreateProject(ctx, &store.Project{ID: id, RootDirs: []string{root}, ApprovalMode: store.ApprovalAsk}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -137,8 +147,11 @@ func TestSandboxSessionCommandApprovals(t *testing.T) {
 				if !wantApproval || approvals > 1 {
 					t.Fatalf("unexpected approval: %s", ev.Payload)
 				}
-				if !strings.Contains(string(ev.Payload), "sandbox_command") || !strings.Contains(string(ev.Payload), "custom_environment") {
+				if !strings.Contains(string(ev.Payload), "sandbox_command") || strings.Contains(string(ev.Payload), "ask_mode") != diagnostics {
 					t.Fatalf("missing scope/reasons: %s", ev.Payload)
+				}
+				if strings.Contains(string(ev.Payload), "sessionGrantMissReason") != diagnostics {
+					t.Fatalf("diagnostic payload did not respect opt-in: %s", ev.Payload)
 				}
 				if beforeApprove != nil {
 					beforeApprove()
@@ -169,15 +182,21 @@ func TestSandboxSessionCommandApprovals(t *testing.T) {
 	execute("one", "cat file.txt", true, ApprovalScopeSession, nil, true)
 	execute("one", "cat file.txt", false, ApprovalScopeTurn, nil, true)
 	status := eng.CommandApprovals("one")
-	if status.GrantCount != 1 || status.ReusedCount != 1 || status.ApprovalReasons["custom_environment"] != 2 {
+	if status.GrantCount != 1 || status.DiagnosticsEnabled != diagnostics || (diagnostics && (status.ReusedCount != 1 || status.ApprovalReasons["ask_mode"] != 2)) {
 		t.Fatalf("status=%+v", status)
 	}
-	status.ApprovalReasons["custom_environment"] = 999
-	if eng.CommandApprovals("one").ApprovalReasons["custom_environment"] == 999 {
+	if !diagnostics && (status.ReusedCount != 0 || len(status.ApprovalReasons) != 0 || len(status.ReuseMissReasons) != 0 || len(eng.commandGrants["one"].identities) != 0) {
+		t.Fatalf("disabled diagnostics collected data: %+v", status)
+	}
+	status.ApprovalReasons["ask_mode"] = 999
+	if eng.CommandApprovals("one").ApprovalReasons["ask_mode"] == 999 {
 		t.Fatal("status exposed mutable authority")
 	}
 	execute("two", "cat file.txt", true, ApprovalScopeTurn, nil, true)
 	execute("one", "cat changed.txt", true, ApprovalScopeTurn, nil, true)
+	if diagnostics && eng.CommandApprovals("one").ReuseMissReasons["arguments_changed"] != 1 {
+		t.Fatal("changed command did not explain reuse failure")
+	}
 	eng.RevokeCommandApprovals("one")
 	execute("one", "cat file.txt", true, ApprovalScopeSession, nil, true)
 	execute("one", "cat changed.txt", true, ApprovalScopeSession, func() { eng.RevokeCommandApprovals("one") }, false)

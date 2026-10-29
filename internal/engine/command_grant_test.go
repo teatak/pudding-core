@@ -20,6 +20,16 @@ import (
 )
 
 func TestHeadlessScreenshotSessionApproval(t *testing.T) {
+	for _, template := range []bool{false, true} {
+		name := "literal"
+		if template {
+			name = "historical shell template"
+		}
+		t.Run(name, func(t *testing.T) { testHeadlessScreenshotSessionApproval(t, template) })
+	}
+}
+
+func testHeadlessScreenshotSessionApproval(t *testing.T, template bool) {
 	ctx := context.Background()
 	ms := storetest.New(t)
 	root := t.TempDir()
@@ -49,6 +59,10 @@ func TestHeadlessScreenshotSessionApproval(t *testing.T) {
 	eng := New(ms, hub, registry.Static(mock.New()), ms, WithTools(runner))
 	defer eng.Stop()
 	base := "'" + chrome + "' --headless=new --user-data-dir=.preview-profile --screenshot=one.png --window-size=800,600 page.html"
+	if template {
+		t.Setenv("TMPDIR", t.TempDir())
+		base = strings.Replace(base, "--user-data-dir=.preview-profile", `--user-data-dir="$TMPDIR/.preview-profile"`, 1) + " 2>/dev/null; echo done"
+	}
 	execute := func(name, sessionID, command string, wantApproval bool, scope ApprovalScope, deny bool) {
 		t.Helper()
 		t.Run(name, func(t *testing.T) {
@@ -58,8 +72,12 @@ func TestHeadlessScreenshotSessionApproval(t *testing.T) {
 			defer cancel()
 			done := make(chan tool.Result, 1)
 			raw, _ := json.Marshal(map[string]any{"scope": "project", "execution": "host", "host_access_reason": "headless rendering", "command": command})
+			turnID := "same_turn"
+			if name == "later_turn" {
+				turnID = "later_turn"
+			}
 			go func() {
-				done <- eng.executeAllowedTool(runCtx, sessionID, "turn_"+name, store.ModeCode, tool.Call{SessionID: sessionID, CallID: "call_" + name, Name: tool.CommandRun, Args: raw})
+				done <- eng.executeAllowedTool(runCtx, sessionID, turnID, store.ModeCode, tool.Call{SessionID: sessionID, CallID: "call_" + name, Name: tool.CommandRun, Args: raw})
 			}()
 			approvals := 0
 			for {
@@ -107,6 +125,7 @@ func TestHeadlessScreenshotSessionApproval(t *testing.T) {
 		command := strings.ReplaceAll(strings.ReplaceAll(base, "one.png", name), "800,600", "1200,900")
 		execute("repeat_"+name, "session", command, false, ApprovalScopeTurn, false)
 	}
+	execute("later_turn", "session", base, false, ApprovalScopeTurn, false)
 	execute("other_session", "other-session", base, true, ApprovalScopeTurn, false)
 	execute("other_profile", "session", strings.ReplaceAll(base, ".preview-profile", ".other-profile"), true, ApprovalScopeTurn, false)
 	projectID := "other-project"

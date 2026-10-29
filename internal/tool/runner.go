@@ -10,17 +10,19 @@ import (
 )
 
 type Call struct {
-	SessionID       string
-	TurnID          string
-	CallID          string
-	Name            string
-	Args            json.RawMessage
-	Mode            store.AgentMode
-	ProjectDirs     []string
-	CommandSandbox  CommandSandboxMode
-	CommandStateKey string
-	CommandGrant    *CommandSessionGrant // Engine-owned prepared invocation, never tool input.
-	FileCopyGrant   *FileCopyPlan        // Engine-approved exact endpoints; never tool input.
+	SessionID          string
+	TurnID             string
+	CallID             string
+	Name               string
+	Args               json.RawMessage
+	Mode               store.AgentMode
+	ProjectDirs        []string
+	CommandSandbox     CommandSandboxMode
+	CommandArtifactDir string // Engine-resolved current-session artifacts; never tool input.
+	CommandDiagnostics bool   // Engine-owned developer opt-in; never tool input or authorization.
+	CommandStateKey    string
+	CommandGrant       *CommandSessionGrant // Engine-owned prepared invocation, never tool input.
+	FileCopyGrant      *FileCopyPlan        // Engine-approved exact endpoints; never tool input.
 }
 
 type CommandSandboxMode string

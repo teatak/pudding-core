@@ -64,7 +64,7 @@ func TestCoreDefinitionsUseSmallStableCodeSurface(t *testing.T) {
 	}
 	for _, name := range []string{
 		RequestCapability, SetNextPrompt, CommandRun, CommandSession, MediaRead,
-		FileList, FileRead, AttachmentExport, FileStat, FileSearch, FileSlice,
+		FileList, FileRead, AttachmentExport, TempWorkspace, FileStat, FileSearch, FileSlice,
 		FileWrite, FilePatch, FileDelete, FileMove, FileCopy,
 		GitStatus, GitDiff, GitLog, GitStage, GitUnstage, GitCommit,
 		CodeSymbols, CodeDefinition, CodeReferences, CodeDiagnostics, CodeRename,
@@ -80,8 +80,8 @@ func TestCoreDefinitionsUseSmallStableCodeSurface(t *testing.T) {
 	}
 	// Three assignment tools are available only in the fixed assistant; the
 	// engine removes them from ordinary and child sessions.
-	if len(first) > 39 {
-		t.Fatalf("Code Core tool count = %d, want <= 39", len(first))
+	if len(first) > 40 {
+		t.Fatalf("Code Core tool count = %d, want <= 40", len(first))
 	}
 }
 

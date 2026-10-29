@@ -34,6 +34,32 @@ CREATE TABLE IF NOT EXISTS assistant_task_dispatches (
 
 func migrateAssistantTasksV58(tx *sql.Tx) error { _, err := tx.Exec(assistantTasksSchema); return err }
 
+// Backfill only from the exact original tool call, not from a dispatch link:
+// existing conversations may also have been assigned to the assistant.
+func migrateAssistantTaskOriginV59(tx *sql.Tx) error {
+	if err := addTableColumnIfMissing(tx, "assistant_tasks", "created_session", "INTEGER NOT NULL DEFAULT 0"); err != nil {
+		return err
+	}
+	_, err := tx.Exec(`UPDATE assistant_tasks SET created_session=1 WHERE EXISTS (
+ SELECT 1 FROM assistant_task_dispatches d
+ JOIN messages m ON m.session_id=assistant_tasks.assistant_session_id AND m.turn_id=d.source_turn_id,
+ json_each(m.parts) p
+ WHERE d.task_id=assistant_tasks.id AND m.role='assistant'
+ AND json_extract(p.value,'$.type')='tool_use'
+ AND json_extract(p.value,'$.id')=d.call_id
+ AND json_extract(p.value,'$.name')='builtin_assistant_task_dispatch'
+ AND json_type(p.value,'$.args')='object'
+ AND coalesce(json_extract(p.value,'$.args.session_id'),'')=''
+);`)
+	return err
+}
+
+func (s *Store) IsAssistantCreatedSession(ctx context.Context, assistantID, sessionID string) (bool, error) {
+	var created bool
+	err := s.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM assistant_tasks WHERE assistant_session_id=? AND session_id=? AND created_session=1)`, assistantID, sessionID).Scan(&created)
+	return created, err
+}
+
 func assistantTaskRunsTx(ctx context.Context, tx *sql.Tx, sessionID string) ([]store.AssistantTaskRun, error) {
 	rows, err := tx.QueryContext(ctx, `SELECT a.id,a.assistant_session_id,a.session_id,a.title,d.source_turn_id,d.client_message_id,d.created_at,
  coalesce((SELECT id FROM turns WHERE session_id=a.session_id AND client_message_id=d.client_message_id ORDER BY created_at DESC,rowid DESC LIMIT 1),(SELECT nullif(turn_id,'') FROM queued_inputs WHERE session_id=a.session_id AND client_message_id=d.client_message_id),'')
@@ -186,6 +212,10 @@ func (s *Store) AssignAssistantTask(ctx context.Context, in store.AssignAssistan
 		if err != nil {
 			return err
 		}
+		// Keep the resolved destination and capability stable through enqueue.
+		if target.ProjectID != in.Session.ProjectID || target.ActiveMode != in.Session.ActiveMode || target.ModeLease != in.Session.ModeLease {
+			return store.ErrAssistantTaskContextChanged
+		}
 		owner, err := parentSessionIDTx(ctx, tx, target.ID)
 		if err != nil {
 			return err
@@ -198,7 +228,7 @@ func (s *Store) AssignAssistantTask(ctx context.Context, in store.AssignAssistan
 		}
 		if in.TaskID == "" {
 			in.TaskID = store.NewID("task")
-			if _, err := tx.ExecContext(ctx, `INSERT INTO assistant_tasks(id,assistant_session_id,session_id,title,created_at) VALUES(?,?,?,?,?)`, in.TaskID, in.AssistantSessionID, target.ID, strings.TrimSpace(in.Title), time.Now().UnixMilli()); err != nil {
+			if _, err := tx.ExecContext(ctx, `INSERT INTO assistant_tasks(id,assistant_session_id,session_id,title,created_at,created_session) VALUES(?,?,?,?,?,?)`, in.TaskID, in.AssistantSessionID, target.ID, strings.TrimSpace(in.Title), time.Now().UnixMilli(), boolInt(in.CreateSession)); err != nil {
 				return err
 			}
 		}

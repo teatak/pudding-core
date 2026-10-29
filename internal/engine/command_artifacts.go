@@ -7,7 +7,8 @@ import (
 	"github.com/teatak/pudding-core/internal/tool"
 )
 
-func (e *Engine) classifyToolCall(sessionID string, call tool.Call) (tool.ToolRisk, bool, error) {
+func (e *Engine) classifyToolCall(sessionID string, call *tool.Call) (tool.ToolRisk, bool, error) {
+	call.CommandArtifactDir = ""
 	var managedDirs []string
 	if call.Name == tool.CommandRun {
 		path, exists, err := home.ExistingSessionArtifacts(e.attachmentHome, sessionID)
@@ -15,6 +16,7 @@ func (e *Engine) classifyToolCall(sessionID string, call tool.Call) (tool.ToolRi
 			return tool.ToolRisk{}, false, fmt.Errorf("resolve command artifacts: %w", err)
 		}
 		if exists {
+			call.CommandArtifactDir = path
 			managedDirs = append(managedDirs, path)
 		}
 	}

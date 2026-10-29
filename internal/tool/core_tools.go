@@ -25,7 +25,7 @@ var chatCoreTools = map[string]bool{
 
 var codeCoreTools = map[string]bool{
 	CommandRun: true, CommandSession: true,
-	FileList: true, FileRead: true, AttachmentExport: true,
+	FileList: true, FileRead: true, AttachmentExport: true, TempWorkspace: true,
 	FileStat: true, FileSearch: true, FileSlice: true,
 	FileWrite: true, FilePatch: true, FileDelete: true,
 	FileMove: true, FileCopy: true,

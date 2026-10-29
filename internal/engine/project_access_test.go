@@ -217,7 +217,7 @@ func TestCommandDirectoryAndRiskUseOneApproval(t *testing.T) {
 					t.Fatalf("repeat %d requested another approval: %+v", i, result)
 				}
 			}
-			if status := eng.CommandApprovals("s"); status.GrantCount != 1 || status.ReusedCount != 4 || len(status.ProjectDirs) != 0 {
+			if status := eng.CommandApprovals("s"); status.GrantCount != 1 || status.ReusedCount != 0 || status.DiagnosticsEnabled || len(status.ProjectDirs) != 0 {
 				t.Fatalf("unexpected combined grant scope: %+v", status)
 			}
 		})

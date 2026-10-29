@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strings"
 	"testing"
 	"time"
 
@@ -52,8 +51,21 @@ func TestHostCommandsRequireFreshApproval(t *testing.T) {
 							continue
 						}
 						approvals++
-						if mode == store.ApprovalFull || approvals != 1 || strings.Contains(string(ev.Payload), "sessionGrant") || !strings.Contains(string(ev.Payload), "host_execution") {
+						var payload struct {
+							SessionGrant     json.RawMessage `json:"sessionGrant"`
+							Execution        string          `json:"execution"`
+							HostAccessReason string          `json:"hostAccessReason"`
+							ApprovalReasons  []string        `json:"approvalReasons"`
+							ReuseMissReason  string          `json:"sessionGrantMissReason"`
+						}
+						if err := json.Unmarshal(ev.Payload, &payload); err != nil {
+							t.Fatal(err)
+						}
+						if mode == store.ApprovalFull || approvals != 1 || len(payload.SessionGrant) > 0 || payload.Execution != "host" || payload.HostAccessReason != "Windows has no project sandbox" {
 							t.Fatalf("unexpected approval: %s", ev.Payload)
+						}
+						if len(payload.ApprovalReasons) != 0 || payload.ReuseMissReason != "" {
+							t.Fatalf("diagnostics emitted without opt-in: %s", ev.Payload)
 						}
 						var err error
 						if deny {

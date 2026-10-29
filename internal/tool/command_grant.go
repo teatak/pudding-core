@@ -31,6 +31,8 @@ type CommandSessionGrant struct {
 	argv            []string
 	env             []string
 	callArgs        json.RawMessage
+	identity        CommandGrantIdentity
+	shellSuffix     string
 }
 
 // Grants bind a literal invocation, not a program prefix. Sandbox grants never
@@ -43,23 +45,31 @@ func CommandSessionGrantForCall(call Call) *CommandSessionGrant {
 	if err != nil || args.Background || args.TTY {
 		return nil
 	}
-	argv := literalGrantCommand(args.Command)
-	if len(argv) == 0 {
-		return nil
-	}
 	env, err := commandEnvironment(args.Env)
 	if err != nil {
 		return nil
 	}
+	var argv []string
+	var suffix string
 	var grant *CommandSessionGrant
 	if args.Execution == CommandExecutionHost {
-		grant = chromeSessionGrantForCall(call, args, argv, env)
+		var tempProfile bool
+		argv, suffix, tempProfile = chromeGrantCommand(args.Command, env)
+		if len(argv) == 0 {
+			return nil
+		}
+		grant = chromeSessionGrantForCall(call, args, argv, env, tempProfile)
 	} else {
+		argv = literalGrantCommand(args.Command)
+		if len(argv) == 0 {
+			return nil
+		}
 		grant = sandboxSessionGrantForCall(call, args, argv, env)
 	}
 	if grant == nil {
 		return nil
 	}
+	grant.shellSuffix = suffix
 	grant.Execution = args.Execution
 	launchPath, err := resolveExecutableFromEnv(argv[0], grant.CWD, env)
 	if err != nil {
@@ -80,9 +90,22 @@ func CommandSessionGrantForCall(call Call) *CommandSessionGrant {
 		}
 		roots = append(roots, resolved)
 	}
-	data, _ := json.Marshal([]any{grant.Key, launchPath, args.Execution, call.CommandStateKey, roots, env})
+	data, _ := json.Marshal([]any{grant.Key, launchPath, args.Execution, call.CommandStateKey, roots, call.CommandArtifactDir, env, suffix})
 	hash := sha256.Sum256(data)
 	grant.Key = hex.EncodeToString(hash[:])
+	info, err := os.Stat(grant.Executable)
+	if err != nil {
+		return nil
+	}
+	if call.CommandDiagnostics {
+		grant.identity = CommandGrantIdentity{
+			Program:     commandIdentityHash(grant.Kind, grant.Executable),
+			Environment: commandIdentityHash(env),
+			Context:     commandIdentityHash(grant.CWD, roots, call.CommandArtifactDir, args.Execution, call.CommandStateKey),
+			Executable:  commandIdentityHash(info.Size(), info.ModTime().UnixNano(), info.Mode()),
+			Arguments:   commandIdentityHash(argv[1:], suffix),
+		}
+	}
 	return grant
 }
 
@@ -99,8 +122,12 @@ func literalGrantCommand(command string) []string {
 	if !ok || len(call.Assigns) != 0 || len(call.Args) == 0 {
 		return nil
 	}
-	argv := make([]string, 0, len(call.Args))
-	for _, word := range call.Args {
+	return literalGrantWords(call.Args)
+}
+
+func literalGrantWords(words []*syntax.Word) []string {
+	argv := make([]string, 0, len(words))
+	for _, word := range words {
 		if !isStaticCommandWord(word) {
 			return nil
 		}
@@ -133,33 +160,13 @@ func sandboxSessionGrantForCall(call Call, args commandRunArgs, argv, env []stri
 	if err != nil {
 		return nil
 	}
-	// Only project-local Python path configuration may relax the environment
-	// classifier for a reusable grant. Never lease PATH, NODE_OPTIONS, etc.
-	for key, value := range args.Env {
-		if !commandEnvironmentRequiresApproval(map[string]string{key: value}) {
-			continue
-		}
-		if key != "PYTHONPATH" && key != "VIRTUAL_ENV" {
-			return nil
-		}
-		for _, path := range filepath.SplitList(value) {
-			_, resolved, _, err := resolveProjectPath(call.ProjectDirs, path, true, false)
-			if !filepath.IsAbs(path) || err != nil {
-				return nil
-			}
-			info, err := os.Stat(resolved)
-			if err != nil || !info.IsDir() {
-				return nil
-			}
-		}
-		if value == "" {
-			return nil
-		}
+	if commandEnvironmentRequiresApprovalForProject(args.Env, call.ProjectDirs) {
+		return nil
 	}
 	base := args
 	base.Env = nil
 	raw, _ := json.Marshal(base)
-	risk, ok := classifyCommandCall(raw, call.ProjectDirs)
+	risk, ok := classifyCommandCall(raw, call.ProjectDirs, call.CommandArtifactDir)
 	if !ok || !risk.LowRisk || risk.Class != RiskClassCommand {
 		return nil
 	}
@@ -206,12 +213,20 @@ func (g *CommandSessionGrant) invocation(call Call) (string, []string, []string,
 	if !bytes.Equal(g.callArgs, call.Args) || fresh == nil || fresh.Key != g.Key {
 		return "", nil, nil, errors.New("command approval context changed; request approval again")
 	}
-	return "/bin/sh", []string{"-c", "exec " + joinShellCommand(g.argv)}, append([]string(nil), g.env...), nil
+	command := "exec " + joinShellCommand(g.argv)
+	if g.shellSuffix != "" {
+		command = joinShellCommand(g.argv) + g.shellSuffix
+	}
+	return "/bin/sh", []string{"-c", command}, append([]string(nil), g.env...), nil
 }
 
-func chromeSessionGrantForCall(call Call, args commandRunArgs, literalArgv, env []string) *CommandSessionGrant {
+func chromeSessionGrantForCall(call Call, args commandRunArgs, literalArgv, env []string, tempProfile bool) *CommandSessionGrant {
 	if len(args.Env) != 0 {
 		return nil
+	}
+	resourceRoots := append([]string(nil), call.ProjectDirs...)
+	if call.CommandArtifactDir != "" {
+		resourceRoots = append(resourceRoots, call.CommandArtifactDir)
 	}
 	argv := append([]string(nil), literalArgv...)
 	for _, arg := range argv {
@@ -237,7 +252,7 @@ func chromeSessionGrantForCall(call Call, args commandRunArgs, literalArgv, env 
 	}
 	// Never lease a program the agent can rewrite through its project access.
 	// This also excludes a project-local script merely named Google Chrome.
-	if commandPathInsideProject(executable, cwd, normalizeProjectDirs(call.ProjectDirs)) {
+	if commandPathInsideProject(executable, cwd, normalizeProjectDirs(resourceRoots)) {
 		return nil
 	}
 	grant := &CommandSessionGrant{Kind: "chrome_headless_screenshot", Executable: executable, CWD: cwd}
@@ -273,7 +288,18 @@ func chromeSessionGrantForCall(call Call, args commandRunArgs, literalArgv, env 
 			if !hasValue || value == "" {
 				return nil
 			}
-			target := commandGrantProjectPath(call.ProjectDirs, cwd, value, false)
+			target := commandGrantProjectPath(resourceRoots, cwd, value, false)
+			if name == "--user-data-dir" && tempProfile {
+				tempRoot := executableEnvValue(env, "TMPDIR")
+				if !filepath.IsAbs(tempRoot) {
+					return nil
+				}
+				target = commandGrantProjectPath([]string{tempRoot}, cwd, value, false)
+				canonicalRoot, err := filepath.EvalSymlinks(tempRoot)
+				if err != nil || target == canonicalRoot {
+					return nil
+				}
+			}
 			if target == "" {
 				return nil
 			}
@@ -284,7 +310,7 @@ func chromeSessionGrantForCall(call Call, args commandRunArgs, literalArgv, env 
 				grant.OutputDirectory = filepath.Dir(target)
 				argv[i] = name + "=" + filepath.Join(grant.OutputDirectory, "<screenshot.png>")
 			} else {
-				for _, root := range normalizeProjectDirs(call.ProjectDirs) {
+				for _, root := range normalizeProjectDirs(resourceRoots) {
 					resolved, err := filepath.EvalSymlinks(root)
 					if err != nil || target == resolved {
 						return nil
@@ -306,7 +332,7 @@ func chromeSessionGrantForCall(call Call, args commandRunArgs, literalArgv, env 
 			} else if strings.Contains(arg, "://") {
 				return nil
 			}
-			grant.InputPath = commandGrantProjectPath(call.ProjectDirs, cwd, arg, true)
+			grant.InputPath = commandGrantProjectPath(resourceRoots, cwd, arg, true)
 			if grant.InputPath == "" {
 				return nil
 			}
@@ -318,7 +344,7 @@ func chromeSessionGrantForCall(call Call, args commandRunArgs, literalArgv, env 
 	}
 	// Environment and executable updates invalidate the lease. Project identity
 	// is added by the engine; roots also bind temporary directory grants.
-	data, _ := json.Marshal([]any{grant.Kind, argv, cwd, normalizeProjectDirs(call.ProjectDirs), env, info.Size(), info.ModTime().UnixNano(), info.Mode()})
+	data, _ := json.Marshal([]any{grant.Kind, argv, cwd, normalizeProjectDirs(resourceRoots), env, info.Size(), info.ModTime().UnixNano(), info.Mode()})
 	hash := sha256.Sum256(data)
 	grant.Key = hex.EncodeToString(hash[:])
 	return grant

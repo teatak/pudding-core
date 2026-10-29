@@ -2,6 +2,8 @@ package engine
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"sort"
 	"sync"
 	"time"
@@ -13,9 +15,22 @@ import (
 // Permission waiting happens before acquisition, so an unanswered approval cannot
 // monopolize a project or the desktop.
 func (e *Engine) acquireToolResources(ctx context.Context, call tool.Call) (func(), error) {
+	// Background processes retain resource locks until exit. Reject cleanup
+	// before waiting on their lock so the agent can stop the process first.
+	if call.Name == tool.TempWorkspace && e.BackgroundProcessCount(call.SessionID) > 0 {
+		var args struct {
+			Action string `json:"action"`
+		}
+		if json.Unmarshal(call.Args, &args) == nil && args.Action == "clear" {
+			return nil, errors.New("workspace_in_use: Stop background processes before clearing the workspace")
+		}
+	}
 	var keys []string
+	if tool.UsesSessionArtifacts(call) {
+		keys = append(keys, "session-artifacts:"+call.SessionID)
+	}
 	// Computer Use already serializes native mutations in computer.Manager.
-	risk, classified, err := e.classifyToolCall(call.SessionID, call)
+	risk, classified, err := e.classifyToolCall(call.SessionID, &call)
 	if err != nil {
 		return nil, err
 	}

@@ -543,6 +543,7 @@ CREATE TABLE IF NOT EXISTS assistant_sessions (
 
 CREATE TABLE IF NOT EXISTS assistant_tasks (
  id TEXT PRIMARY KEY,
+ created_session INTEGER NOT NULL DEFAULT 0,
  assistant_session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
  session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
  title TEXT NOT NULL,

@@ -14,16 +14,19 @@ type commandApprovalState struct {
 	context   string
 	projectID string
 	// Nil means no extra directories; map membership is the grant.
-	grants  map[string]*tool.CommandProjectAccess
-	reasons map[string]int
-	reused  int
+	identities map[string]tool.CommandGrantIdentity
+	grants     map[string]*tool.CommandProjectAccess
+	reasons    map[string]int
+	reused     int
 }
 
 type CommandApprovalStatus struct {
-	ProjectDirs     []string       `json:"projectDirs"`
-	GrantCount      int            `json:"grantCount"`
-	ApprovalReasons map[string]int `json:"approvalReasons"`
-	ReusedCount     int            `json:"reusedCount"`
+	DiagnosticsEnabled bool           `json:"diagnosticsEnabled"`
+	ProjectDirs        []string       `json:"projectDirs"`
+	GrantCount         int            `json:"grantCount"`
+	ApprovalReasons    map[string]int `json:"approvalReasons"`
+	ReuseMissReasons   map[string]int `json:"reuseMissReasons"`
+	ReusedCount        int            `json:"reusedCount"`
 }
 
 func commandApprovalContext(project *store.Project, roots []string) string {
@@ -42,7 +45,10 @@ func (e *Engine) commandApprovalState(sessionID string, project *store.Project, 
 	key := commandApprovalContext(project, roots)
 	state := e.commandGrants[sessionID]
 	if state == nil || state.context != key {
-		state = &commandApprovalState{context: key, grants: make(map[string]*tool.CommandProjectAccess), reasons: make(map[string]int)}
+		if state != nil && e.commandDiagnosticsEnabled {
+			e.commandReuseDiagnosticLocked(sessionID).lastReset = "scope_changed"
+		}
+		state = &commandApprovalState{context: key, grants: make(map[string]*tool.CommandProjectAccess), identities: make(map[string]tool.CommandGrantIdentity), reasons: make(map[string]int)}
 		if project != nil {
 			state.projectID = project.ID
 		}
@@ -68,7 +74,12 @@ func (e *Engine) commandApprovalStillCurrent(ctx context.Context, sessionID, tur
 func (e *Engine) CommandApprovals(sessionID string) CommandApprovalStatus {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	result := CommandApprovalStatus{ApprovalReasons: make(map[string]int), ProjectDirs: []string{}}
+	result := CommandApprovalStatus{DiagnosticsEnabled: e.commandDiagnosticsEnabled, ApprovalReasons: make(map[string]int), ReuseMissReasons: make(map[string]int), ProjectDirs: []string{}}
+	if diagnostics := e.commandReuseDiagnostics[sessionID]; diagnostics != nil {
+		for reason, count := range diagnostics.misses {
+			result.ReuseMissReasons[reason] = count
+		}
+	}
 	if state := e.sessionProjectAccess[sessionID]; state != nil {
 		result.ProjectDirs = append(result.ProjectDirs, state.dirs...)
 	}
@@ -86,6 +97,9 @@ func (e *Engine) CommandApprovals(sessionID string) CommandApprovalStatus {
 func (e *Engine) RevokeCommandApprovals(sessionID string) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	if e.commandDiagnosticsEnabled {
+		e.commandReuseDiagnosticLocked(sessionID).lastReset = "authorization_revoked"
+	}
 	delete(e.commandGrants, sessionID)
 	delete(e.sessionProjectAccess, sessionID)
 	for id, grant := range e.turnProjectAccess {
@@ -110,6 +124,9 @@ func (e *Engine) RevokeProjectCommandApprovals(projectID string) {
 	}
 	for id, state := range e.commandGrants {
 		if state.projectID == projectID {
+			if e.commandDiagnosticsEnabled {
+				e.commandReuseDiagnosticLocked(id).lastReset = "scope_changed"
+			}
 			delete(e.commandGrants, id)
 		}
 	}

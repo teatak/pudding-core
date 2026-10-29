@@ -73,6 +73,14 @@
 [会话产物目录](../internal/home/session_artifacts.go)、
 [命令预审集成](../internal/engine/command_artifacts.go)。
 
+### 一次性验证产物
+
+无需先上传附件即可调用 `builtin_temp_workspace({"action":"open"})`，返回当前会话
+scratch 目录的 `scope`、`path` 和 `absolutePath`。文件工具使用 temp 相对路径，命令使用绝对路径。
+这适合截图、验证日志和预览副本，不进入项目 diff。保存正式输出后调用 `action="clear"`，
+仅清理 scratch，保留导出的附件；存在运行中的后台命令时拒绝清理。会话资源释放或正常关闭
+daemon 时自动回收。清理不按 `_preview` 等文件名猜测，也不接受调用方指定目录。
+
 ## 3. 后台命令发现
 
 ```json

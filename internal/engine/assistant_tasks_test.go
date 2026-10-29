@@ -103,6 +103,9 @@ func TestAssistantTaskDispatchReportAndFollowUp(t *testing.T) {
 	if parent, err := db.ParentSessionID(ctx, task.SessionID); err != nil || parent != "" {
 		t.Fatal("work is not independent", parent, err)
 	}
+	if session, err := db.GetSession(ctx, task.SessionID); err != nil || session.ActiveMode != store.ModeWork || session.ModeLease != store.ModeLeaseSession {
+		t.Fatal("new assigned conversation must retain Work capability", session, err)
+	}
 	waitReports := func(count int) {
 		t.Helper()
 		end := time.Now().Add(5 * time.Second)
@@ -135,6 +138,12 @@ func TestAssistantTaskDispatchReportAndFollowUp(t *testing.T) {
 	if err != nil || len(tasks) != 1 || tasks[0].SessionID != task.SessionID || tasks[0].TurnID == firstTurn || !tasks[0].ResultCollected {
 		t.Fatal("follow-up lost identity or result", tasks, err)
 	}
+	for _, turnID := range []string{firstTurn, tasks[0].TurnID} {
+		turn, err := db.GetConversationTurn(ctx, task.SessionID, turnID)
+		if err != nil || turn.Mode != store.ModeWork {
+			t.Fatal("assigned execution and follow-up must start in Work", turn, err)
+		}
+	}
 	client.mu.Lock()
 	defer client.mu.Unlock()
 	if len(client.workerRequests) != 2 {
@@ -160,6 +169,106 @@ func TestAssistantTaskDispatchReportAndFollowUp(t *testing.T) {
 		if !found {
 			t.Fatal("report lacks canonical result", i)
 		}
+	}
+}
+
+func TestAssistantTaskDispatchCapabilityScope(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		existing store.AgentMode
+		project  bool
+		want     store.AgentMode
+	}{
+		{name: "new", want: store.ModeWork},
+		{name: "new-project", project: true, want: store.ModeWork},
+		{name: "existing-chat", existing: store.ModeChat, want: store.ModeChat},
+		{name: "existing-work", existing: store.ModeWork, want: store.ModeWork},
+		{name: "existing-code", existing: store.ModeCode, want: store.ModeCode},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			db := storetest.New(t)
+			client := &nextPromptClient{}
+			eng := New(db, event.NewHub(), mapResolver{"capture": client}, db)
+			t.Cleanup(func() { eng.Stop(); eng.Wait() })
+			if err := db.PutProviderProfile(ctx, &store.ProviderProfile{ID: "capture", Protocol: "openai-compatible", Models: []store.ProviderModel{{ID: "test", Capabilities: &store.ModelCaps{Tools: true}}}}); err != nil {
+				t.Fatal(err)
+			}
+			profile, err := db.OpenAssistant(ctx, "小布", "capture", "test", store.AssistantAppearance{"version": 1})
+			if err != nil {
+				t.Fatal(err)
+			}
+			sid := profile.Assistant.SessionID
+			code, lease := store.ModeCode, store.ModeLeaseSession
+			if _, err := db.UpdateSession(ctx, sid, store.SessionUpdate{ActiveMode: &code, ModeLease: &lease}); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := db.BeginTurn(ctx, store.BeginTurnInput{SessionID: sid, TurnID: "source", UserMessageID: "source-message", ClientMessageID: "source-client", UserText: "Arrange work"}); err != nil {
+				t.Fatal(err)
+			}
+			args := map[string]string{"title": "Assigned work", "prompt": "Complete this work"}
+			if tc.existing != "" {
+				if err := db.CreateSession(ctx, &store.Session{ID: "existing", Provider: "capture", Model: "test", ActiveMode: tc.existing, ModeLease: lease}); err != nil {
+					t.Fatal(err)
+				}
+				args["session_id"] = "existing"
+			}
+			if tc.project {
+				if err := db.CreateProject(ctx, &store.Project{ID: "project", Name: "Project", RootDirs: []string{t.TempDir()}}); err != nil {
+					t.Fatal(err)
+				}
+				args["project_id"] = "project"
+			}
+			raw, _ := json.Marshal(args)
+			callCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+			defer cancel()
+			done := make(chan tool.Result, 1)
+			go func() {
+				done <- eng.executeAssistantTask(callCtx, sid, "source", tool.Call{CallID: "dispatch", Name: tool.AssistantTaskDispatch, Args: raw})
+			}()
+			if tc.existing != "" {
+				approval := waitAssistantTaskApproval(t, eng, sid)
+				if err := eng.ApproveApproval(ctx, sid, approval.ID, ApprovalScopeTurn, nil); err != nil {
+					t.Fatal(err)
+				}
+			}
+			result := <-done
+			if !result.Ok {
+				t.Fatal(result.Content)
+			}
+			var task store.AssistantTaskRun
+			if err := json.Unmarshal([]byte(result.Content), &task); err != nil {
+				t.Fatal(err)
+			}
+			var executed *store.ConversationTurn
+			for deadline := time.Now().Add(3 * time.Second); time.Now().Before(deadline); {
+				if turn, ok := turnByClientID(t, db, task.SessionID, task.ClientMessageID); ok && turn.Status == store.TurnCompleted {
+					executed = turn
+					break
+				}
+				time.Sleep(10 * time.Millisecond)
+			}
+			if executed == nil || executed.Mode != tc.want {
+				t.Fatalf("worker execution must use %s: %+v", tc.want, executed)
+			}
+			session, err := db.GetSession(ctx, task.SessionID)
+			if err != nil || session.ActiveMode != tc.want || session.ModeLease != lease {
+				t.Fatal("assigned session capability changed", session, err)
+			}
+			requests := client.snapshot()
+			if len(requests) != 1 {
+				t.Fatal("expected one worker request", len(requests))
+			}
+			req := requests[0]
+			for _, def := range req.Tools {
+				if tool.IsAssistantTool(def.Name) {
+					t.Fatal("assistant tool leaked to worker", def.Name)
+				}
+			}
+			if strings.Contains(req.System, "## Personal Assistant Profile") || len(eng.PendingApprovals(task.SessionID)) != 0 {
+				t.Fatal("worker inherited personal profile or requested a capability upgrade")
+			}
+		})
 	}
 }
 

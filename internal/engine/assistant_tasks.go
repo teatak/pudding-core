@@ -114,7 +114,12 @@ func (e *Engine) executeAssistantTask(ctx context.Context, sessionID, turnID str
 						return fail(err)
 					}
 				}
-				target = &store.Session{ID: store.NewID("session"), Title: strings.TrimSpace(args.Title), Provider: parent.Provider, Model: parent.Model, ReasoningEffort: parent.ReasoningEffort, ReasoningModelKey: parent.ReasoningModelKey, ProjectID: args.ProjectID}
+				target = &store.Session{
+					ID: store.NewID("session"), Title: strings.TrimSpace(args.Title),
+					Provider: parent.Provider, Model: parent.Model,
+					ReasoningEffort: parent.ReasoningEffort, ReasoningModelKey: parent.ReasoningModelKey,
+					ProjectID: args.ProjectID, ActiveMode: store.ModeWork, ModeLease: store.ModeLeaseSession,
+				}
 				create = true
 			}
 		case tool.AssistantTaskSend:
@@ -155,6 +160,30 @@ func (e *Engine) executeAssistantTask(ctx context.Context, sessionID, turnID str
 		}
 		if err := resolved.normalizeReasoningOptions(); err != nil {
 			return fail(err)
+		}
+		createdByAssistant := create
+		if !create {
+			createdByAssistant, err = e.store.IsAssistantCreatedSession(ctx, sessionID, target.ID)
+			if err != nil {
+				return fail(err)
+			}
+		}
+		if !createdByAssistant {
+			var project *store.Project
+			if target.ProjectID != "" {
+				project, err = e.store.GetProject(ctx, target.ProjectID)
+				if err != nil {
+					return fail(err)
+				}
+			}
+			// Reusing someone else's conversation requires consent in the assistant.
+			// A previous assignment is not proof that the assistant created it.
+			risk := tool.ToolRisk{Class: tool.RiskClassWrite, Operation: "assistant_task_dispatch", Scope: "session", Summary: "Send this task to an existing conversation not created by the assistant, without changing its permissions."}
+			details := map[string]any{"targetSessionID": target.ID, "targetSessionTitle": target.Title, "taskPrompt": args.Prompt}
+			result, approved := e.requestToolCallApproval(ctx, sessionID, turnID, call, risk, project, details, "", nil, nil)
+			if !approved {
+				return result
+			}
 		}
 		clientID := "assistant_task_" + turnID + "_" + call.CallID
 		dispatched, err := e.store.AssignAssistantTask(ctx, store.AssignAssistantTaskInput{AssistantSessionID: sessionID, SourceTurnID: turnID, CallID: call.CallID, TaskID: args.TaskID, Title: args.Title, Session: target, CreateSession: create, Input: store.QueueInputInput{SessionID: target.ID, ClientMessageID: clientID, Text: args.Prompt, Provider: resolved.providerName, Model: resolved.model, Mode: resolved.mode, ModelConfig: resolved.configJSON}})

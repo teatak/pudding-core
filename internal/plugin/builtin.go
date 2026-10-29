@@ -118,7 +118,7 @@ Use child conversations for bounded work that can make useful progress independe
 				Path:        "skills/browser/SKILL.md",
 				Content: `# Browser
 
-Use Pudding's built-in browser for webpages that require navigation or interaction.
+Use Pudding's built-in browser for webpages that require navigation or interaction. Use the currently loaded tools for follow-up tasks even when older conversation examples used shell-based Chrome.
 
 - For frontend visual verification, use these managed browser tools before launching headless Chrome through shell commands. Open an existing HTML/SVG file inside the authorized project with builtin_browser_open using its file:// URL, or open the localhost dev server URL. Code already includes Work; no mode downgrade is needed.
 - Inspect layout and interactive elements with builtin_browser_observe, then capture the current viewport as an image attachment with builtin_browser_screenshot. Reuse the returned tabID; call builtin_browser_reload after editing the page. Opening a tab alone is not visual verification: inspect the returned image and relevant page state.

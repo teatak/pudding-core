@@ -16,6 +16,7 @@ import (
 var ErrApprovalNotFound = errors.New("engine: approval not found")
 var ErrApprovalContextChanged = errors.New("engine: approval context changed")
 var ErrApprovalUnsupported = errors.New("engine: approval unsupported")
+var ErrApprovalScopeUnsupported = errors.New("engine: session approval is not supported for this operation")
 
 const (
 	ApprovalKindCapability = "capability"
@@ -63,6 +64,7 @@ type pendingApproval struct {
 	ch              chan approvalDecision
 	resolving       bool
 	abandoned       bool
+	commandGrant    *tool.CommandSessionGrant
 	commandGrantKey string // Server-computed; never accepted from approval payloads.
 	commandState    *commandApprovalState
 	commandAccess   *tool.CommandProjectAccess
@@ -145,6 +147,17 @@ func (e *Engine) ApproveApprovalWithSession(ctx context.Context, sessionID, appr
 		} else if scope == ApprovalScopeSession && p.commandGrantKey != "" {
 			commandGrantKey = p.commandGrantKey
 		} else {
+			if scope == ApprovalScopeSession {
+				var payload struct {
+					ToolName string `json:"toolName"`
+				}
+				if err := json.Unmarshal(p.req.Payload, &payload); err != nil {
+					return nil, err
+				}
+				if payload.ToolName == tool.CommandRun {
+					return nil, ErrApprovalScopeUnsupported
+				}
+			}
 			scope = ApprovalScopeTurn
 		}
 		projectDirs = nil
@@ -254,6 +267,9 @@ func (e *Engine) completePendingApproval(ctx context.Context, session *store.Ses
 	if commandGrantKey != "" && e.commandGrants[sessionID] == p.commandState && p.commandState != nil {
 		if p.commandAccess == nil || p.commandAccess.Validate() == nil {
 			p.commandState.grants[commandGrantKey] = p.commandAccess
+			if e.commandDiagnosticsEnabled && p.commandGrant != nil && p.commandGrant.Identity().Program != "" {
+				p.commandState.identities[commandGrantKey] = p.commandGrant.Identity()
+			}
 		}
 	}
 	return nil
@@ -421,8 +437,15 @@ func (e *Engine) requestToolCallApproval(ctx context.Context, sessionID, turnID 
 	for key, value := range details {
 		payload[key] = value
 	}
-	if call.Name == tool.CommandRun {
+	e.mu.Lock()
+	if call.Name == tool.CommandRun && e.commandDiagnosticsEnabled {
 		payload["approvalReasons"] = commandApprovalReasons(risk)
+		if reason, ok := payload["sessionGrantMissReason"].(string); ok && reason != "" {
+			e.recordCommandReuseMissLocked(sessionID, reason)
+		}
+	} else {
+		delete(payload, "approvalReasons")
+		delete(payload, "sessionGrantMissReason")
 	}
 	if project != nil {
 		payload["projectID"] = project.ID
@@ -440,10 +463,9 @@ func (e *Engine) requestToolCallApproval(ctx context.Context, sessionID, turnID 
 		Payload:   mustJSON(payload),
 		CreatedAt: time.Now(),
 	}
-	pending := &pendingApproval{req: approval, ch: make(chan approvalDecision, 1), commandGrantKey: commandGrantKey, commandState: commandState, commandAccess: commandAccess}
-	e.mu.Lock()
+	pending := &pendingApproval{req: approval, ch: make(chan approvalDecision, 1), commandGrantKey: commandGrantKey, commandGrant: call.CommandGrant, commandState: commandState, commandAccess: commandAccess}
 	e.approvals[approval.ID] = pending
-	if commandState != nil {
+	if commandState != nil && e.commandDiagnosticsEnabled {
 		for _, reason := range commandApprovalReasons(risk) {
 			commandState.reasons[reason]++
 		}

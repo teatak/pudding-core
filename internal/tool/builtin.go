@@ -162,6 +162,8 @@ type BuiltinRunner struct {
 	preparedPatches          map[string]*preparedPatch
 	gitApprovalMu            sync.Mutex
 	gitApprovals             map[string]gitCommitApprovalSnapshot
+	scratchMu                sync.Mutex
+	scratchSessions          map[string]bool
 	commands                 commandRunner
 	processes                *backgroundProcessManager
 }
@@ -179,6 +181,7 @@ func NewBuiltinRunner(opts ...BuiltinOption) *BuiltinRunner {
 		graphqlSchemas:  map[string]*graphqlSchemaCache{},
 		preparedPatches: map[string]*preparedPatch{},
 		gitApprovals:    map[string]gitCommitApprovalSnapshot{},
+		scratchSessions: make(map[string]bool),
 		commands:        commands,
 		processes:       newBackgroundProcessManager(backgroundProcessRetentionTTL, commands),
 	}
@@ -432,6 +435,7 @@ func builtinRunnerDefinitions() []provider.ToolDef {
 			InputSchema: json.RawMessage(`{"type":"object","properties":{"source":{"type":"string","enum":["attachment","file"],"description":"Where the media comes from. source=file requires Code capability."},"attachmentKey":{"type":"string","description":"For source=attachment, the exact session attachment key returned by an upload or capture tool. Prefer this field."},"url":{"type":"string","description":"For source=attachment, a session attachment URL fallback."},"scope":{"type":"string","enum":["plugin","skill","temp","project"],"description":"For source=file in Code mode, the target file area."},"path":{"type":"string","description":"For source=file in Code mode, a relative path in a managed area or a project path inside authorized directories; project paths must be absolute when multiple roots are authorized."}},"required":["source"],"additionalProperties":false}`),
 			Capability:  store.ModeChat,
 		},
+		tempWorkspaceDefinition(),
 		{
 			Name:        AttachmentExport,
 			Description: "Export one session attachment. Use scope=temp for command analysis: the tool allocates a unique file in the current session artifact directory and returns scope/path for file tools plus absolutePath for sandboxed commands. Omit path and overwrite for temp. Use scope=project with an explicit path to save into an authorized project. Use the exact attachmentKey; never guess the attachment's internal filesystem path.",
@@ -746,6 +750,8 @@ func (r *BuiltinRunner) Call(ctx context.Context, call Call) Result {
 		return r.fileRead(call)
 	case MediaRead:
 		return r.mediaRead(call)
+	case TempWorkspace:
+		return r.tempWorkspace(call)
 	case AttachmentExport:
 		return r.attachmentExport(ctx, call)
 	case FileStat:

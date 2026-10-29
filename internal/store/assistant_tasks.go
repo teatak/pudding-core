@@ -7,6 +7,7 @@ import (
 )
 
 var ErrAssistantTaskBusy = errors.New("an assigned task is still active; follow up on that task or wait for its result before assigning another")
+var ErrAssistantTaskContextChanged = errors.New("the work conversation's project or capability changed; submit the task again")
 
 // These are coordination links between independent root sessions, not children.
 // Status and results are projected from the dispatch's own queued input/turn.
@@ -43,6 +44,7 @@ type AssignAssistantTaskInput struct {
 }
 
 type AssistantTaskStore interface {
+	IsAssistantCreatedSession(context.Context, string, string) (bool, error)
 	AssignAssistantTask(context.Context, AssignAssistantTaskInput) (*AssistantTaskRun, error)
 	ListAssistantTaskRuns(context.Context, string) ([]AssistantTaskRun, error)
 	CollectAssistantTaskResults(context.Context, string) (bool, error)

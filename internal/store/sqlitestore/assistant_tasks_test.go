@@ -96,6 +96,9 @@ func TestAssistantTaskLifecycleAndExactResults(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer s.Close()
+	if created, err := s.IsAssistantCreatedSession(ctx, sid, work.ID); err != nil || !created {
+		t.Fatal("restart lost creation origin", created, err)
+	}
 	runs, err := s.ListAssistantTaskRuns(ctx, sid)
 	if err != nil || len(runs) != 2 || runs[1].Status != "failed" || runs[1].Summary != "validation failed" {
 		t.Fatal("restart lost exact task runs", runs, err)

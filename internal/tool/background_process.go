@@ -1132,6 +1132,7 @@ func (r *BuiltinRunner) CloseSession(sessionID string) {
 	if r.processes != nil {
 		r.processes.CloseSession(sessionID)
 	}
+	r.cleanupSessionScratch(sessionID)
 	r.releaseComputerSession(sessionID)
 	if sessionID != "" {
 		r.patchMu.Lock()
@@ -1176,5 +1177,17 @@ func (r *BuiltinRunner) Close() error {
 	if r == nil || r.processes == nil {
 		return nil
 	}
-	return r.processes.Close()
+	if err := r.processes.Close(); err != nil {
+		return err
+	}
+	r.scratchMu.Lock()
+	sessions := make([]string, 0, len(r.scratchSessions))
+	for id := range r.scratchSessions {
+		sessions = append(sessions, id)
+	}
+	r.scratchMu.Unlock()
+	for _, id := range sessions {
+		r.cleanupSessionScratch(id)
+	}
+	return nil
 }

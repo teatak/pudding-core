@@ -108,3 +108,26 @@ func openArtifactDirectory(parent *os.Root, name string, create bool) (*os.Root,
 	}
 	return root, nil
 }
+
+// Scratch is disposable; exported attachments in sibling directories survive.
+func OpenSessionScratch(dir, sessionID string) (*os.Root, string, error) {
+	artifacts, path, err := OpenSessionArtifacts(dir, sessionID)
+	if err != nil {
+		return nil, "", err
+	}
+	defer artifacts.Close()
+	root, err := openArtifactDirectory(artifacts, "scratch", true)
+	return root, filepath.Join(path, "scratch"), err
+}
+
+func RemoveSessionScratch(dir, sessionID string) error {
+	root, _, err := sessionArtifactsRoot(dir, sessionID, false)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	defer root.Close()
+	return root.RemoveAll("scratch")
+}

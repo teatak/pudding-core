@@ -1355,6 +1355,10 @@ func (s *Server) approveApproval(c *cart.Context) error {
 	}
 	sess, err := s.engine.ApproveApprovalWithSession(c.Request.Context(), id, approvalID, scope, req.ProjectDirs)
 	if err != nil {
+		if errors.Is(err, engine.ErrApprovalScopeUnsupported) {
+			c.JSON(http.StatusBadRequest, map[string]string{"error": "approval_scope_unsupported"})
+			return nil
+		}
 		if errors.Is(err, engine.ErrApprovalContextChanged) {
 			c.JSON(http.StatusConflict, map[string]string{"error": "approval_context_changed"})
 			return nil
@@ -1535,6 +1539,11 @@ func (s *Server) putSettings(c *cart.Context) error {
 		}
 		return s.fail(c, err)
 	}
+	if _, changed := kv[config.SettingDeveloperApprovalDiagnostics]; changed {
+		if err := s.engine.ReloadCommandApprovalDiagnostics(c.Request.Context()); err != nil {
+			return s.fail(c, err)
+		}
+	}
 	c.String(http.StatusNoContent, "")
 	return nil
 }
@@ -1548,6 +1557,9 @@ func (s *Server) resetSettings(c *cart.Context) error {
 	}
 	kv, err := settings.ResetSettings(c.Request.Context())
 	if err != nil {
+		return s.fail(c, err)
+	}
+	if err := s.engine.ReloadCommandApprovalDiagnostics(c.Request.Context()); err != nil {
 		return s.fail(c, err)
 	}
 	c.JSON(http.StatusOK, map[string]any{"settings": kv})

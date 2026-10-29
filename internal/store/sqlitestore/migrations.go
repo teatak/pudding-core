@@ -19,7 +19,7 @@ import (
 const (
 	baselineSchemaVersion      = 1
 	currentSchemaLayoutVersion = 8
-	currentSchemaVersion       = 58
+	currentSchemaVersion       = 59
 )
 
 var (
@@ -35,6 +35,7 @@ type schemaMigration func(*sql.Tx) error
 // Unpublished Studio migrations 27–29 are consolidated into destination 30.
 // Unpublished Studio migrations 33–46 are consolidated into destination 47.
 var schemaMigrations = map[int]schemaMigration{
+	59: migrateAssistantTaskOriginV59,
 	58: migrateAssistantTasksV58,
 	57: migrateAssistantAppearanceHistoryV57,
 	56: migrateAssistantAppearanceV56,

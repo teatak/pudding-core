@@ -410,7 +410,7 @@ func classifyCommandCall(raw json.RawMessage, projectDirs []string, managedDirs 
 		risk.requiredProjectPaths = append(risk.requiredProjectPaths, outsidePaths...)
 	}
 	for _, environment := range analysis.Environments {
-		if commandEnvironmentRequiresApproval(environment) {
+		if commandEnvironmentRequiresApprovalForProject(environment, projectDirs) {
 			risk.LowRisk = false
 			risk.ApprovalReasons = append(risk.ApprovalReasons, "custom_environment")
 		}
@@ -421,7 +421,7 @@ func classifyCommandCall(raw json.RawMessage, projectDirs []string, managedDirs 
 	}
 	if len(args.Env) > 0 {
 		risk.Summary = "Run project command with custom environment: " + compactShellCommand(args.Command)
-		if commandEnvironmentRequiresApproval(args.Env) {
+		if commandEnvironmentRequiresApprovalForProject(args.Env, projectDirs) {
 			risk.LowRisk = false
 			risk.ApprovalReasons = append(risk.ApprovalReasons, "custom_environment")
 		}

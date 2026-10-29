@@ -110,21 +110,23 @@ type Engine struct {
 	auxCtx    context.Context
 	auxCancel context.CancelFunc
 
-	collaborationMu      sync.Mutex
-	resourceMu           sync.Mutex
-	resourceLocks        map[string]chan struct{}
-	mu                   sync.Mutex
-	running              map[string]*activeTurn // sessionID → 当前 turn
-	approvals            map[string]*pendingApproval
-	commandGrants        map[string]*commandApprovalState // session-scoped, process-lifetime command leases
-	inputRequests        map[string]*pendingUserInput
-	inputAnswerMu        sync.Mutex // serialize answer deduplication across steer/submit boundaries
-	sessionProjectAccess map[string]*projectAccessState
-	turnProjectAccess    map[string]ProjectAccessGrant // turnID → 本轮临时目录授权
-	queuedRuntimeIDs     map[string]string             // queued input → originating UI runtime
-	wg                   sync.WaitGroup
-	compacting           map[string]bool // guarded by mu; independent session compactions
-	toolCloseOnce        sync.Once
+	collaborationMu           sync.Mutex
+	resourceMu                sync.Mutex
+	resourceLocks             map[string]chan struct{}
+	mu                        sync.Mutex
+	running                   map[string]*activeTurn // sessionID → 当前 turn
+	approvals                 map[string]*pendingApproval
+	commandReuseDiagnostics   map[string]*commandReuseDiagnostics
+	commandDiagnosticsEnabled bool                             // guarded by mu; developer opt-in, never authorization
+	commandGrants             map[string]*commandApprovalState // session-scoped, process-lifetime command leases
+	inputRequests             map[string]*pendingUserInput
+	inputAnswerMu             sync.Mutex // serialize answer deduplication across steer/submit boundaries
+	sessionProjectAccess      map[string]*projectAccessState
+	turnProjectAccess         map[string]ProjectAccessGrant // turnID → 本轮临时目录授权
+	queuedRuntimeIDs          map[string]string             // queued input → originating UI runtime
+	wg                        sync.WaitGroup
+	compacting                map[string]bool // guarded by mu; independent session compactions
+	toolCloseOnce             sync.Once
 }
 
 type activeTurn struct {
@@ -227,25 +229,29 @@ func New(s store.Store, hub *event.Hub, resolver Resolver, cfg ConfigSource, opt
 	}
 	auxCtx, auxCancel := context.WithCancel(context.Background())
 	e := &Engine{
-		scheduledRuntimeIDs:  make(map[string]string),
-		store:                s,
-		config:               cfg,
-		hub:                  hub,
-		resolver:             resolver,
-		builder:              contextbuilder.New(s, nil, contextbuilder.WithCoolingSettings(cfg)),
-		auxCtx:               auxCtx,
-		auxCancel:            auxCancel,
-		running:              make(map[string]*activeTurn),
-		approvals:            make(map[string]*pendingApproval),
-		commandGrants:        make(map[string]*commandApprovalState),
-		sessionProjectAccess: make(map[string]*projectAccessState),
-		turnProjectAccess:    make(map[string]ProjectAccessGrant),
-		queuedRuntimeIDs:     make(map[string]string),
-		compacting:           make(map[string]bool),
-		turnFiles:            turnfiles.New(),
+		scheduledRuntimeIDs:     make(map[string]string),
+		store:                   s,
+		config:                  cfg,
+		hub:                     hub,
+		resolver:                resolver,
+		builder:                 contextbuilder.New(s, nil, contextbuilder.WithCoolingSettings(cfg)),
+		auxCtx:                  auxCtx,
+		auxCancel:               auxCancel,
+		running:                 make(map[string]*activeTurn),
+		approvals:               make(map[string]*pendingApproval),
+		commandGrants:           make(map[string]*commandApprovalState),
+		commandReuseDiagnostics: make(map[string]*commandReuseDiagnostics),
+		sessionProjectAccess:    make(map[string]*projectAccessState),
+		turnProjectAccess:       make(map[string]ProjectAccessGrant),
+		queuedRuntimeIDs:        make(map[string]string),
+		compacting:              make(map[string]bool),
+		turnFiles:               turnfiles.New(),
 	}
 	for _, opt := range opts {
 		opt(e)
+	}
+	if err := e.ReloadCommandApprovalDiagnostics(context.Background()); err != nil {
+		slog.Warn("engine: load developer diagnostics setting failed", "err", err)
 	}
 	return e
 }
@@ -2286,7 +2292,7 @@ func (e *Engine) executeAllowedTool(ctx context.Context, sessionID, turnID strin
 	var result tool.Result
 	var commandState *commandApprovalState
 	var commandAccess *tool.CommandProjectAccess
-	risk, classified, err := e.classifyToolCall(sessionID, call)
+	risk, classified, err := e.classifyToolCall(sessionID, &call)
 	if err != nil {
 		return tool.Result{CallID: call.CallID, Name: call.Name, Ok: false, Content: err.Error()}
 	}
@@ -2342,7 +2348,11 @@ func (e *Engine) executeAllowedTool(ctx context.Context, sessionID, turnID strin
 			}
 		}
 		commandGrantKey := ""
+		reuseMissReason := "unsupported_invocation"
 		if result.CallID == "" && result.Name == "" && required && call.Name == tool.CommandRun {
+			e.mu.Lock()
+			call.CommandDiagnostics = e.commandDiagnosticsEnabled
+			e.mu.Unlock()
 			if grant := tool.CommandSessionGrantForCall(call); grant != nil {
 				call.CommandGrant = grant
 				commandGrantKey = commandSandboxStateKey(project, sessionID) + ":" + grant.Key
@@ -2351,10 +2361,14 @@ func (e *Engine) executeAllowedTool(ctx context.Context, sessionID, turnID strin
 				granted = granted && e.commandGrants[sessionID] == commandState
 				if granted && approvedAccess != nil && approvedAccess.Validate() != nil {
 					delete(commandState.grants, commandGrantKey)
+					delete(commandState.identities, commandGrantKey)
+					reuseMissReason = "directory_changed"
 					granted = false
 				}
-				if granted {
+				if granted && e.commandDiagnosticsEnabled {
 					commandState.reused++
+				} else if reuseMissReason != "directory_changed" {
+					reuseMissReason = e.commandReuseMissReasonLocked(sessionID, commandState, grant.Identity())
 				}
 				e.mu.Unlock()
 				if granted {
@@ -2371,6 +2385,12 @@ func (e *Engine) executeAllowedTool(ctx context.Context, sessionID, turnID strin
 			}
 		}
 		if result.CallID == "" && result.Name == "" && required {
+			if call.Name == tool.CommandRun {
+				if approvalDetails == nil {
+					approvalDetails = make(map[string]any)
+				}
+				approvalDetails["sessionGrantMissReason"] = reuseMissReason
+			}
 			var approved bool
 			result, approved = e.requestToolCallApproval(ctx, sessionID, turnID, call, risk, project, approvalDetails, commandGrantKey, commandState, commandAccess)
 			if approved {

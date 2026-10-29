@@ -24,18 +24,19 @@ const (
 )
 
 const (
-	SettingToolResultCoolingEnabled    = "tool_result_cooling_enabled"
-	SettingToolResultCoolingKeepTurns  = "tool_result_cooling_keep_turns"
-	SettingCompactTailInputTurns       = "compact_tail_input_turns"
-	SettingCompactAutoThresholdPercent = "compact_auto_threshold_percent"
-	SettingShowCompactSummary          = "show_compact_summary"
-	SettingShowReasoning               = "show_reasoning"
-	SettingShowRawToolInfo             = "show_raw_tool_info"
-	SettingShowPluginPreviewVersions   = "show_plugin_preview_versions"
-	SettingShowWidgetPreviewVersions   = "show_widget_preview_versions"
-	SettingEditorFontFamily            = "editor_font_family"
-	SettingEditorFontSize              = "editor_font_size"
-	SettingEditorLineHeight            = "editor_line_height"
+	SettingToolResultCoolingEnabled     = "tool_result_cooling_enabled"
+	SettingToolResultCoolingKeepTurns   = "tool_result_cooling_keep_turns"
+	SettingCompactTailInputTurns        = "compact_tail_input_turns"
+	SettingCompactAutoThresholdPercent  = "compact_auto_threshold_percent"
+	SettingShowCompactSummary           = "show_compact_summary"
+	SettingShowReasoning                = "show_reasoning"
+	SettingShowRawToolInfo              = "show_raw_tool_info"
+	SettingShowPluginPreviewVersions    = "show_plugin_preview_versions"
+	SettingShowWidgetPreviewVersions    = "show_widget_preview_versions"
+	SettingDeveloperApprovalDiagnostics = "developer_approval_diagnostics"
+	SettingEditorFontFamily             = "editor_font_family"
+	SettingEditorFontSize               = "editor_font_size"
+	SettingEditorLineHeight             = "editor_line_height"
 )
 
 const (
@@ -265,12 +266,17 @@ func EffectiveAPIKey(p *store.ProviderProfile) string {
 func (m *Manager) path(name string) string { return filepath.Join(m.dir, name) }
 
 type settingsYAML struct {
-	Version int                 `yaml:"version"`
-	Compact compactSettingsYAML `yaml:"compact,omitempty"`
-	Display displaySettingsYAML `yaml:"display,omitempty"`
-	Editor  editorSettingsYAML  `yaml:"editor,omitempty"`
-	Plugins pluginsSettingsYAML `yaml:"plugins,omitempty"`
-	Widgets widgetsSettingsYAML `yaml:"widgets,omitempty"`
+	Developer developerSettingsYAML `yaml:"developer,omitempty"`
+	Version   int                   `yaml:"version"`
+	Compact   compactSettingsYAML   `yaml:"compact,omitempty"`
+	Display   displaySettingsYAML   `yaml:"display,omitempty"`
+	Editor    editorSettingsYAML    `yaml:"editor,omitempty"`
+	Plugins   pluginsSettingsYAML   `yaml:"plugins,omitempty"`
+	Widgets   widgetsSettingsYAML   `yaml:"widgets,omitempty"`
+}
+
+type developerSettingsYAML struct {
+	ApprovalDiagnostics bool `yaml:"approval_diagnostics,omitempty"`
 }
 
 type compactSettingsYAML struct {
@@ -364,23 +370,30 @@ func defaultSettingsYAML() settingsYAML {
 
 func (s settingsYAML) asMap() map[string]string {
 	return map[string]string{
-		SettingToolResultCoolingEnabled:    formatBoolSetting(s.Compact.ToolResultCoolingEnabled == nil || *s.Compact.ToolResultCoolingEnabled),
-		SettingToolResultCoolingKeepTurns:  strconv.Itoa(s.toolResultCoolingKeepTurns()),
-		SettingCompactTailInputTurns:       strconv.Itoa(s.compactTailInputTurns()),
-		SettingCompactAutoThresholdPercent: strconv.Itoa(s.compactAutoThresholdPercent()),
-		SettingShowCompactSummary:          formatBoolSetting(s.showCompactSummary()),
-		SettingShowReasoning:               formatBoolSetting(s.showReasoning()),
-		SettingShowRawToolInfo:             formatBoolSetting(s.showRawToolInfo()),
-		SettingShowPluginPreviewVersions:   formatBoolSetting(s.showPluginPreviewVersions()),
-		SettingShowWidgetPreviewVersions:   formatBoolSetting(s.Widgets.ShowPreviewVersions != nil && *s.Widgets.ShowPreviewVersions),
-		SettingEditorFontFamily:            s.editorFontFamily(),
-		SettingEditorFontSize:              strconv.Itoa(s.editorFontSize()),
-		SettingEditorLineHeight:            strconv.Itoa(s.editorLineHeight()),
+		SettingDeveloperApprovalDiagnostics: formatBoolSetting(s.Developer.ApprovalDiagnostics),
+		SettingToolResultCoolingEnabled:     formatBoolSetting(s.Compact.ToolResultCoolingEnabled == nil || *s.Compact.ToolResultCoolingEnabled),
+		SettingToolResultCoolingKeepTurns:   strconv.Itoa(s.toolResultCoolingKeepTurns()),
+		SettingCompactTailInputTurns:        strconv.Itoa(s.compactTailInputTurns()),
+		SettingCompactAutoThresholdPercent:  strconv.Itoa(s.compactAutoThresholdPercent()),
+		SettingShowCompactSummary:           formatBoolSetting(s.showCompactSummary()),
+		SettingShowReasoning:                formatBoolSetting(s.showReasoning()),
+		SettingShowRawToolInfo:              formatBoolSetting(s.showRawToolInfo()),
+		SettingShowPluginPreviewVersions:    formatBoolSetting(s.showPluginPreviewVersions()),
+		SettingShowWidgetPreviewVersions:    formatBoolSetting(s.Widgets.ShowPreviewVersions != nil && *s.Widgets.ShowPreviewVersions),
+		SettingEditorFontFamily:             s.editorFontFamily(),
+		SettingEditorFontSize:               strconv.Itoa(s.editorFontSize()),
+		SettingEditorLineHeight:             strconv.Itoa(s.editorLineHeight()),
 	}
 }
 
 func (s *settingsYAML) set(key, raw string) error {
 	switch key {
+	case SettingDeveloperApprovalDiagnostics:
+		v, err := parseBoolSetting(raw)
+		if err != nil {
+			return err
+		}
+		s.Developer.ApprovalDiagnostics = v
 	case SettingToolResultCoolingEnabled:
 		v, err := parseBoolSetting(raw)
 		if err != nil {
