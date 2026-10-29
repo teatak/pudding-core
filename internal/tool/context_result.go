@@ -142,7 +142,8 @@ func ModelResultContent(name string, ok bool, content, turnID, callID string, ca
 
 type modelPatchFilePreview struct {
 	patchFileView
-	LineRangesTruncated bool `json:"lineRangesTruncated,omitempty"`
+	LineRangesTruncated  bool `json:"lineRangesTruncated,omitempty"`
+	RelocationsTruncated bool `json:"relocationsTruncated,omitempty"`
 }
 
 func modelPatchFilePreviews(files []patchFileView) []modelPatchFilePreview {
@@ -150,6 +151,11 @@ func modelPatchFilePreviews(files []patchFileView) []modelPatchFilePreview {
 	budget := modelResultHeadChars / max(1, len(files))
 	for _, file := range files {
 		item := modelPatchFilePreview{patchFileView: file}
+		// Reserve room for changed ranges as well as relocation coordinates.
+		for len(item.Relocations) > 0 && utf8.RuneCountInString(jsonString(item.Relocations)) > budget/2 {
+			item.Relocations = item.Relocations[:len(item.Relocations)-1]
+			item.RelocationsTruncated = true
+		}
 		low, high := 0, len(file.LineRanges)
 		for low < high {
 			count := (low + high + 1) / 2

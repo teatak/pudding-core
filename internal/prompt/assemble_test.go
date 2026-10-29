@@ -380,10 +380,15 @@ func TestAssembleModeLayersAndAllModesShowPlugins(t *testing.T) {
 	if strings.Contains(code.SystemInstruction, `builtin_plugin_load(plugin_id="terminal")`) {
 		t.Fatalf("code prompt still treats terminal as a plugin:\n%s", code.SystemInstruction)
 	}
+	for _, guidance := range []string{"when Browser is listed in Available Plugins", "builtin_browser_open", "builtin_browser_observe", "builtin_browser_screenshot", "A visible browser tab does not mean its plugin is loaded", "relocate=true", "without another read", "old line numbers may be stale"} {
+		if !strings.Contains(code.SystemInstruction, guidance) {
+			t.Fatalf("missing Code verification or recovery guidance %q", guidance)
+		}
+	}
 	if !strings.Contains(code.SystemInstruction, "builtin_file_slice.numberedContent") ||
 		!strings.Contains(code.SystemInstruction, "direct line counting is acceptable") ||
 		!strings.Contains(code.SystemInstruction, "read a fresh numbered slice") ||
-		!strings.Contains(code.SystemInstruction, "recovery.candidateStartLines") ||
+		!strings.Contains(code.SystemInstruction, "recovery.candidates") ||
 		!strings.Contains(code.SystemInstruction, "multiple matches require surrounding context") ||
 		!strings.Contains(code.SystemInstruction, "copy truncated diagnostic text") {
 		t.Fatalf("code prompt missing line-safe patch workflow:\n%s", code.SystemInstruction)

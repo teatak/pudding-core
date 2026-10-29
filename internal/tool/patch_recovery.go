@@ -6,8 +6,8 @@ const (
 	patchRecoveryLineBytes     = 1024
 )
 
-// Recovery is diagnostic only. applyPatchHunks never uses candidates to relocate
-// a hunk; the caller must confirm the intended target and submit a new patch.
+// Candidate matching is shared by recovery diagnostics and explicitly opted-in
+// relocation. Only a unique exact non-empty block can be relocated.
 type patchHunkRecovery struct {
 	Path                string                     `json:"path"`
 	Hunk                int                        `json:"hunk"` // One-based, within this file.
@@ -39,7 +39,7 @@ type patchRecoveryContextLine struct {
 	Truncated bool   `json:"truncated,omitempty"`
 }
 
-func newPatchHunkError(reason, detail, path string, index int, hunk patchHunkArg, lines []patchTextLine, mismatchOffset int) error {
+func newPatchHunkError(reason, detail, path string, index int, hunk patchHunkArg, lines []patchTextLine, mismatchOffset int) *patchError {
 	oldLines := *hunk.OldLines
 	candidates, count := patchExactCandidateLines(lines, oldLines)
 	recovery := &patchHunkRecovery{
@@ -78,9 +78,18 @@ func patchRecoveryContext(lines []patchTextLine, center int) []patchRecoveryCont
 }
 
 func (r *patchHunkRecovery) hint() string {
+	if r.ExactMatchCount == 1 && !r.CandidatesTruncated && len(r.Candidates) == 1 {
+		complete := true
+		for _, line := range r.Candidates[0].Context {
+			complete = complete && !line.Truncated
+		}
+		if complete {
+			return "No files were changed. One exact old_lines block was found. If the candidate context identifies the intended target, retry with its startLine or set relocate=true on this hunk; no extra read is needed. Keep the complete old_lines you already supplied. Otherwise read a focused builtin_file_slice with order=natural."
+		}
+	}
 	matchHint := "No exact non-empty old_lines block was found."
 	if r.ExactMatchCount == 1 {
-		matchHint = "One exact old_lines block was found; its position is a suggestion, not an automatic relocation."
+		matchHint = "One exact old_lines block was found, but its diagnostic context is truncated."
 	} else if r.ExactMatchCount > 1 {
 		matchHint = "Multiple exact old_lines blocks were found; use surrounding context to disambiguate, not proximity alone."
 	}

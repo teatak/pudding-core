@@ -108,17 +108,23 @@ Unix 命令使用 POSIX `/bin/sh`，不会自动切换 shell 或改写执行选�
 
 `context_lines` 仍为 0–5，越界返回错误，不静默改写参数。搜索结果用于定位；准备补丁时
 仍应读取 `file_slice` 的自然顺序完整源行，尤其不能将截断的搜索预览作为 `old_lines`。
-`file_patch` 保持精确匹配和整批校验后写入；候选行号用于重新定位，不自动重放候选。
+`file_patch` 保持精确匹配和整批校验后写入。每个 hunk 可显式设置 `relocate: true`：
+仅在 `start_line` 不匹配或越界时，按非空 `old_lines` 在修改前文件中的唯一精确匹配
+重定位；纯插入不能重定位，无匹配或多匹配仍拒绝。指定位置已精确匹配时照常使用，
+无需全文件唯一。全部 hunk 解析后重新检查重叠，审批与执行继续绑定同一文件快照。
 失败的 `recovery.candidates[]` 各含 `startLine` 和该候选附近最多五行的编号上下文；
 最多返回五个候选，完整匹配数及候选／源行截断标记仍保留。候选反馈取代原来的
-仅坐标数组，不改变原始坐标、重复匹配、源文件变更检测或整批拒绝行为。
+仅坐标数组。唯一候选的上下文未截断且目标明确时，可直接修正 `start_line` 或设置
+`relocate: true` 重试，不强制重读；有歧义、截断或目标不明确时再读取局部源行。
 
+成功结果的 `files[].relocations[]` 仅记录实际移动的 hunk，包含原输入数组中从 1 开始的
+`hunk`、请求的 `requestedStartLine` 和解析后的 `startLine`；两个坐标都属于修改前文件。
 成功结果的 `files[].lineRanges[]` 从同一份 review diff 派生，描述修改后文件的
 `startLine` 和 `lineCount`。`lineCount=0` 是删除边界，可位于新 EOF 后一行；删除整个
 文件时数组为空。后续编辑应重新读取这些位置附近的源行，不沿用本批的原始坐标。
 
 超大工具结果继续使用受限 preview 和 `result_ref` 回读。预览额外保留有界错误分类、
-资源数值、路径提示与 recovery 坐标，不把完整源文件重复放回模型上下文。
+资源数值、路径提示与 recovery 坐标（成功结果的重定位列表省略时标记 `relocationsTruncated`），不把完整源文件重复放回模型上下文。
 
 实现：[模型结果投影](../internal/tool/context_result.go)、[精确补丁](../internal/tool/patch.go)。
 
@@ -241,3 +247,11 @@ DeepSeek 使用独立的 `/v1/tools/search` 和 `/v1/tools/fetch`。搜索默认
 桌面从已完成 turn 的末尾工具结果恢复建议，不显示工具卡片；新任务清除旧建议。
 只有空输入框显示建议并允许 Tab 填入，填入不自动发送；没有建议时使用默认 placeholder。
 复用现有消息与 SSE 工具协议，无新增数据库或客户端契约字段。
+
+## 前端视觉验证入口
+
+Code 模式在 Browser 出现在可用插件列表时，引导加载该插件，通过 `builtin_browser_open`
+打开授权项目内的 `file://` HTML/SVG 或本地开发服务器，再用 `builtin_browser_observe`
+检查页面、`builtin_browser_screenshot` 返回视口截图附件。修改后复用 tabID 并 reload。
+已有可见页不等于插件已加载；单张截图不证明动画连续性。指定动画时间、多帧采样及任意
+SVG 几何查询仍不在此工具契约中。

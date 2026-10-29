@@ -47,6 +47,7 @@ type patchFileArg struct {
 
 type patchHunkArg struct {
 	StartLine int       `json:"start_line"`
+	Relocate  bool      `json:"relocate,omitempty"`
 	OldLines  *[]string `json:"old_lines"`
 	NewLines  *[]string `json:"new_lines"`
 }
@@ -68,26 +69,36 @@ type preparedPatch struct {
 }
 
 type preparedPatchFile struct {
-	Path       string
-	Target     string
-	Operation  string
-	Existed    bool
-	Delete     bool
-	OldText    string
-	NewText    string
-	OldHash    string
-	Mode       os.FileMode
-	Additions  int
-	Deletions  int
-	LineRanges []patchLineRange
+	Path        string
+	Target      string
+	Operation   string
+	Existed     bool
+	Delete      bool
+	OldText     string
+	NewText     string
+	OldHash     string
+	Mode        os.FileMode
+	Additions   int
+	Deletions   int
+	LineRanges  []patchLineRange
+	Relocations []patchHunkRelocation
 }
 
 type patchFileView struct {
-	Path       string           `json:"path"`
-	Operation  string           `json:"operation"`
-	Additions  int              `json:"additions"`
-	Deletions  int              `json:"deletions"`
-	LineRanges []patchLineRange `json:"lineRanges"`
+	Path        string                `json:"path"`
+	Operation   string                `json:"operation"`
+	Additions   int                   `json:"additions"`
+	Deletions   int                   `json:"deletions"`
+	LineRanges  []patchLineRange      `json:"lineRanges"`
+	Relocations []patchHunkRelocation `json:"relocations,omitempty"`
+}
+
+// Only moved hunks are reported. Both coordinates refer to the pre-patch file;
+// hunk is one-based in the caller's original hunk array.
+type patchHunkRelocation struct {
+	Hunk               int `json:"hunk"`
+	RequestedStartLine int `json:"requestedStartLine"`
+	StartLine          int `json:"startLine"`
 }
 
 // Coordinates refer to the resulting file. A zero-length range marks the
@@ -333,11 +344,12 @@ func preparePatchFile(projectDirs []string, requested patchFileArg) (preparedPat
 	if action == "delete" {
 		file.Operation = "delete"
 	} else if action == "edit" {
-		next, err := applyPatchHunks(file.OldText, file.Path, requested.Hunks)
+		next, relocations, err := applyPatchHunks(file.OldText, file.Path, requested.Hunks)
 		if err != nil {
 			return preparedPatchFile{}, "", err
 		}
 		file.NewText = next
+		file.Relocations = relocations
 		file.Operation = "update"
 	} else {
 		file.NewText = *requested.Content
@@ -361,9 +373,9 @@ type patchTextLine struct {
 	ending string
 }
 
-func applyPatchHunks(content, filePath string, hunks []patchHunkArg) (string, error) {
+func applyPatchHunks(content, filePath string, hunks []patchHunkArg) (string, []patchHunkRelocation, error) {
 	if len(hunks) == 0 || len(hunks) > patchMaxHunksPerFile {
-		return "", newPatchError("invalid_hunks", "patch hunks must contain between 1 and 64 entries: "+filePath)
+		return "", nil, newPatchError("invalid_hunks", "patch hunks must contain between 1 and 64 entries: "+filePath)
 	}
 	type resolvedHunk struct {
 		index    int
@@ -373,18 +385,29 @@ func applyPatchHunks(content, filePath string, hunks []patchHunkArg) (string, er
 	}
 	lines := splitPatchTextLines(content)
 	resolved := make([]resolvedHunk, 0, len(hunks))
+	var relocations []patchHunkRelocation
 	for index, hunk := range hunks {
 		oldLines := *hunk.OldLines
 		start := hunk.StartLine - 1
+		var matchErr *patchError
 		if start > len(lines) || len(oldLines) > len(lines)-start {
-			return "", newPatchHunkError("hunk_line_out_of_range", "hunk "+strconv.Itoa(index+1)+" range is outside the original file: "+filePath, filePath, index, hunk, lines, -1)
-		}
-		end := start + len(oldLines)
-		for offset, expected := range oldLines {
-			if lines[start+offset].text != expected {
-				return "", newPatchHunkError("hunk_lines_mismatch", "hunk "+strconv.Itoa(index+1)+" old_lines do not match at start_line "+strconv.Itoa(hunk.StartLine)+": "+filePath, filePath, index, hunk, lines, offset)
+			matchErr = newPatchHunkError("hunk_line_out_of_range", "hunk "+strconv.Itoa(index+1)+" range is outside the original file: "+filePath, filePath, index, hunk, lines, -1)
+		} else {
+			for offset, expected := range oldLines {
+				if lines[start+offset].text != expected {
+					matchErr = newPatchHunkError("hunk_lines_mismatch", "hunk "+strconv.Itoa(index+1)+" old_lines do not match at start_line "+strconv.Itoa(hunk.StartLine)+": "+filePath, filePath, index, hunk, lines, offset)
+					break
+				}
 			}
 		}
+		if matchErr != nil {
+			if !hunk.Relocate || len(oldLines) == 0 || matchErr.recovery.ExactMatchCount != 1 {
+				return "", nil, matchErr
+			}
+			start = matchErr.recovery.Candidates[0].StartLine - 1
+			relocations = append(relocations, patchHunkRelocation{Hunk: index + 1, RequestedStartLine: hunk.StartLine, StartLine: start + 1})
+		}
+		end := start + len(oldLines)
 		resolved = append(resolved, resolvedHunk{index: index, start: start, end: end, newLines: *hunk.NewLines})
 	}
 	sort.Slice(resolved, func(i, j int) bool {
@@ -397,7 +420,7 @@ func applyPatchHunks(content, filePath string, hunks []patchHunkArg) (string, er
 		previous := resolved[index-1]
 		current := resolved[index]
 		if current.start < previous.end || (current.start == previous.start && (current.start == current.end || previous.start == previous.end)) {
-			return "", newPatchError("hunk_overlap", "hunks "+strconv.Itoa(resolved[index-1].index+1)+" and "+strconv.Itoa(resolved[index].index+1)+" overlap in the original file: "+filePath)
+			return "", nil, newPatchError("hunk_overlap", "hunks "+strconv.Itoa(resolved[index-1].index+1)+" and "+strconv.Itoa(resolved[index].index+1)+" overlap in the original file: "+filePath)
 		}
 	}
 	defaultEnding := patchDefaultLineEnding(lines)
@@ -436,14 +459,14 @@ func applyPatchHunks(content, filePath string, hunks []patchHunkArg) (string, er
 		nextBytes += int64(len(line.text)) + int64(len(line.ending))
 	}
 	if nextBytes > patchMaxFileBytes {
-		return "", newPatchLimitError("file_too_large", "edited file text must not exceed 512 KiB: "+filePath, "destination_file_bytes", "bytes", nextBytes, patchMaxFileBytes)
+		return "", nil, newPatchLimitError("file_too_large", "edited file text must not exceed 512 KiB: "+filePath, "destination_file_bytes", "bytes", nextBytes, patchMaxFileBytes)
 	}
 	var next strings.Builder
 	for _, line := range lines {
 		next.WriteString(line.text)
 		next.WriteString(line.ending)
 	}
-	return next.String(), nil
+	return next.String(), relocations, nil
 }
 
 func splitPatchTextLines(content string) []patchTextLine {
@@ -657,11 +680,12 @@ func patchPayload(patch *preparedPatch) map[string]any {
 	for _, file := range patch.Files {
 		destructive = destructive || file.Delete
 		files = append(files, patchFileView{
-			Path:       file.Path,
-			Operation:  file.Operation,
-			Additions:  file.Additions,
-			Deletions:  file.Deletions,
-			LineRanges: file.LineRanges,
+			Path:        file.Path,
+			Operation:   file.Operation,
+			Additions:   file.Additions,
+			Deletions:   file.Deletions,
+			LineRanges:  file.LineRanges,
+			Relocations: file.Relocations,
 		})
 	}
 	payload := map[string]any{
