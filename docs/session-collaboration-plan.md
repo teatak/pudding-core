@@ -2,17 +2,17 @@
 
 ## 会话步骤退役（2026-10-20）
 
-当前工作区移除 `builtin_plan_update` 的工具定义、执行入口和模式提示词，Desktop 移除输入框计划进度及协作面板里的主会话步骤。子 agent 派发、状态、结果回收、停止与归档保持原有语义。旧计划调用与结果成对过滤出模型上下文及压缩输入，原始历史保留。后文涉及旧步骤组件的内容是首版实施记录，不再代表当前界面；发布版本仍以 Desktop 锁定的 Core 为准。
+当前工作区移除 `builtin_plan_update` 的工具定义、执行入口和模式提示词，Desktop 移除输入框计划进度及协作面板里的主会话步骤。子会话 派发、状态、结果回收、停止与归档保持原有语义。旧计划调用与结果成对过滤出模型上下文及压缩输入，原始历史保留。后文涉及旧步骤组件的内容是首版实施记录，不再代表当前界面；发布版本仍以 Desktop 锁定的 Core 为准。
 
-## 子 agent 生命周期改版（2026-10-15 已确认，尚未发布）
+## 子会话 生命周期改版（2026-10-15 已确认，尚未发布）
 
 实施分支：core [PR #22](https://github.com/teatak/pudding-core/pull/22)，desktop [PR #14](https://github.com/teatak/pudding-desktop/pull/14)。本节为改版的目标规则；后文保留改版前基线和首版历史，不代表本次改版已经验收。准确发布范围仍由 desktop 的 `core.lock.json` 与发布报告确定。
 
 ### 工具命名及旧名退役
 
-新工具清单及新调用记录只使用 `builtin_subagent_{list,dispatch,send,wait,stop,archive,restore,reset}`。中文界面继续使用“子任务”，插件 ID `collaboration` 和现有父子会话关系不变，不为工具改名进行数据迁移。
+2026-10-30：新工具清单及新调用记录统一使用 `builtin_subsession_{list,dispatch,send,wait,stop,archive,restore,reset}`，插件及默认技能 ID 为 `subsession`，界面使用 Subsessions／子会话／子會話。旧插件 ID `subagent`、`collaboration` 在配置和技能引用边界归一化，保留已有启用状态和会话加载状态。父子关系及持久化的 `subagent_reset` v1 元数据保持不变，历史重置记录无需迁移。
 
-`internal/tool/subagent_compat.go` 集中处理已经实际发布的旧名历史读取兼容：`builtin_subtask_` 的 list / dispatch / send / wait / stop / archive / restore，以及 `builtin_collaboration_` 的 list / dispatch / send / wait / stop。不得补造未发布的旧操作，不注册可执行旧名，也不把多套同义工具同时暴露给模型。
+`internal/tool/subsession_compat.go` 集中处理已经实际发布的旧名历史读取兼容：`builtin_subagent_` 的全部八个操作、`builtin_subtask_` 的 list / dispatch / send / wait / stop / archive / restore，以及 `builtin_collaboration_` 的 list / dispatch / send / wait / stop。不得补造未发布的旧操作，不注册可执行旧名，也不把多套同义工具同时暴露给模型。
 
 兼容期从首次包含本次改名的正式 desktop 版本发布日期开始，保留六个自然月。不能从讨论或提交日期起算。发布时维护以下记录，并同步映射处注释：
 
@@ -27,7 +27,7 @@
 
 ### 数量、归档与恢复
 
-每个主会话最多保留 24 个子 agent 身份，包含归档、失败、取消、已完成及运行／排队对象；归档不释放身份名额。已有超限数据不自动删除，只禁止继续新增。每个主会话最多 3 个子会话同时运行，每个子会话仍最多 1 个运行轮次，不允许递归派发。
+每个主会话最多保留 24 个子会话 身份，包含归档、失败、取消、已完成及运行／排队对象；归档不释放身份名额。已有超限数据不自动删除，只禁止继续新增。每个主会话最多 3 个子会话同时运行，每个子会话仍最多 1 个运行轮次，不允许递归派发。
 
 每次原始用户请求最多开启 3 个新上下文，新建与重置合计；普通 `send` 续接不计入。系统续跑、重试、表单补答和重启不重置该额度，归档不返还额度。重复工具调用按既有回执返回，不重复计数。
 
@@ -37,11 +37,11 @@
 
 ### 重置上下文与组合派发
 
-`builtin_subagent_reset(session_id, expected_turn_id)` 只重置，不派发，也不改变归档状态。`builtin_subagent_send(session_id, prompt, reset_context:true, expected_turn_id)` 复用同一对象，原子提交重置边界、归档恢复、任务入队及一次新上下文额度。`reset_context` 默认 false；dispatch 只负责新建，不混用新建与复用职责。
+`builtin_subsession_reset(session_id, expected_turn_id)` 只重置，不派发，也不改变归档状态。`builtin_subsession_send(session_id, prompt, reset_context:true, expected_turn_id)` 复用同一对象，原子提交重置边界、归档恢复、任务入队及一次新上下文额度。`reset_context` 默认 false；dispatch 只负责新建，不混用新建与复用职责。
 
 `expected_turn_id` 来自最新 list 的 `latest_turn_id`。重置前必须检查所属主会话、最新轮次、运行或排队／编辑输入、审批、未答问题、后台进程、压缩状态和结果回收。目标忙或状态已变化则拒绝，原消息、队列、归档与额度均不改变；不能偷偷取消旧任务。相同工具调用重试只返回原回执，即使新任务已经开始或 daemon 重启。
 
-重置保留子 agent ID、项目、基础配置、原始历史、文件和 Studio 内容；旧任务消息、旧摘要、历史技能引用及 provider 续接状态不再自动进入新任务上下文。新的 prompt 必须自包含。它不是磁盘清理，不撤回主会话已经收到的结果，也不回滚文件。
+重置保留子会话 ID、项目、基础配置、原始历史、文件和 Studio 内容；旧任务消息、旧摘要、历史技能引用及 provider 续接状态不再自动进入新任务上下文。新的 prompt 必须自包含。它不是磁盘清理，不撤回主会话已经收到的结果，也不回滚文件。
 
 重置检查点是维护记录，不得作为新完成任务回收、唤醒父会话或获得旧任务的重试资格。重置前迟到的输出、完成事件和旧轮次重试不能污染新上下文；新上下文中的真实失败任务仍可重试。desktop 将重置前历史默认收起，允许显式查看／搜索，保留草稿与原始记录。
 
@@ -121,7 +121,7 @@
 | 字段 | 定义 |
 | --- | --- |
 | 中文名称 | 子任务调度 |
-| 英文名称 | Subagents |
+| 英文名称 | Subsessions |
 | 稳定插件 ID | `collaboration` |
 | 中文简介 | 让主会话分派子任务、跟踪执行并汇总结果。 |
 | 英文简介 | Let the main conversation delegate subtasks, track their progress, and bring results together. |

@@ -203,7 +203,7 @@ func (e *Engine) executeAssistantTask(ctx context.Context, sessionID, turnID str
 	return result
 }
 
-// Called at the same model-safe boundaries as subagent result collection.
+// Called at the same model-safe boundaries as subsession result collection.
 func (e *Engine) collectWorkResults(ctx context.Context, sessionID string) (bool, error) {
 	children, err := e.collectChildResults(ctx, sessionID)
 	if err != nil {

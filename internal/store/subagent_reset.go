@@ -10,10 +10,10 @@ import (
 )
 
 var (
-	ErrSubagentResetBusy = errors.New("subagent cannot be reset while work, approvals, unanswered questions, background processes or compaction are pending")
-	ErrSubagentStateChanged = errors.New("subagent state changed; list again and supply its current latest_turn_id as expected_turn_id")
-	ErrSubagentResultUncollected = errors.New("subagent result has not been collected; wait for result collection before resetting")
-	ErrSubagentResetConflict = errors.New("subagent reset request identity was already used with different arguments")
+	ErrSubagentResetBusy         = errors.New("subsession cannot be reset while work, approvals, unanswered questions, background processes or compaction are pending")
+	ErrSubagentStateChanged      = errors.New("subsession state changed; list again and supply its current latest_turn_id as expected_turn_id")
+	ErrSubagentResultUncollected = errors.New("subsession result has not been collected; wait for result collection before resetting")
+	ErrSubagentResetConflict     = errors.New("subsession reset request identity was already used with different arguments")
 )
 
 // SubagentLifecycleStore is the transaction contract for a context boundary and
@@ -26,22 +26,22 @@ type SubagentLifecycleStore interface {
 
 type SubagentResetInput struct {
 	ParentSessionID string
-	ParentTurnID string
-	CallID string
-	SessionID string
-	ExpectedTurnID string
+	ParentTurnID    string
+	CallID          string
+	SessionID       string
+	ExpectedTurnID  string
 	// Nil means reset only. Non-nil means reset, restore archive and queue
 	// this input in the same transaction. Runtime admission is owned by Engine.
 	Input *QueueInputInput
 }
 
 type SubagentResetResult struct {
-	SessionID string `json:"session_id"`
-	ResetTurnID string `json:"reset_turn_id"`
-	ContextReset bool `json:"context_reset"`
-	Queued bool `json:"queued"`
+	SessionID       string `json:"session_id"`
+	ResetTurnID     string `json:"reset_turn_id"`
+	ContextReset    bool   `json:"context_reset"`
+	Queued          bool   `json:"queued"`
 	ClientMessageID string `json:"client_message_id,omitempty"`
-	Duplicate bool `json:"duplicate"`
+	Duplicate       bool   `json:"duplicate"`
 }
 
 // A reset is a maintenance checkpoint, not a user task or an LLM compaction.
@@ -49,12 +49,12 @@ type SubagentResetResult struct {
 // canonical history, pagination and reload all retain the same boundary.
 // The checkpoint has no model execution and cannot be retried as a failed task.
 type SubagentResetMetadata struct {
-	Version int `json:"version"`
-	ParentSessionID string `json:"parent_session_id"`
-	ParentTurnID string `json:"parent_turn_id"`
-	CallID string `json:"call_id"`
-	ExpectedTurnID string `json:"expected_turn_id"`
-	RequestHash string `json:"request_hash"`
+	Version               int    `json:"version"`
+	ParentSessionID       string `json:"parent_session_id"`
+	ParentTurnID          string `json:"parent_turn_id"`
+	CallID                string `json:"call_id"`
+	ExpectedTurnID        string `json:"expected_turn_id"`
+	RequestHash           string `json:"request_hash"`
 	QueuedClientMessageID string `json:"queued_client_message_id,omitempty"`
 }
 
@@ -86,7 +86,9 @@ func SubagentResetFromMessage(msg *Message) (*SubagentResetMetadata, bool) {
 	if msg == nil || msg.Role != RoleSummary || msg.Kind != MessageKindSummary {
 		return nil, false
 	}
-	var envelope struct { Reset *SubagentResetMetadata `json:"subagent_reset"` }
+	var envelope struct {
+		Reset *SubagentResetMetadata `json:"subagent_reset"`
+	}
 	if json.Unmarshal(msg.Metadata, &envelope) != nil || envelope.Reset == nil {
 		return nil, false
 	}
@@ -111,7 +113,9 @@ func SubagentContextMessages(messages []*Message) []*Message {
 
 func ValidateSubagentReset(in SubagentResetInput) error {
 	for _, value := range []string{in.ParentSessionID, in.ParentTurnID, in.CallID, in.SessionID, in.ExpectedTurnID} {
-		if strings.TrimSpace(value) == "" { return ErrInvalidSessionRelation }
+		if strings.TrimSpace(value) == "" {
+			return ErrInvalidSessionRelation
+		}
 	}
 	if in.Input != nil && (in.Input.SessionID != in.SessionID || strings.TrimSpace(in.Input.ClientMessageID) == "" || strings.TrimSpace(in.Input.Text) == "") {
 		return ErrInvalidSessionRelation

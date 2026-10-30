@@ -22,7 +22,7 @@ Pudding 使用统一的**插件**概念承载需要说明、工具、界面和�
 | --- | --- | --- |
 | Web Search & Fetch（网页搜索与抓取） | Chat | Tavily / DeepSeek 搜索和抓取，daemon 执行，不依赖客户端 runtime |
 | Browser | Work | 浏览器标签页、页面状态和页面交互工具 |
-| Subagents（子任务调度） | Work | 主会话派发、补充、等待和停止子任务；关闭后已接受任务继续收尾，结果回收不依赖工具开关 |
+| Subsessions（子任务调度） | Work | 主会话派发、补充、等待和停止子任务；关闭后已接受任务继续收尾，结果回收不依赖工具开关 |
 | Computer Use | Work | 本机应用的观察与操作 |
 | Image Capture | Chat | 用户明确要求时从本地屏幕或相机采集图像 |
 | Studio | Chat | 列出和打开内容，创建、读取与修改原生文档；Core 执行，定时任务和子会话无需 Desktop |

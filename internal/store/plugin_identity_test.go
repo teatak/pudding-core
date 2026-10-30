@@ -12,7 +12,8 @@ func TestCanonicalPluginIDsAndOwnedSkillSelectors(t *testing.T) {
 		"markdown":       "page-authoring",
 		"note-authoring": "page-authoring",
 		"tables":         "sheet-authoring",
-		"collaboration":  "subagent",
+		"collaboration":  "subsession",
+		"subagent":       "subsession",
 		"web":            "web-search-fetch",
 	} {
 		t.Run(old, func(t *testing.T) {

@@ -14,7 +14,7 @@ import (
 )
 
 func TestPluginIDRenamePreservesLoadUnloadAndAuthorization(t *testing.T) {
-	for old, current := range map[string]string{"artifacts": "artifact", "markdown": "page-authoring", "note-authoring": "page-authoring", "tables": "sheet-authoring", "collaboration": "subagent", "web": "web-search-fetch"} {
+	for old, current := range map[string]string{"artifacts": "artifact", "markdown": "page-authoring", "note-authoring": "page-authoring", "tables": "sheet-authoring", "collaboration": "subsession", "subagent": "subsession", "web": "web-search-fetch"} {
 		t.Run(old, func(t *testing.T) {
 			ctx := context.Background()
 			st := storetest.New(t)
@@ -28,7 +28,7 @@ func TestPluginIDRenamePreservesLoadUnloadAndAuthorization(t *testing.T) {
 				return tool.Call{Name: tool.PluginLoad, Args: raw}
 			}
 			mode := store.ModeChat
-			if current == "subagent" {
+			if current == "subsession" {
 				mode = store.ModeWork
 			}
 			out, changed, _ := e.loadPlugin(ctx, "s", call(old, old), mode)
@@ -78,7 +78,7 @@ func TestSubagentPluginAliasCannotBypassChildRestrictions(t *testing.T) {
 	if err := st.CreateChildSession(ctx, "parent", &store.Session{ID: "child", Provider: "mock", Model: "mock"}); err != nil {
 		t.Fatal(err)
 	}
-	for _, id := range []string{"collaboration", "subagent"} {
+	for _, id := range []string{"collaboration", "subagent", "subsession"} {
 		raw, _ := json.Marshal(map[string]string{"plugin_id": id})
 		call := tool.Call{Name: tool.PluginLoad, Args: raw}
 		out, _, _ := e.loadPlugin(ctx, "child", call, store.ModeWork)

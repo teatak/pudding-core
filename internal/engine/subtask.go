@@ -23,7 +23,7 @@ func (e *Engine) executeSubtask(ctx context.Context, sessionID, turnID string, m
 		return tool.Result{CallID: call.CallID, Name: call.Name, Content: err.Error()}
 	}
 	if !tool.IsSubtaskTool(call.Name) {
-		return fail(errors.New("unknown subagent tool"))
+		return fail(errors.New("unknown subsession tool"))
 	}
 	owner, err := e.store.ParentSessionID(ctx, sessionID)
 	if err != nil {
@@ -32,8 +32,8 @@ func (e *Engine) executeSubtask(ctx context.Context, sessionID, turnID string, m
 	if owner != "" {
 		return fail(store.ErrInvalidSessionRelation)
 	}
-	if !e.pluginToolCallable(ctx, sessionID, plugin.BuiltinSubagentID, mode) {
-		return e.pluginToolUnavailableResult(ctx, sessionID, call, plugin.BuiltinSubagentID)
+	if !e.pluginToolCallable(ctx, sessionID, plugin.BuiltinSubsessionID, mode) {
+		return e.pluginToolUnavailableResult(ctx, sessionID, call, plugin.BuiltinSubsessionID)
 	}
 	var dispatchArgs struct {
 		Title  string `json:"title"`
@@ -75,7 +75,7 @@ func (e *Engine) executeSubtask(ctx context.Context, sessionID, turnID string, m
 		return fail(err)
 	}
 	if err := decoder.Decode(new(any)); err != io.EOF {
-		return fail(errors.New("subagent tool expects one JSON object"))
+		return fail(errors.New("subsession tool expects one JSON object"))
 	}
 	var payload any
 	switch call.Name {
@@ -167,7 +167,7 @@ func (e *Engine) executeSubtask(ctx context.Context, sessionID, turnID string, m
 		}
 		payload = map[string]any{"stopped": true}
 	default:
-		return fail(errors.New("unknown subagent tool"))
+		return fail(errors.New("unknown subsession tool"))
 	}
 	content, _ := json.Marshal(payload)
 	return tool.Result{CallID: call.CallID, Name: call.Name, Ok: true, Content: string(content)}
@@ -180,7 +180,7 @@ func (e *Engine) dispatchChild(ctx context.Context, parentID, turnID, callID, ti
 		e.collaborationMu.Unlock()
 		return nil, err
 	}
-	if !e.pluginToolCallable(ctx, parentID, plugin.BuiltinSubagentID, mode) {
+	if !e.pluginToolCallable(ctx, parentID, plugin.BuiltinSubsessionID, mode) {
 		e.collaborationMu.Unlock()
 		return nil, errors.New("collaboration plugin is unavailable")
 	}
@@ -192,7 +192,7 @@ func (e *Engine) dispatchChild(ctx context.Context, parentID, turnID, callID, ti
 	child := &store.Session{ID: store.NewID("session"), Title: strings.TrimSpace(title), Provider: parent.Provider, Model: parent.Model, ReasoningEffort: parent.ReasoningEffort, ReasoningModelKey: parent.ReasoningModelKey, ProjectID: parent.ProjectID, ActiveMode: parent.ActiveMode, ModeLease: parent.ModeLease}
 	// Capability grants scoped only to this parent turn do not transfer.
 	for _, id := range parent.LoadedPluginIDs {
-		if id != plugin.BuiltinSubagentID {
+		if id != plugin.BuiltinSubsessionID {
 			child.LoadedPluginIDs = append(child.LoadedPluginIDs, id)
 		}
 	}

@@ -278,19 +278,19 @@ func TestAssistantSubagentNeedsNoDispatchApproval(t *testing.T) {
 		t.Fatal(err)
 	}
 	sid := profile.Assistant.SessionID
-	mode, lease, ids := store.ModeWork, store.ModeLeaseSession, []string{plugin.BuiltinSubagentID}
+	mode, lease, ids := store.ModeWork, store.ModeLeaseSession, []string{plugin.BuiltinSubsessionID}
 	if _, err := db.UpdateSession(ctx, sid, store.SessionUpdate{ActiveMode: &mode, ModeLease: &lease, LoadedPluginIDs: &ids}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := db.BeginTurn(ctx, store.BeginTurnInput{SessionID: sid, TurnID: "source", UserMessageID: "message", ClientMessageID: "client", UserText: "Do a small subtask"}); err != nil {
 		t.Fatal(err)
 	}
-	result := eng.executeAllowedTool(ctx, sid, "source", mode, tool.Call{CallID: "subagent", Name: tool.SubtaskDispatch, Args: mustJSON(map[string]string{"title": "Small task", "prompt": "Do this small task"})})
+	result := eng.executeAllowedTool(ctx, sid, "source", mode, tool.Call{CallID: "subsession", Name: tool.SubtaskDispatch, Args: mustJSON(map[string]string{"title": "Small task", "prompt": "Do this small task"})})
 	if !result.Ok || len(eng.PendingApprovals(sid)) != 0 {
-		t.Fatal("subagent must not need dispatch approval", result)
+		t.Fatal("subsession must not need dispatch approval", result)
 	}
 	children, err := eng.ListChildSessions(ctx, sid)
 	if err != nil || len(children) != 1 {
-		t.Fatal("subagent not created", children, err)
+		t.Fatal("subsession not created", children, err)
 	}
 }

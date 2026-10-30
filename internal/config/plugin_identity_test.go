@@ -9,7 +9,7 @@ import (
 )
 
 func TestPluginIDEnablementAliasesPreserveStateAndCanonicalPrecedence(t *testing.T) {
-	for old, current := range map[string]string{"artifacts": "artifact", "markdown": "page-authoring", "note-authoring": "page-authoring", "tables": "sheet-authoring", "collaboration": "subagent", "web": "web-search-fetch"} {
+	for old, current := range map[string]string{"artifacts": "artifact", "markdown": "page-authoring", "note-authoring": "page-authoring", "tables": "sheet-authoring", "collaboration": "subsession", "subagent": "subsession", "web": "web-search-fetch"} {
 		for _, explicit := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/canonical=%v", old, explicit), func(t *testing.T) {
 				ctx := context.Background()
@@ -59,6 +59,24 @@ func TestPluginIDEnablementAliasesPreserveStateAndCanonicalPrecedence(t *testing
 					t.Fatal("legacy delete left canonical setting", got)
 				}
 			})
+		}
+	}
+}
+
+func TestSubsessionEnablementPreservesNewestLegacySetting(t *testing.T) {
+	ctx := context.Background()
+	m := NewManager(t.TempDir())
+	if err := m.Prepare(); err != nil {
+		t.Fatal(err)
+	}
+	for _, enabled := range []bool{false, true} {
+		body := fmt.Sprintf("version: 1\nplugins:\n  content_plugins_split: true\n  enabled:\n    collaboration: %t\n    subagent: %t\n", !enabled, enabled)
+		if err := os.WriteFile(m.path(settingsFile), []byte(body), 0600); err != nil {
+			t.Fatal(err)
+		}
+		got, err := m.ListPluginEnablement(ctx)
+		if err != nil || got["subsession"] != enabled || len(got) != 1 {
+			t.Fatalf("newer setting lost: %v, %v", got, err)
 		}
 	}
 }

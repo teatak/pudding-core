@@ -38,7 +38,7 @@ func TestAssistantTaskLifecycleAndExactResults(t *testing.T) {
 		t.Fatal("work missing from ordinary list", sessions, err)
 	}
 	if err := s.CreateChildSession(ctx, work.ID, &store.Session{ID: "work-child", Provider: "mock", Model: "mock"}); err != nil {
-		t.Fatal("work cannot use subagents", err)
+		t.Fatal("work cannot use subsessions", err)
 	}
 	other := in
 	other.CallID = "another"

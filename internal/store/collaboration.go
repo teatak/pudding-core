@@ -15,9 +15,9 @@ import (
 const SubtaskDispatchLimit = 3
 const SubagentTotalLimit = 24
 
-var ErrSubtaskLimit = errors.New("subagent fresh-context limit reached (3 creations or resets per user request); continue in the main conversation or send related work without resetting; archiving does not restore this budget")
-var ErrSubagentTotalLimit = errors.New("subagent total limit reached (24 per parent, including archived); list with include_archived=true and send to a suitable existing subagent, or reset an idle one for independent work; archiving does not free a slot")
-var ErrSubtaskArchiveBusy = errors.New("subagent must be settled with no running or queued work, approvals, unanswered questions, or background processes before archiving")
+var ErrSubtaskLimit = errors.New("subsession fresh-context limit reached (3 creations or resets per user request); continue in the main conversation or send related work without resetting; archiving does not restore this budget")
+var ErrSubagentTotalLimit = errors.New("subsession total limit reached (24 per parent, including archived); list with include_archived=true and send to a suitable existing subsession, or reset an idle one for independent work; archiving does not free a slot")
+var ErrSubtaskArchiveBusy = errors.New("subsession must be settled with no running or queued work, approvals, unanswered questions, or background processes before archiving")
 var ErrCollaborationStopped = errors.New("store: collaboration stopped")
 
 // Dispatch identity belongs to the originating tool call. Execution state stays

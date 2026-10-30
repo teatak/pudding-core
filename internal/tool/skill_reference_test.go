@@ -4,6 +4,14 @@ import "testing"
 
 func TestCurrentToolNameProjectsRetiredNamesOnlyInHistory(t *testing.T) {
 	for old, current := range map[string]string{
+		"builtin_subagent_list":          SubtaskList,
+		"builtin_subagent_dispatch":      SubtaskDispatch,
+		"builtin_subagent_send":          SubtaskSend,
+		"builtin_subagent_wait":          SubtaskWait,
+		"builtin_subagent_stop":          SubtaskStop,
+		"builtin_subagent_archive":       SubtaskArchive,
+		"builtin_subagent_restore":       SubtaskRestore,
+		"builtin_subagent_reset":         SubtaskReset,
 		"builtin_collaboration_list":     SubtaskList,
 		"builtin_collaboration_dispatch": SubtaskDispatch,
 		"builtin_collaboration_send":     SubtaskSend,
@@ -66,7 +74,7 @@ func TestReferencedSkillReadsPluginResultsStoredUnderAppNames(t *testing.T) {
 }
 
 func TestRenamedPluginHistoryIsProjectedWithoutChangingSource(t *testing.T) {
-	for old, current := range map[string]string{"artifacts": "artifact", "markdown": "page-authoring", "note-authoring": "page-authoring", "tables": "sheet-authoring", "collaboration": "subagent", "web": "web-search-fetch"} {
+	for old, current := range map[string]string{"artifacts": "artifact", "markdown": "page-authoring", "note-authoring": "page-authoring", "tables": "sheet-authoring", "collaboration": "subsession", "web": "web-search-fetch"} {
 		content := `{"reference":{"kind":"plugin_skill","pluginID":"` + old + `","skillID":"` + old + `"},"content":"OLD_BODY"}`
 		got, ok := ReferencedSkill(PluginLoad, true, content)
 		if !ok || got.PluginID != current || got.SkillID != current {

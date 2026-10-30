@@ -584,12 +584,18 @@ func (m *Manager) readSettings() (settingsYAML, error) {
 	// Migrate saved enablement once. Explicit canonical settings win. Sorting
 	// also gives the newer legacy "artifacts" switch precedence over "studio"
 	// when neither has an explicit "artifact" setting; map order must not decide.
+	// Likewise, the newer "subagent" switch takes precedence over "collaboration".
 	changed := false
 	ids := make([]string, 0, len(cfg.Plugins.Enabled))
 	for id := range cfg.Plugins.Enabled {
 		ids = append(ids, id)
 	}
-	sort.Strings(ids)
+	sort.Slice(ids, func(i, j int) bool {
+		if (ids[i] == "subagent") != (ids[j] == "subagent") {
+			return ids[i] == "subagent"
+		}
+		return ids[i] < ids[j]
+	})
 	for _, id := range ids {
 		enabled := cfg.Plugins.Enabled[id]
 		current := store.CurrentPluginID(id)

@@ -161,7 +161,7 @@ func (s *Store) ResetSubagent(ctx context.Context, in store.SubagentResetInput) 
 		checkpoint := &store.Message{
 			ID: resetMessageID, SessionID: child.ID, TurnID: resetTurnID,
 			Role: store.RoleSummary, Kind: store.MessageKindSummary,
-			Text: "Subagent task context reset. Earlier history is retained for explicit inspection but is not part of the new task context.",
+			Text:     "Subsession task context reset. Earlier history is retained for explicit inspection but is not part of the new task context.",
 			Metadata: store.NewSubagentResetMetadata(in).JSON(), CreatedAt: now,
 		}
 		checkpoint.Parts = store.TextPart(checkpoint.Text)

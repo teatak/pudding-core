@@ -219,7 +219,7 @@ func TestCollaborationListKeepsPluginModeAndParentBoundaries(t *testing.T) {
 		t.Fatal("list accepted a target session override")
 	}
 	call.Args = json.RawMessage(`{}`)
-	if err := st.CreateChildSession(ctx, "root", &store.Session{ID: "child", Provider: "mock", Model: "model", LoadedPluginIDs: []string{plugin.BuiltinSubagentID}}); err != nil {
+	if err := st.CreateChildSession(ctx, "root", &store.Session{ID: "child", Provider: "mock", Model: "model", LoadedPluginIDs: []string{plugin.BuiltinSubsessionID}}); err != nil {
 		t.Fatal(err)
 	}
 	if hasList("child", store.ModeWork) || eng.executeSubtask(ctx, "child", "", store.ModeWork, call).Ok {

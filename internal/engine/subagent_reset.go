@@ -25,14 +25,14 @@ func (e *Engine) resetSubagent(ctx context.Context, parentID, parentTurnID, call
 	}
 	lifecycle, ok := e.store.(store.SubagentLifecycleStore)
 	if !ok {
-		return nil, errors.New("subagent context reset is unavailable in this store")
+		return nil, errors.New("subsession context reset is unavailable in this store")
 	}
 	e.collaborationMu.Lock()
 	result, err := func() (*store.SubagentResetResult, error) {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		if !e.pluginToolCallable(ctx, parentID, plugin.BuiltinSubagentID, mode) {
+		if !e.pluginToolCallable(ctx, parentID, plugin.BuiltinSubsessionID, mode) {
 			return nil, errors.New("collaboration plugin is unavailable")
 		}
 		owner, err := e.store.ParentSessionID(ctx, childID)

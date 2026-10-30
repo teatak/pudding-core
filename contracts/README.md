@@ -390,7 +390,7 @@ Protocol 54 adds `GET /sessions/:id/assistant-tasks` (`{tasks}`) and optional
 `assistantSessionID` / `assistantTaskActive` source markers on session snapshots.
 The three fixed-assistant-only tools `builtin_assistant_task_dispatch`,
 `builtin_assistant_task_list` and `builtin_assistant_task_send` coordinate ordinary
-root work conversations; they neither create subagent relations nor transfer
+root work conversations; they neither create subsession relations nor transfer
 personal profiles, memories or permission grants. New work conversations use the
 assistant's configured provider/model; existing targets keep their own settings.
 Only one assignment may be active at a time. A task's status/result is derived

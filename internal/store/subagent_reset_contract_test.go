@@ -151,7 +151,9 @@ func TestSubagentResetContractReplay(t *testing.T) {
 			func(v *SubagentResetInput) { v.CallID = "other-call" },
 			func(v *SubagentResetInput) { v.ParentTurnID = "other-turn" },
 			func(v *SubagentResetInput) { v.ParentSessionID = "other-parent" },
-			func(v *SubagentResetInput) { v.Input = &QueueInputInput{SessionID: v.SessionID, ClientMessageID: "different", Text: "different task"} },
+			func(v *SubagentResetInput) {
+				v.Input = &QueueInputInput{SessionID: v.SessionID, ClientMessageID: "different", Text: "different task"}
+			},
 		} {
 			changed := in
 			mutate(&changed)
@@ -164,7 +166,7 @@ func TestSubagentResetContractReplay(t *testing.T) {
 
 func TestSubagentSettledArchivePolicy(t *testing.T) {
 	if SubagentTotalLimit != 24 {
-		t.Fatalf("unexpected total subagent limit: %d", SubagentTotalLimit)
+		t.Fatalf("unexpected total subsession limit: %d", SubagentTotalLimit)
 	}
 	for _, status := range []string{"completed", "failed", "cancelled"} {
 		if !SubagentSettledStatus(status) {

@@ -12,7 +12,7 @@ const (
 	BuiltinPageAuthoringID = "page-authoring"
 
 	BuiltinSheetAuthoringID  = "sheet-authoring"
-	BuiltinSubagentID        = "subagent"
+	BuiltinSubsessionID      = "subsession"
 	BuiltinBrowserID         = "browser"
 	BuiltinWebSearchFetchID  = "web-search-fetch"
 	BuiltinSkillAuthoringID  = "skill-authoring"
@@ -57,12 +57,12 @@ var builtinDefinitions = []builtinDefinition{
 		[]string{"builtin_page_create", "builtin_page_read", "builtin_page_edit", "builtin_page_rename"}, pageInstructions),
 	contentBuiltin(BuiltinSheetAuthoringID, "Sheet Authoring", "Create, read and edit native typed tables using stable row and column IDs.",
 		[]string{"builtin_sheet_create", "builtin_sheet_read", "builtin_sheet_edit"}, sheetInstructions),
-	{definition: &Definition{Kind: KindPlugin, ID: BuiltinSubagentID, Name: "Subagents", Description: "Subagent delegation: Let the main conversation delegate bounded subtasks to child conversations, track their progress, and bring results together.", Source: SourceBuiltin, Enabled: true, CanUninstall: false, RequiredMode: "work", DefaultSkillID: BuiltinSubagentID,
-		Tools:  []ToolRef{{Name: "builtin_subagent_list"}, {Name: "builtin_subagent_dispatch"}, {Name: "builtin_subagent_send"}, {Name: "builtin_subagent_wait"}, {Name: "builtin_subagent_stop"}, {Name: "builtin_subagent_archive"}, {Name: "builtin_subagent_restore"}, {Name: "builtin_subagent_reset"}},
-		Skills: []SkillRef{{ID: BuiltinSubagentID, Name: "Subagents", Description: "Delegate bounded subtasks to child conversations and integrate their results.", Path: "skills/subagent/SKILL.md"}}},
-		skills: map[string]SkillDetail{BuiltinSubagentID: {ID: BuiltinSubagentID, Name: "Subagents", Description: "Delegate bounded subtasks to child conversations and integrate their results.", Path: "skills/subagent/SKILL.md", Content: `# Subagents
+	{definition: &Definition{Kind: KindPlugin, ID: BuiltinSubsessionID, Name: "Subsessions", Description: "Subsession delegation: Let the main conversation delegate bounded subtasks to child conversations, track their progress, and bring results together.", Source: SourceBuiltin, Enabled: true, CanUninstall: false, RequiredMode: "work", DefaultSkillID: BuiltinSubsessionID,
+		Tools:  []ToolRef{{Name: "builtin_subsession_list"}, {Name: "builtin_subsession_dispatch"}, {Name: "builtin_subsession_send"}, {Name: "builtin_subsession_wait"}, {Name: "builtin_subsession_stop"}, {Name: "builtin_subsession_archive"}, {Name: "builtin_subsession_restore"}, {Name: "builtin_subsession_reset"}},
+		Skills: []SkillRef{{ID: BuiltinSubsessionID, Name: "Subsessions", Description: "Delegate bounded subtasks to child conversations and integrate their results.", Path: "skills/subsession/SKILL.md"}}},
+		skills: map[string]SkillDetail{BuiltinSubsessionID: {ID: BuiltinSubsessionID, Name: "Subsessions", Description: "Delegate bounded subtasks to child conversations and integrate their results.", Path: "skills/subsession/SKILL.md", Content: `# Subsessions
 
-Use child conversations for bounded work that can make useful progress independently. Supply the objective, relevant context, constraints, and expected output in the dispatch prompt. Children do not inherit the main conversation history or temporary approvals. Use only the current builtin_subagent_* tools.
+Use child conversations for bounded work that can make useful progress independently. Supply the objective, relevant context, constraints, and expected output in the dispatch prompt. Children do not inherit the main conversation history or temporary approvals. Use only the current builtin_subsession_* tools.
 
 - Handle simple queries, plugin loading and small edits yourself. Only delegate bounded work that benefits from independent execution.
 - A parent can own at most 24 children, including archived, failed and cancelled children. Existing over-limit groups are preserved but cannot create more. Archive changes visibility, not capacity; restore, reset and ordinary send remain available at the total limit.

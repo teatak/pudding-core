@@ -1,13 +1,13 @@
 # Built-in plugin IDs
 
-Current canonical IDs, updated 2026-10-21:
+Current canonical IDs, updated 2026-10-30:
 
 | Previous ID | Canonical ID | Default Skill ID |
 | --- | --- | --- |
 | `artifacts` (earlier `studio`) | `artifact` | `artifact` |
 | `markdown`, `note-authoring` | `page-authoring` | `page-authoring` |
 | `tables` | `sheet-authoring` | `sheet-authoring` |
-| `collaboration` | `subagent` | `subagent` |
+| `collaboration`, `subagent` | `subsession` | `subsession` |
 | `web` | `web-search-fetch` | `web-search-fetch` |
 
 The earlier `docx` / `document-authoring` product is not part of the current Page/Sheet catalog. Do not relabel its retained structured data as Markdown. Canonical content kinds, references and tool names are listed in [Content naming](content-naming.md).
