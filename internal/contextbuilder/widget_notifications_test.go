@@ -141,3 +141,49 @@ func TestNotificationCoolingExemptionsAndEpoch(t *testing.T) {
 		})
 	}
 }
+
+func TestExpandedNotificationKeepsOriginalRoleAcrossWireProtocols(t *testing.T) {
+	ctx := context.Background()
+	db := storetest.New(t)
+	if err := db.CreateSession(ctx, &store.Session{ID: "s", Provider: "mock", Model: "m"}); err != nil {
+		t.Fatal(err)
+	}
+	board := "A B C\n. X .\n. . O\n"
+	payload := map[string]any{"stateVersion": 4, "message": "Your move", "data": map[string]any{"board": map[string]any{"text": board}}}
+	raw, _ := json.Marshal(payload)
+	metadata, _ := json.Marshal(map[string]any{"widgetNotification": payload, "modelOutput": map[string]any{"version": 1, "textFields": []map[string]any{{"path": "/data/board/text", "overflow": "whole"}}}})
+	notice := &store.Message{ID: "notice", TurnID: "notice", Role: store.RoleUser, Text: string(raw), Parts: store.TextPart(string(raw)), Metadata: metadata}
+	before, _ := json.Marshal(notice)
+	for _, enabled := range []bool{false, true} {
+		req, err := New(db, nil).BuildForProviderWithHistory(ctx, "s", "mock", "m", "chat", nil, []*store.Message{notice}, provider.ModelConfig{ToolOutputTextEnabled: enabled}, store.ContextCooling{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(req.Messages) != 1 || req.Messages[0].Role != provider.RoleUser {
+			t.Fatal("created a new message or role")
+		}
+		if strings.Contains(req.Messages[0].Text, board) != enabled {
+			t.Fatalf("incorrect toggle projection: %q", req.Messages[0].Text)
+		}
+		for _, wire := range []func(provider.Request) provider.WireInput{openai.ChatRequestInput, openai.ResponsesRequestInput, anthropic.RequestInput, google.RequestInput} {
+			data, err := json.Marshal(wire(req).Messages)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(string(data), "stateVersion") || strings.Contains(string(data), "$text_ref") != enabled {
+				t.Fatalf("wire lost projection: %s", data)
+			}
+		}
+	}
+	after, _ := json.Marshal(notice)
+	if string(after) != string(before) {
+		t.Fatal("canonical notice changed")
+	}
+	// Cooling must not re-expand the full canonical notice from its metadata.
+	large := coolingNotice("large")
+	large.Metadata = metadata
+	cold := coldWidgetNotification(large, widgetNotification(large))
+	if projected := projectWidgetNotification(cold, true); projected != cold {
+		t.Fatal("expanded a cooled notification")
+	}
+}

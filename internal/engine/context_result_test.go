@@ -8,7 +8,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/teatak/pudding-core/internal/config"
 	"github.com/teatak/pudding-core/internal/contextbuilder"
+	"github.com/teatak/pudding-core/internal/modeloutput"
 	"github.com/teatak/pudding-core/internal/provider"
 	"github.com/teatak/pudding-core/internal/store"
 	"github.com/teatak/pudding-core/internal/store/sqlitestore"
@@ -16,6 +18,12 @@ import (
 )
 
 func TestResultPreviewReadbackSurvivesRunningTurnRestartAndCompaction(t *testing.T) {
+	t.Run("legacy-json", func(t *testing.T) { checkResultReadback(t, false) })
+	t.Run("expanded-text", func(t *testing.T) { checkResultReadback(t, true) })
+}
+func checkResultReadback(t *testing.T, expanded bool) {
+	cfg := provider.ModelConfig{ToolOutputTextEnabled: expanded}
+	spec := &modeloutput.Spec{Version: 1, TextFields: []modeloutput.TextField{{Path: "/stdout", Title: "Standard output"}, {Path: "/stderr", Title: "Standard error"}}}
 	ctx := context.Background()
 	dbPath := filepath.Join(t.TempDir(), "test.db")
 	db, err := sqlitestore.Open(dbPath)
@@ -41,12 +49,12 @@ func TestResultPreviewReadbackSurvivesRunningTurnRestartAndCompaction(t *testing
 	if err := e.commitTurnPartsWithProviderState("t1", &parts, native); err != nil {
 		t.Fatal(err)
 	}
-	parts.AppendToolResult(tool.Result{CallID: "call1", Name: tool.CommandRun, Ok: false, Content: string(raw)})
+	parts.AppendToolResult(tool.Result{CallID: "call1", Name: tool.CommandRun, Ok: false, Content: string(raw), ModelOutput: spec})
 	if err := e.commitTurnParts("t1", &parts, true); err != nil {
 		t.Fatal(err)
 	}
 	continuations := []provider.Continuation{{Kind: native.Kind, Data: native.Data}}
-	current := requestMessagesWithTurnParts(nil, parts.Parts(), continuations, "s1", "t1", "", provider.ModelConfig{}, true)
+	current := requestMessagesWithTurnParts(nil, parts.Parts(), continuations, "s1", "t1", "", cfg, true)
 	resultContents := func(messages []provider.Message) []string {
 		var out []string
 		for _, msg := range messages {
@@ -65,7 +73,7 @@ func TestResultPreviewReadbackSurvivesRunningTurnRestartAndCompaction(t *testing
 	var preview struct {
 		Ref tool.ResultReference `json:"result_ref"`
 	}
-	if err := json.Unmarshal([]byte(views[0]), &preview); err != nil {
+	if err := json.Unmarshal([]byte(strings.SplitN(views[0], "\n\n", 2)[0]), &preview); err != nil {
 		t.Fatal(err)
 	}
 	read := func(sessionID string, args any) tool.Result {
@@ -154,7 +162,7 @@ func TestResultPreviewReadbackSurvivesRunningTurnRestartAndCompaction(t *testing
 	}
 	assertReadable() // No runtime cache is needed after restarting.
 	defs := []provider.ToolDef{{Name: tool.CommandRun}, {Name: tool.HistoryGetMessage}}
-	replay, err := contextbuilder.New(db, nil).BuildForProviderWithTools(ctx, "s1", "mock", "test", string(store.ModeCode), defs, provider.ModelConfig{})
+	replay, err := contextbuilder.New(db, nil).BuildForProviderWithTools(ctx, "s1", "mock", "test", string(store.ModeCode), defs, cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -195,4 +203,36 @@ func TestResultPreviewReadbackSurvivesRunningTurnRestartAndCompaction(t *testing
 		t.Fatal(err)
 	}
 	assertReadable() // A retained reference can still read an older compacted turn.
+}
+
+func TestToolOutputSettingIsFrozenWithModelSnapshot(t *testing.T) {
+	eng, ms, _, sid := newTestEngine(t)
+	defer eng.Stop()
+	ctx := context.Background()
+	sess, err := ms.GetSession(ctx, sid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = ms.SetSettings(ctx, map[string]string{config.SettingToolOutputTextEnabled: "true"}); err != nil {
+		t.Fatal(err)
+	}
+	first, err := eng.resolveModel(ctx, sess)
+	if err != nil {
+		t.Fatal(err)
+	}
+	saved := append(json.RawMessage(nil), first.configJSON...)
+	if err = ms.SetSettings(ctx, map[string]string{config.SettingToolOutputTextEnabled: "false"}); err != nil {
+		t.Fatal(err)
+	}
+	second, err := eng.resolveModel(ctx, sess)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var resumed provider.ModelConfig
+	if err = json.Unmarshal(saved, &resumed); err != nil {
+		t.Fatal(err)
+	}
+	if !first.config.ToolOutputTextEnabled || !resumed.ToolOutputTextEnabled || second.config.ToolOutputTextEnabled {
+		t.Fatal("setting changed the old snapshot or did not affect the next turn")
+	}
 }

@@ -603,3 +603,30 @@ func TestWriteYAMLDoesNotFollowPredictableTempSymlink(t *testing.T) {
 		t.Fatalf("predictable temp target changed: %q", data)
 	}
 }
+
+func TestToolOutputTextSettingDefaultsOffAndPersists(t *testing.T) {
+	ctx := context.Background()
+	home := t.TempDir()
+	m := NewManager(home)
+	if err := m.Prepare(); err != nil {
+		t.Fatal(err)
+	}
+	settings, err := m.Settings(ctx)
+	if err != nil || settings[SettingToolOutputTextEnabled] != "false" {
+		t.Fatalf("default: %v %v", settings, err)
+	}
+	if err := m.SetSettings(ctx, map[string]string{SettingToolOutputTextEnabled: "true"}); err != nil {
+		t.Fatal(err)
+	}
+	reloaded := NewManager(home)
+	if err := reloaded.Prepare(); err != nil {
+		t.Fatal(err)
+	}
+	settings, err = reloaded.Settings(ctx)
+	if err != nil || settings[SettingToolOutputTextEnabled] != "true" {
+		t.Fatal("setting did not persist")
+	}
+	if err := reloaded.SetSettings(ctx, map[string]string{SettingToolOutputTextEnabled: "not a boolean"}); err == nil {
+		t.Fatal("invalid flag accepted")
+	}
+}

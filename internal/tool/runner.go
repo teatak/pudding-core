@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 
+	"github.com/teatak/pudding-core/internal/modeloutput"
 	"github.com/teatak/pudding-core/internal/provider"
 	"github.com/teatak/pudding-core/internal/store"
 )
@@ -34,10 +35,12 @@ const (
 )
 
 type Result struct {
-	CallID  string
-	Name    string
-	Ok      bool
-	Content string
+	MCPResult   json.RawMessage `json:"mcpResult,omitempty"`
+	ModelOutput *modeloutput.Spec
+	CallID      string
+	Name        string
+	Ok          bool
+	Content     string
 	// Attachments are user-visible tool artifacts persisted with the tool result.
 	Attachments []store.Attachment
 	// ContextAttachments are appended to canonical turn output and replayed to the model.

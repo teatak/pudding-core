@@ -1,0 +1,283 @@
+[
+  {
+    "name": "nested-text-and-identical-records",
+    "canonical": {
+      "a/b": {
+        "~key": "甲\r\n\t```json\n{\"text\":\"\\n\"}\n```\n\n"
+      },
+      "items": [
+        {
+          "text": "same\n"
+        },
+        {
+          "text": "same\n"
+        }
+      ]
+    },
+    "spec": {
+      "version": 1,
+      "textFields": [
+        {
+          "path": "/a~1b/~0key",
+          "title": "Source"
+        },
+        {
+          "each": "/items",
+          "path": "/text"
+        }
+      ]
+    },
+    "projection": {
+      "a/b": {
+        "~key": {
+          "$text_ref": "t1"
+        }
+      },
+      "items": [
+        {
+          "text": {
+            "$text_ref": "t2"
+          }
+        },
+        {
+          "text": {
+            "$text_ref": "t3"
+          }
+        }
+      ]
+    },
+    "text": "\n\n$text_ref refers only to the following text blocks in this result.\n\n--- text t1 | \"/a~1b/~0key\" | Source ---\n甲\r\n\t```json\n{\"text\":\"\\n\"}\n```\n\n\n--- end text t1 ---\n\n--- text t2 | \"/items/0/text\" ---\nsame\n\n--- end text t2 ---\n\n--- text t3 | \"/items/1/text\" ---\nsame\n\n--- end text t3 ---"
+  },
+  {
+    "name": "root-string",
+    "canonical": "A B\n. .\n",
+    "spec": {
+      "version": 1,
+      "textFields": [
+        {
+          "path": "",
+          "overflow": "whole"
+        }
+      ]
+    },
+    "projection": {
+      "$text_ref": "t1"
+    },
+    "text": "\n\n$text_ref refers only to the following text blocks in this result.\n\n--- text t1 | \"\" ---\nA B\n. .\n\n--- end text t1 ---"
+  },
+  {
+    "name": "empty-and-missing-fields",
+    "canonical": {
+      "text": "",
+      "items": []
+    },
+    "spec": {
+      "version": 1,
+      "textFields": [
+        {
+          "path": "/absent/text",
+          "optional": true
+        },
+        {
+          "each": "/items",
+          "path": "/text"
+        },
+        {
+          "path": "/text"
+        }
+      ]
+    },
+    "projection": {
+      "text": {
+        "$text_ref": "t1"
+      },
+      "items": []
+    },
+    "text": "\n\n$text_ref refers only to the following text blocks in this result.\n\n--- text t1 | \"/text\" ---\n\n--- end text t1 ---"
+  },
+  {
+    "name": "unicode-title",
+    "canonical": {
+      "text": "🙂"
+    },
+    "spec": {
+      "version": 1,
+      "textFields": [
+        {
+          "path": "/text",
+          "title": "🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂"
+        }
+      ]
+    },
+    "projection": {
+      "text": {
+        "$text_ref": "t1"
+      }
+    },
+    "text": "\n\n$text_ref refers only to the following text blocks in this result.\n\n--- text t1 | \"/text\" | 🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂 ---\n🙂\n--- end text t1 ---"
+  },
+  {
+    "name": "null-is-not-missing",
+    "canonical": {
+      "body": null
+    },
+    "spec": {
+      "version": 1,
+      "textFields": [
+        {
+          "path": "/body",
+          "optional": true
+        }
+      ]
+    },
+    "invalid": true
+  },
+  {
+    "name": "scalar-parent-is-not-missing",
+    "canonical": {
+      "body": 1
+    },
+    "spec": {
+      "version": 1,
+      "textFields": [
+        {
+          "path": "/body/text",
+          "optional": true
+        }
+      ]
+    },
+    "invalid": true
+  },
+  {
+    "name": "null-parent-is-not-missing",
+    "canonical": {
+      "body": null
+    },
+    "spec": {
+      "version": 1,
+      "textFields": [
+        {
+          "path": "/body/text",
+          "optional": true
+        }
+      ]
+    },
+    "invalid": true
+  },
+  {
+    "name": "invalid-array-index",
+    "canonical": {
+      "items": [
+        "text"
+      ]
+    },
+    "spec": {
+      "version": 1,
+      "textFields": [
+        {
+          "path": "/items/00",
+          "optional": true
+        }
+      ]
+    },
+    "invalid": true
+  },
+  {
+    "name": "wrong-each-type",
+    "canonical": {
+      "items": {}
+    },
+    "spec": {
+      "version": 1,
+      "textFields": [
+        {
+          "each": "/items",
+          "path": "/text",
+          "optional": true
+        }
+      ]
+    },
+    "invalid": true
+  },
+  {
+    "name": "required-missing",
+    "canonical": {},
+    "spec": {
+      "version": 1,
+      "textFields": [
+        {
+          "path": "/body"
+        }
+      ]
+    },
+    "invalid": true
+  },
+  {
+    "name": "duplicate-path",
+    "canonical": {
+      "body": "hello"
+    },
+    "spec": {
+      "version": 1,
+      "textFields": [
+        {
+          "path": "/body"
+        },
+        {
+          "path": "/body"
+        }
+      ]
+    },
+    "invalid": true
+  },
+  {
+    "name": "invalid-pointer-escape",
+    "canonical": {},
+    "spec": {
+      "version": 1,
+      "textFields": [
+        {
+          "path": "/body~2",
+          "optional": true
+        }
+      ]
+    },
+    "invalid": true
+  },
+  {
+    "name": "invalid-title",
+    "canonical": {
+      "body": "hello"
+    },
+    "spec": {
+      "version": 1,
+      "textFields": [
+        {
+          "path": "/body",
+          "title": "fake\nheader"
+        }
+      ]
+    },
+    "invalid": true
+  },
+  {
+    "name": "quoted-path-controls",
+    "canonical": {
+      "<>&\u0007 ": "body"
+    },
+    "spec": {
+      "version": 1,
+      "textFields": [
+        {
+          "path": "/<>&\u0007 "
+        }
+      ]
+    },
+    "projection": {
+      "<>&\u0007 ": {
+        "$text_ref": "t1"
+      }
+    },
+    "text": "\n\n$text_ref refers only to the following text blocks in this result.\n\n--- text t1 | \"/\\u003c\\u003e\\u0026\\u0007\\u2028\" ---\nbody\n--- end text t1 ---"
+  }
+]

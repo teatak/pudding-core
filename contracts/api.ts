@@ -562,6 +562,15 @@ export const projectReference = z.object({
 });
 export type ProjectReference = z.infer<typeof projectReference>;
 
+export const modelOutput = z.object({
+  version: z.number().int(),
+  textFields: z.array(z.object({
+    path: z.string(), title: z.string().optional(), each: z.string().optional(),
+    optional: z.boolean().optional(), overflow: z.string().optional(),
+  })),
+});
+export type ModelOutputSpec = z.infer<typeof modelOutput>;
+
 export const contentPart = z.discriminatedUnion("type", [
   z.object({ type: z.literal("text"), text: z.string() }),
   z.object({ type: z.literal("thought"), text: z.string() }),
@@ -589,6 +598,8 @@ export const contentPart = z.discriminatedUnion("type", [
     name: z.string().optional(),
     ok: z.boolean().optional(),
     content: z.string().optional(),
+    modelOutput: modelOutput.optional(),
+    mcpResult: z.unknown().optional(),
     summaryKind: z.string().optional(),
     summaryCount: z.number().optional(),
     attachments: z.array(attachment).optional(),

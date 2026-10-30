@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/teatak/pudding-core/internal/modeloutput"
 	"github.com/teatak/pudding-core/internal/store"
 )
 
@@ -35,10 +36,11 @@ type Request struct {
 // ModelConfig 是 provider-neutral 的 resolved model 配置快照。各 provider
 // 只读取自己命名空间下支持的字段;未知字段保留在 snapshot 中供后续能力使用。
 type ModelConfig struct {
-	ContextWindow   int                   `json:"contextWindow,omitempty"`
-	Capabilities    *ModelCapabilities    `json:"capabilities,omitempty"`
-	Limits          *ModelLimits          `json:"limits,omitempty"`
-	ProviderOptions *ModelProviderOptions `json:"providerOptions,omitempty"`
+	ToolOutputTextEnabled bool                  `json:"toolOutputTextEnabled,omitempty"`
+	ContextWindow         int                   `json:"contextWindow,omitempty"`
+	Capabilities          *ModelCapabilities    `json:"capabilities,omitempty"`
+	Limits                *ModelLimits          `json:"limits,omitempty"`
+	ProviderOptions       *ModelProviderOptions `json:"providerOptions,omitempty"`
 }
 
 type ModelCapabilities struct {
@@ -214,6 +216,7 @@ const (
 )
 
 type ToolDef struct {
+	ModelOutput *modeloutput.Spec `json:"-"`
 	Name        string
 	Description string
 	InputSchema json.RawMessage

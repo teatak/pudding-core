@@ -557,7 +557,8 @@ func sessionScopedBrowserTool(name string) bool {
 	return strings.HasPrefix(name, "widget_") || name == RequestUserInput
 }
 
-func browserToolResult(call Call, raw json.RawMessage, homeDir string) Result {
+func browserToolResult(call Call, raw json.RawMessage, homeDir string) (result Result) {
+	defer func() { result.MCPResult = append(json.RawMessage(nil), raw...); applyMCPPresentation(&result, raw) }()
 	out := Result{CallID: call.CallID, Name: call.Name, Ok: true}
 	var decoded struct {
 		IsError bool `json:"isError"`

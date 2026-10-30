@@ -24,6 +24,39 @@
 
 只有请求暴露历史读取工具且结果有 turn / call 标识时，才使用有损预览；否则仅作无损去重。搜索少展示的命中和大结果都标记 `preview_only=true`。没有该标记不代表源工具从未截断，仍须检查其 `truncated` 等字段。
 
+## 工具结果文本展开
+
+开发者设置 `tool_output_text_enabled` 默认关闭。开启后，新 turn 将已声明的字符串
+展开为同一条 tool result 内的正文；已有 turn（包括重启继续）保留开始时的开关快照。
+工具输入 schema、执行状态和原始结果不变。未经声明的字段、没有声明的旧历史仍沿用
+原格式。声明来自 `provider.ToolDef.ModelOutput` 或本次 `tool.Result.ModelOutput`，
+并与结果一起持久化；不根据工具名字替旧历史补猜声明。
+
+`ModelOutputSpec` v1 使用 `textFields` 列表。每项为 RFC 6901 `path`、可选 `title`、
+可选数组路径 `each`、`optional` 和 `overflow: "excerpt" | "whole"`。有 `each` 时，
+`path` 相对每个数组元素。空字符串是有效值；optional 只允许缺失，不接受 null 或
+错误类型。最多 64 条规则，路径最多 4096、标题最多 256 个 Unicode 字符；标题不含
+控制字符。未知版本、重复路径或错误声明保留业务结果并附展示诊断，不重做工具动作。
+
+视图中的原字段变为 `{"$text_ref":"t1"}`，随后是同 ID、完整来源路径及可选标题的文本块。
+ID 只在本条结果内有效，即使正文相同也不跨字段合并。文本按 JSON 解码一次，保留实际
+LF、CRLF、tab、空行及字面量 `\n`；不会递归解析字符串内的 JSON 或反转义代码。
+现有来源文字的保留标记转义仍在 provider 消息构建时执行。
+
+首批声明覆盖命令 stdout/stderr、文件带行号正文、搜索片段和历史回读正文。文件／搜索
+沿用原行号规范化，再展开文本；不会同时保留一份重复的原正文。最终文本连同元数据和
+字段标签参与原 12,000 字符预算。可回读时，excerpt 使用带标记的整行 head/tail，whole
+完整显示或整体省略；结果保留 result_ref。没有回读条件以及显式历史读取页不再二次截断。
+`ColdResultContent` 继续使用纯 JSON 投影；冷记录清除投影视图中的声明，防止正文复活，
+SQLite 原始内容及声明保持不变。
+
+内部小组件通知从 metadata 的原 payload 投影，保持原 user 角色及原触发次数；
+棋盘是普通声明字段，不在 Core 硬编码游戏规则。冷通知仍可通过 message_id 回读。
+第三方 MCP 的原始 envelope 独立保存；纯文本继续保留，仅当整个文本 JSON 与
+structuredContent 完全相等时，在启用开关的模型视图中去重。自有 MCP 使用
+`_meta.pudding.{canonical,modelOutput}` 传递声明，不能保证其他 MCP 客户端如何组合
+text 与 structuredContent。此功能不执行摘要模型，也不改变工具权限。
+
 ## 跨轮冷却
 
 - 设置中的 `tool_result_cooling_enabled` 默认开启；`tool_result_cooling_keep_turns` 默认 2，范围 0–50，表示额外保留的已结束输入轮数。当前 turn 始终保留。此设置独立于 Compact 的保留轮数，修改轮数在下一次冷却时应用；关闭开关后构建请求恢复 L1 预览。

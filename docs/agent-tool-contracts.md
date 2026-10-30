@@ -4,6 +4,8 @@
 工具名称和 JSON schema 以 [`internal/tool/builtin.go`](../internal/tool/builtin.go) 为准。
 相关样本见 [2026-09-23 问题记录](archive/reports/agent-tooling-issues-2026-09-23.md)。
 
+工具结果可通过开发者开关按声明展开正文；输入仍使用原 JSON schema。声明、历史快照及预算规则见 [工具结果文本展开](context-working-set.md#工具结果文本展开)。
+
 ## 1. 项目路径
 
 `scope` 继续表示工具的文件区，项目操作使用 `scope="project"`。

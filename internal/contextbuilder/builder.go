@@ -252,6 +252,7 @@ func (b *Builder) buildMessagesWithCooling(ctx context.Context, sess *store.Sess
 		switch m.Role {
 		case store.RoleUser:
 			flushAssistant()
+			m = projectWidgetNotification(m, cfg.ToolOutputTextEnabled)
 			parts := b.providerParts(sessionID, m.TurnID, m.Parts, currentMode, allowedTools, cfg)
 			parts = withUserMessageMeta(parts, m.CreatedAt)
 			req.Messages = append(req.Messages, provider.Message{Role: provider.RoleUser, Text: textFromProviderParts(parts), Parts: parts})
@@ -599,7 +600,7 @@ func (b *Builder) providerParts(
 				CallID:  part.CallID,
 				Name:    name,
 				Ok:      part.Ok,
-				Content: tool.ModelResultContent(part.Name, part.Ok, part.Content, turnID, part.CallID, toolIncluded(allowedTools, tool.HistoryGetMessage)),
+				Content: tool.ModelResultContent(part.Name, part.Ok, part.Content, turnID, part.CallID, toolIncluded(allowedTools, tool.HistoryGetMessage), tool.OutputPresentation{Enabled: cfg.ToolOutputTextEnabled, Spec: part.ModelOutput, MCPResult: part.MCPResult}),
 			})
 		case store.ContentPartAttachment:
 			if part.Origin == attachment.OriginASRAudio {

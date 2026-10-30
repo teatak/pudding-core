@@ -1,3 +1,4 @@
+import { modelOutput } from "./api";
 import { parseVersion } from "./compatibility.mjs";
 import { z } from "zod";
 import { studioItem, studioItemRevision, studioIconImage } from "./studio";
@@ -206,6 +207,7 @@ export const widgetNotification = z
     message: z.string().trim().min(1).max(10000),
     summary: z.string().trim().min(1).max(1000).optional(),
     data: z.json().optional(),
+    modelOutput: modelOutput.optional(),
   })
   .strict();
 export const widgetRequestKey = z

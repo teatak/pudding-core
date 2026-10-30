@@ -108,6 +108,10 @@ func cooledMessages(messages []*store.Message, state store.ContextCooling) []*st
 		for j, part := range copy.Parts {
 			if part.Type == store.ContentPartToolResult {
 				copy.Parts[j].Content = tool.ColdResultContent(part.Name, part.Ok, part.Content, m.TurnID, part.CallID)
+				if copy.Parts[j].Content != part.Content {
+					copy.Parts[j].ModelOutput = nil
+					copy.Parts[j].MCPResult = nil
+				}
 			}
 		}
 		out[i] = &copy

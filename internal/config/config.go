@@ -33,6 +33,7 @@ const (
 	SettingShowRawToolInfo              = "show_raw_tool_info"
 	SettingShowPluginPreviewVersions    = "show_plugin_preview_versions"
 	SettingShowWidgetPreviewVersions    = "show_widget_preview_versions"
+	SettingToolOutputTextEnabled        = "tool_output_text_enabled"
 	SettingDeveloperApprovalDiagnostics = "developer_approval_diagnostics"
 	SettingEditorFontFamily             = "editor_font_family"
 	SettingEditorFontSize               = "editor_font_size"
@@ -276,7 +277,8 @@ type settingsYAML struct {
 }
 
 type developerSettingsYAML struct {
-	ApprovalDiagnostics bool `yaml:"approval_diagnostics,omitempty"`
+	ToolOutputTextEnabled bool `yaml:"tool_output_text_enabled,omitempty"`
+	ApprovalDiagnostics   bool `yaml:"approval_diagnostics,omitempty"`
 }
 
 type compactSettingsYAML struct {
@@ -370,6 +372,7 @@ func defaultSettingsYAML() settingsYAML {
 
 func (s settingsYAML) asMap() map[string]string {
 	return map[string]string{
+		SettingToolOutputTextEnabled:        formatBoolSetting(s.Developer.ToolOutputTextEnabled),
 		SettingDeveloperApprovalDiagnostics: formatBoolSetting(s.Developer.ApprovalDiagnostics),
 		SettingToolResultCoolingEnabled:     formatBoolSetting(s.Compact.ToolResultCoolingEnabled == nil || *s.Compact.ToolResultCoolingEnabled),
 		SettingToolResultCoolingKeepTurns:   strconv.Itoa(s.toolResultCoolingKeepTurns()),
@@ -388,6 +391,12 @@ func (s settingsYAML) asMap() map[string]string {
 
 func (s *settingsYAML) set(key, raw string) error {
 	switch key {
+	case SettingToolOutputTextEnabled:
+		v, err := parseBoolSetting(raw)
+		if err != nil {
+			return err
+		}
+		s.Developer.ToolOutputTextEnabled = v
 	case SettingDeveloperApprovalDiagnostics:
 		v, err := parseBoolSetting(raw)
 		if err != nil {

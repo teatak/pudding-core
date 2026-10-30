@@ -16,8 +16,10 @@ import (
 	"time"
 
 	"github.com/teatak/pudding-core/internal/attachment"
+	"github.com/teatak/pudding-core/internal/config"
 	"github.com/teatak/pudding-core/internal/contextbuilder"
 	"github.com/teatak/pudding-core/internal/event"
+	"github.com/teatak/pudding-core/internal/modeloutput"
 	"github.com/teatak/pudding-core/internal/plugin"
 	"github.com/teatak/pudding-core/internal/provider"
 	"github.com/teatak/pudding-core/internal/sessionworkspace"
@@ -748,7 +750,17 @@ func (e *Engine) takeQueuedRuntimeLocked(sessionID, clientMessageID string) stri
 	return runtimeID
 }
 
-func (e *Engine) resolveModel(ctx context.Context, sess *store.Session) (*resolvedModel, error) {
+func (e *Engine) resolveModel(ctx context.Context, sess *store.Session) (result *resolvedModel, resolveErr error) {
+	settings, err := e.config.Settings(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		if result != nil && resolveErr == nil {
+			result.config.ToolOutputTextEnabled = settings[config.SettingToolOutputTextEnabled] == "true"
+			resolveErr = result.refreshConfigJSON()
+		}
+	}()
 	// provider / model 在提交时刻解析并随 turn 快照,改配置不影响进行中的 turn。
 	// 若会话引用的 profile/model 已被删除,自动落到当前第一个可用配置。
 	providerName := strings.TrimSpace(sess.Provider)
@@ -2227,6 +2239,14 @@ func (e *Engine) executePendingTools(ctx context.Context, sessionID, turnID stri
 		if storedName != call.Name || result.Name == "" {
 			result.Name = storedName
 		}
+		if result.ModelOutput == nil {
+			for _, definition := range allowedTools {
+				if definition.Name == call.Name {
+					result.ModelOutput = definition.ModelOutput
+					break
+				}
+			}
+		}
 		parts.AppendToolResult(result)
 		parts.AppendAttachments(result.ContextAttachments)
 		if err := e.commitTurnParts(turnID, parts, true); err != nil {
@@ -3085,6 +3105,8 @@ func (a *turnPartAccumulator) AppendToolResult(result tool.Result) {
 		Name:         result.Name,
 		Ok:           result.Ok,
 		Content:      result.Content,
+		ModelOutput:  modeloutput.Clone(result.ModelOutput),
+		MCPResult:    append(json.RawMessage(nil), result.MCPResult...),
 		SummaryKind:  result.SummaryKind,
 		SummaryCount: result.SummaryCount,
 		Attachments:  store.NormalizeAttachments(result.Attachments),
@@ -3273,7 +3295,7 @@ func providerPartsFromCurrentTurn(parts []store.ContentPart, sessionID, turnID, 
 				CallID:  part.CallID,
 				Name:    part.Name,
 				Ok:      part.Ok,
-				Content: tool.ModelResultContent(part.Name, part.Ok, part.Content, turnID, part.CallID, canReadResult),
+				Content: tool.ModelResultContent(part.Name, part.Ok, part.Content, turnID, part.CallID, canReadResult, tool.OutputPresentation{Enabled: cfg.ToolOutputTextEnabled, Spec: part.ModelOutput, MCPResult: part.MCPResult}),
 			})
 		case store.ContentPartAttachment:
 			attachmentParts := providerAttachmentParts(sessionID, part, attachmentHome, cfg)

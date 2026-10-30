@@ -91,9 +91,30 @@ func TestWidgetRunRoutesRequireAuthAndRuntimeAndPreserveNotices(t *testing.T) {
 	call("PUT", path+"/participants", members, "token", "desktop", 200)
 	call("PUT", path+"/requests", map[string]any{}, "token", "desktop", 400)
 	call("PUT", path+"/requests", map[string]any{"requests": []any{}}, "token", "desktop", 200)
-	n := map[string]any{"stateVersion": 0, "notification": map[string]any{"id": "notice", "audience": map[string]any{"kind": "all"}, "delivery": "inform", "topic": "update", "message": "Draft changed"}}
+	n := map[string]any{"stateVersion": 0, "notification": map[string]any{"id": "notice", "audience": map[string]any{"kind": "all"}, "delivery": "inform", "topic": "update", "message": "Draft changed",
+		"data":        map[string]any{"board": map[string]any{"text": "A B\n. .\n"}},
+		"modelOutput": map[string]any{"version": 1, "textFields": []any{map[string]any{"path": "/data/board/text", "overflow": "whole"}}},
+	}}
 	call("POST", path+"/notifications", n, "token", "desktop", 200)
 	call("POST", path+"/notifications", n, "token", "desktop", 200)
+	messages, err := st.ListMessages(ctx, "participant", 0)
+	if err != nil || len(messages) != 1 {
+		t.Fatalf("notification messages: %d %v", len(messages), err)
+	}
+	var metadata struct {
+		ModelOutput struct {
+			Version    int `json:"version"`
+			TextFields []struct {
+				Path string `json:"path"`
+			} `json:"textFields"`
+		} `json:"modelOutput"`
+	}
+	if err := json.Unmarshal(messages[0].Metadata, &metadata); err != nil {
+		t.Fatal(err)
+	}
+	if metadata.ModelOutput.Version != 1 || len(metadata.ModelOutput.TextFields) != 1 || metadata.ModelOutput.TextFields[0].Path != "/data/board/text" {
+		t.Fatal("notification declaration was lost at API/storage boundary")
+	}
 	page, err := st.ListTurnsPage(ctx, "participant", "", 10)
 	if err != nil || len(page.Turns) != 1 {
 		t.Fatal(page, err)

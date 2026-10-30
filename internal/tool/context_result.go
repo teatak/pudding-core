@@ -26,7 +26,7 @@ type ResultReference struct {
 // ModelResultContent builds a deterministic model-only view. Canonical history
 // and UI results remain unchanged. Only shorten results when a reader is in the
 // request's tool set; skill instructions and explicit readback pages stay intact.
-func ModelResultContent(name string, ok bool, content, turnID, callID string, canRead bool) string {
+func modelResultJSON(name string, ok bool, content, turnID, callID string, canRead bool) string {
 	if IsPluginLoad(name) || name == SkillRead {
 		return SkillReferenceOnly(name, ok, content)
 	}

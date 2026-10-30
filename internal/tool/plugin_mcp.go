@@ -1221,7 +1221,8 @@ func pluginMCPInputSchema(raw json.RawMessage) json.RawMessage {
 	return plugin.CloneJSON(raw)
 }
 
-func pluginMCPToolResult(call Call, raw json.RawMessage) Result {
+func pluginMCPToolResult(call Call, raw json.RawMessage) (result Result) {
+	defer func() { result.MCPResult = append(json.RawMessage(nil), raw...); applyMCPPresentation(&result, raw) }()
 	out := Result{CallID: call.CallID, Name: call.Name, Ok: true}
 	var decoded struct {
 		IsError           bool               `json:"isError"`

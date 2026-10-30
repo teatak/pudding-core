@@ -3,7 +3,7 @@
 ## Extension compatibility and Hub sources
 
 Widget SDK and Plugin API are independent stable semantic versions. Their current
-versions are `widget.json.sdkVersion` and `plugin.json.apiVersion` (both 1.1.0).
+versions are `widget.json.sdkVersion` and `plugin.json.apiVersion` (Widget SDK 1.2.0 and Plugin API 1.1.0).
 An extension declares the minimum version it needs; the host accepts the same
 major with a requirement no newer than its own version. Compatible additions
 increment minor, compatible fixes increment patch, and breaking changes increment
@@ -34,6 +34,19 @@ requiring access to a separate Core checkout.
 The Go daemon embeds it through this package; desktop generates `web/contracts/` from the same pinned revision.
 `api.ts` and `events.ts` are the TypeScript/Zod client validation definitions for the REST and SSE protocol.
 Server structs and lifecycle semantics remain owned by core; verify both sides when changing a wire field.
+
+Protocol 55 adds optional host-only `modelOutput` declarations and canonical
+`mcpResult` envelopes to tool-result content parts, plus `modelOutput` on widget
+notifications. Widget SDK 1.2.0 supports the declaration on `defineInterface`
+(relative to its return value) and `interaction.notify` (relative to the notice).
+The declaration never becomes part of a model's tool input schema.
+
+`tool_output_text_enabled` is a default-off developer setting. A new turn freezes
+it into model configuration; changing it does not alter an in-flight turn or its
+restart continuation. External MCP calls read the current setting per call.
+Canonical output and declarations are stored even when disabled. Older records
+without a declaration keep their previous presentation. See
+[tool result text presentation](../docs/context-working-set.md#工具结果文本展开).
 
 The assistant editor submits one explicit `PUT /assistant` without an edit group:
 name and appearance are committed atomically, and an appearance change records the

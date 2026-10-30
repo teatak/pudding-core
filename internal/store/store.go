@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/teatak/pudding-core/internal/event"
+	"github.com/teatak/pudding-core/internal/modeloutput"
 )
 
 var (
@@ -534,72 +535,76 @@ const (
 )
 
 type ContentPart struct {
-	Type                ContentPartType `json:"type"`
-	Text                string          `json:"text,omitempty"`
-	CallID              string          `json:"id,omitempty"`
-	Name                string          `json:"name,omitempty"`
-	Args                json.RawMessage `json:"args,omitempty"`
-	Ok                  bool            `json:"ok,omitempty"`
-	Content             string          `json:"content,omitempty"`
-	SummaryKind         string          `json:"summaryKind,omitempty"`
-	SummaryCount        int             `json:"summaryCount,omitempty"`
-	Attachments         []Attachment    `json:"attachments,omitempty"`
-	AttachmentKey       string          `json:"attachmentKey,omitempty"`
-	URL                 string          `json:"url,omitempty"`
-	Path                string          `json:"path,omitempty"`
-	SourcePath          string          `json:"sourcePath,omitempty"`
-	MIME                string          `json:"mime,omitempty"`
-	Size                int64           `json:"size,omitempty"`
-	Origin              string          `json:"origin,omitempty"`
-	AttachmentCreatedAt string          `json:"createdAt,omitempty"`
-	AudioTranscript     string          `json:"audioTranscript,omitempty"`
-	Surface             string          `json:"surface,omitempty"`
-	Resource            string          `json:"resource,omitempty"`
-	SelectionText       string          `json:"selectionText,omitempty"`
-	ResourceKind        string          `json:"kind,omitempty"`
-	RootID              string          `json:"rootID,omitempty"`
-	StartLine           int             `json:"startLine,omitempty"`
-	StartColumn         int             `json:"startColumn,omitempty"`
-	EndLine             int             `json:"endLine,omitempty"`
-	EndColumn           int             `json:"endColumn,omitempty"`
-	Title               string          `json:"title,omitempty"`
-	Schema              json.RawMessage `json:"schema,omitempty"`
-	Result              json.RawMessage `json:"result,omitempty"`
+	MCPResult           json.RawMessage   `json:"mcpResult,omitempty"`
+	ModelOutput         *modeloutput.Spec `json:"modelOutput,omitempty"`
+	Type                ContentPartType   `json:"type"`
+	Text                string            `json:"text,omitempty"`
+	CallID              string            `json:"id,omitempty"`
+	Name                string            `json:"name,omitempty"`
+	Args                json.RawMessage   `json:"args,omitempty"`
+	Ok                  bool              `json:"ok,omitempty"`
+	Content             string            `json:"content,omitempty"`
+	SummaryKind         string            `json:"summaryKind,omitempty"`
+	SummaryCount        int               `json:"summaryCount,omitempty"`
+	Attachments         []Attachment      `json:"attachments,omitempty"`
+	AttachmentKey       string            `json:"attachmentKey,omitempty"`
+	URL                 string            `json:"url,omitempty"`
+	Path                string            `json:"path,omitempty"`
+	SourcePath          string            `json:"sourcePath,omitempty"`
+	MIME                string            `json:"mime,omitempty"`
+	Size                int64             `json:"size,omitempty"`
+	Origin              string            `json:"origin,omitempty"`
+	AttachmentCreatedAt string            `json:"createdAt,omitempty"`
+	AudioTranscript     string            `json:"audioTranscript,omitempty"`
+	Surface             string            `json:"surface,omitempty"`
+	Resource            string            `json:"resource,omitempty"`
+	SelectionText       string            `json:"selectionText,omitempty"`
+	ResourceKind        string            `json:"kind,omitempty"`
+	RootID              string            `json:"rootID,omitempty"`
+	StartLine           int               `json:"startLine,omitempty"`
+	StartColumn         int               `json:"startColumn,omitempty"`
+	EndLine             int               `json:"endLine,omitempty"`
+	EndColumn           int               `json:"endColumn,omitempty"`
+	Title               string            `json:"title,omitempty"`
+	Schema              json.RawMessage   `json:"schema,omitempty"`
+	Result              json.RawMessage   `json:"result,omitempty"`
 }
 
 func (p ContentPart) MarshalJSON() ([]byte, error) {
 	type contentPartJSON struct {
-		Type            ContentPartType `json:"type"`
-		Text            string          `json:"text,omitempty"`
-		CallID          string          `json:"id,omitempty"`
-		Name            string          `json:"name,omitempty"`
-		Args            json.RawMessage `json:"args,omitempty"`
-		Ok              *bool           `json:"ok,omitempty"`
-		Content         string          `json:"content,omitempty"`
-		SummaryKind     string          `json:"summaryKind,omitempty"`
-		SummaryCount    *int            `json:"summaryCount,omitempty"`
-		Attachments     []Attachment    `json:"attachments,omitempty"`
-		AttachmentKey   string          `json:"attachmentKey,omitempty"`
-		URL             string          `json:"url,omitempty"`
-		Path            string          `json:"path,omitempty"`
-		SourcePath      string          `json:"sourcePath,omitempty"`
-		MIME            string          `json:"mime,omitempty"`
-		Size            int64           `json:"size,omitempty"`
-		Origin          string          `json:"origin,omitempty"`
-		CreatedAt       string          `json:"createdAt,omitempty"`
-		AudioTranscript string          `json:"audioTranscript,omitempty"`
-		Surface         string          `json:"surface,omitempty"`
-		Resource        string          `json:"resource,omitempty"`
-		SelectionText   string          `json:"selectionText,omitempty"`
-		ResourceKind    string          `json:"kind,omitempty"`
-		RootID          string          `json:"rootID,omitempty"`
-		StartLine       int             `json:"startLine,omitempty"`
-		StartColumn     int             `json:"startColumn,omitempty"`
-		EndLine         int             `json:"endLine,omitempty"`
-		EndColumn       int             `json:"endColumn,omitempty"`
-		Title           string          `json:"title,omitempty"`
-		Schema          json.RawMessage `json:"schema,omitempty"`
-		Result          json.RawMessage `json:"result,omitempty"`
+		MCPResult       json.RawMessage   `json:"mcpResult,omitempty"`
+		ModelOutput     *modeloutput.Spec `json:"modelOutput,omitempty"`
+		Type            ContentPartType   `json:"type"`
+		Text            string            `json:"text,omitempty"`
+		CallID          string            `json:"id,omitempty"`
+		Name            string            `json:"name,omitempty"`
+		Args            json.RawMessage   `json:"args,omitempty"`
+		Ok              *bool             `json:"ok,omitempty"`
+		Content         string            `json:"content,omitempty"`
+		SummaryKind     string            `json:"summaryKind,omitempty"`
+		SummaryCount    *int              `json:"summaryCount,omitempty"`
+		Attachments     []Attachment      `json:"attachments,omitempty"`
+		AttachmentKey   string            `json:"attachmentKey,omitempty"`
+		URL             string            `json:"url,omitempty"`
+		Path            string            `json:"path,omitempty"`
+		SourcePath      string            `json:"sourcePath,omitempty"`
+		MIME            string            `json:"mime,omitempty"`
+		Size            int64             `json:"size,omitempty"`
+		Origin          string            `json:"origin,omitempty"`
+		CreatedAt       string            `json:"createdAt,omitempty"`
+		AudioTranscript string            `json:"audioTranscript,omitempty"`
+		Surface         string            `json:"surface,omitempty"`
+		Resource        string            `json:"resource,omitempty"`
+		SelectionText   string            `json:"selectionText,omitempty"`
+		ResourceKind    string            `json:"kind,omitempty"`
+		RootID          string            `json:"rootID,omitempty"`
+		StartLine       int               `json:"startLine,omitempty"`
+		StartColumn     int               `json:"startColumn,omitempty"`
+		EndLine         int               `json:"endLine,omitempty"`
+		EndColumn       int               `json:"endColumn,omitempty"`
+		Title           string            `json:"title,omitempty"`
+		Schema          json.RawMessage   `json:"schema,omitempty"`
+		Result          json.RawMessage   `json:"result,omitempty"`
 	}
 	out := contentPartJSON{
 		Type:            p.Type,
@@ -631,6 +636,8 @@ func (p ContentPart) MarshalJSON() ([]byte, error) {
 		Result:          p.Result,
 	}
 	if p.Type == ContentPartToolResult {
+		out.MCPResult = p.MCPResult
+		out.ModelOutput = p.ModelOutput
 		out.Ok = &p.Ok
 		out.SummaryKind = p.SummaryKind
 		out.Attachments = NormalizeAttachments(p.Attachments)
@@ -1225,6 +1232,8 @@ func CloneContentParts(parts []ContentPart) []ContentPart {
 	out := make([]ContentPart, 0, len(parts))
 	for _, part := range parts {
 		cp := part
+		cp.ModelOutput = modeloutput.Clone(part.ModelOutput)
+		cp.MCPResult = append(json.RawMessage(nil), part.MCPResult...)
 		if part.Args != nil {
 			cp.Args = append(json.RawMessage(nil), part.Args...)
 		}
