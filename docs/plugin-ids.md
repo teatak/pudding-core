@@ -57,6 +57,16 @@ its discussion or commit.
 | Remove-after date | Release date plus six calendar months, clamped to month end |
 | Removal release | First maintenance release on/after remove-after date |
 
+### Subsession rename
+
+The `subagent` / `collaboration` to `subsession` rename first ships in Desktop
+**0.8.4**, released **2026-10-31**. Its remove-after date is **2027-04-30**
+(six calendar months, clamped to month end), with removal in the first maintenance
+release on or after that date. This record applies only to this rename; it does
+not restart the compatibility windows of earlier renames. The corresponding
+historical tool-name projection is tracked in
+[Session collaboration](session-collaboration-plan.md#工具命名及旧名退役).
+
 At release, fill this record. Before removal, normalize retained configuration
 and session identities, including inactive sessions, or explicitly retain their
 read projection; never strand old persisted data by simply deleting the map.

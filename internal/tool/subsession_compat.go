@@ -8,7 +8,7 @@ package tool
 // and remove-after date in docs/session-collaboration-plan.md. Remove this map,
 // its caller and the corresponding desktop history-display branches in the
 // first maintenance release on/after that date; do not use a runtime date gate.
-// Release version/date: pending first stable release of this change.
+// First stable release: Desktop 0.8.4 (2026-10-31); remove after 2027-04-30.
 func HistoricalSubsessionToolName(name string) string {
 	switch name {
 	case "builtin_subagent_list", "builtin_subtask_list", "builtin_collaboration_list":

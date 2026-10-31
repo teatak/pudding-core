@@ -15,6 +15,7 @@ func CurrentPluginID(id string) string {
 		return "page-authoring"
 	case "tables":
 		return "sheet-authoring"
+	// First stable Subsession rename: Desktop 0.8.4, 2026-10-31; remove after 2027-04-30.
 	case "collaboration", "subagent":
 		return "subsession"
 	case "web":
