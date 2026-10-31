@@ -279,7 +279,7 @@ Go：`engine/widget_runs.go`、`store/sqlitestore/widget_notices.go`；TS：`con
 | `PATCH /widget-runs/{runID}` | `action:heartbeat\|pause\|resume\|stop` | WidgetRun；停止后不再可读 |
 | `POST /widget-runs/{runID}/notifications` | `notification,stateVersion,actor?` | WidgetRun；actor 仅宿主从当前模型操作注入，页面不可提供 |
 | `PUT /widget-runs/{runID}/requests` | `requests[{notificationID,participantID}]` | WidgetRun；必须是已有有效请求的子集 |
-| `POST /sessions/{id}/widget-runs/{runID}/authorize` | `notificationID?` | WidgetParticipant；逐次检查参与者、活动源码、运行状态及行动请求 |
+| `POST /sessions/{id}/widget-runs/{runID}/authorize` | `notificationID?` | WidgetParticipant；逐次检查参与者、页面授权及运行状态；notificationID 仅作触发上下文，不校验行动请求是否仍有效 |
 
 WidgetRun 包括 id、itemID、title、targetID、revisionHash、bindingVersion、participants、status、reason?、receipts。参与者含 id、sessionID?、name、roles；传入 guest 时去掉 sessionID，提供 kind:session/human。Notification 为 id、audience(all/selected + participantIDs)、delivery(inform/request-action)、topic、summary?（面向用户的本地化摘要，最多 1000 字符）、message、data?。Receipt 补充 actor?、seq、stateVersion 和每位收件人的 deliveries：participantID、status、attempt、active、messageID?、turnID?、error?。
 
@@ -289,7 +289,7 @@ WidgetRun 包括 id、itemID、title、targetID、revisionHash、bindingVersion�
 
 运行和待办不持久化。45 秒租约失效、源码/绑定变化、停止、退出会撤销运行；仅取消所属 turn。暂停保留待办，继续被中断请求使用新的 attempt 幂等键，复用原 notice。重启不会根据 canonical 通知恢复运行。
 
-Core 仅从调度上下文向 Widget 工具注入私有 `_pudding_widget_request:{runID,notificationID}`；删除任何模型传入同名字段。Desktop 每次执行前向 Core 核实请求仍有效，此字段不出现在 LLM 工具 schema 中。
+Core 仅从调度上下文向 Widget 工具注入私有 `_pudding_widget_request:{runID,notificationID}`；删除任何模型传入同名字段。Desktop 每次执行前向 Core 核实运行可用性及参与者身份，不以通知请求是否仍有效拦截调用；具体业务操作由组件依据当前状态判断。有效请求集合继续控制待办与后续唤醒，此字段不出现在 LLM 工具 schema 中。
 
 ## Widget Hub 源码分发
 

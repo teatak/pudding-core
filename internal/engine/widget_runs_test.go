@@ -195,8 +195,8 @@ func TestWidgetActionWaitsForBusySessionAndDoesNotBlockInform(t *testing.T) {
 	if _, err = e.SetWidgetRequests(ctx, run.ID, keep); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = e.AuthorizeWidgetRun(ctx, run.ID, "second", "submit"); err == nil {
-		t.Fatal("fulfilled request still authorizes tools")
+	if _, err = e.AuthorizeWidgetRun(ctx, run.ID, "second", "submit"); err != nil {
+		t.Fatal("fulfilled request blocked participant tools", err)
 	}
 	if _, err = e.AuthorizeWidgetRun(ctx, run.ID, "sess_1", "submit"); err != nil {
 		t.Fatal(err)

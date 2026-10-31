@@ -46,7 +46,10 @@ func TestExternalWidgetParticipantsIdentityAndLifecycle(t *testing.T) {
 	if who, err := e.AuthorizeExternalWidgetRun(ctx, run.ID, "external-a", "move"); err != nil || who.ID != a.ID {
 		t.Fatal(who, err)
 	}
-	for _, id := range []string{"external-b", "external-outsider", ""} {
+	if who, err := e.AuthorizeExternalWidgetRun(ctx, run.ID, "external-b", "move"); err != nil || who.ID != b.ID {
+		t.Fatal("notification audience must not restrict participant tools", who, err)
+	}
+	for _, id := range []string{"external-outsider", ""} {
 		if _, err := e.AuthorizeExternalWidgetRun(ctx, run.ID, id, "move"); !errors.Is(err, ErrWidgetRun) {
 			t.Fatal("wrong actor accepted", id, err)
 		}
@@ -70,8 +73,8 @@ func TestExternalWidgetParticipantsIdentityAndLifecycle(t *testing.T) {
 	if _, err = e.SetWidgetRequests(ctx, run.ID, nil); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = e.AuthorizeExternalWidgetRun(ctx, run.ID, "external-a", "move"); !errors.Is(err, ErrWidgetRun) {
-		t.Fatal("stale notification authorization")
+	if who, err := e.AuthorizeExternalWidgetRun(ctx, run.ID, "external-a", "move"); err != nil || who.ID != a.ID {
+		t.Fatal("stale notification blocked participant tools", who, err)
 	}
 	if _, err = e.SetWidgetParticipants(ctx, run.ID, members[:1]); err != nil {
 		t.Fatal(err)

@@ -121,6 +121,33 @@ func TestWidgetRunRoutesRequireAuthAndRuntimeAndPreserveNotices(t *testing.T) {
 	}
 	call("POST", "/sessions/participant/widget-runs/"+run.ID+"/authorize", map[string]any{}, "token", "desktop", 200)
 	call("POST", "/sessions/outsider/widget-runs/"+run.ID+"/authorize", map[string]any{}, "token", "desktop", 400)
+	// Replacing an action notification keeps participant access available to the
+	// already running model turn, without restoring the withdrawn request.
+	call("POST", path+"/notifications", map[string]any{
+		"stateVersion": 9,
+		"notification": map[string]any{"id": "move-5", "audience": map[string]any{"kind": "all"}, "delivery": "request-action", "message": "Your move"},
+	}, "token", "desktop", 200)
+	call("PUT", path+"/requests", map[string]any{"requests": []any{}}, "token", "desktop", 200)
+	call("POST", path+"/notifications", map[string]any{
+		"stateVersion": 10,
+		"notification": map[string]any{"id": "result-5", "audience": map[string]any{"kind": "all"}, "delivery": "request-action", "message": "Opponent resigned"},
+	}, "token", "desktop", 200)
+	staleContext := map[string]any{"notificationID": "move-5"}
+	call("POST", "/sessions/participant/widget-runs/"+run.ID+"/authorize", staleContext, "token", "desktop", 200)
+	call("POST", "/sessions/outsider/widget-runs/"+run.ID+"/authorize", staleContext, "token", "desktop", 400)
+	call("POST", "/sessions/participant/widget-runs/"+run.ID+"/authorize", staleContext, "token", "other", 400)
+	var current engine.WidgetRun
+	if err := json.Unmarshal(call("GET", path, nil, "token", "desktop", 200), &current); err != nil {
+		t.Fatal(err)
+	}
+	if len(current.Receipts) != 3 || current.Receipts[1].ID != "move-5" || current.Receipts[2].ID != "result-5" {
+		t.Fatal("notification history lost", current.Receipts)
+	}
+	for _, delivery := range current.Receipts[1].Deliveries {
+		if delivery.Active {
+			t.Fatal("authorization reactivated the old request", delivery)
+		}
+	}
 	// A default upgrade leaves the pinned page, its run and its shared writes valid.
 	next := strings.Repeat("b", 64)
 	item, err = st.SaveStudioItemRevision(ctx, &store.StudioItemRevision{ItemID: item.ID, Hash: next, ClientRequestID: "upgrade", CreatedAt: time.Now()}, item.HeadRevision)
@@ -147,6 +174,7 @@ func TestWidgetRunRoutesRequireAuthAndRuntimeAndPreserveNotices(t *testing.T) {
 
 	call("PATCH", path, map[string]any{"action": "pause"}, "token", "desktop", 200)
 	call("POST", "/sessions/participant/widget-runs/"+run.ID+"/authorize", map[string]any{}, "token", "desktop", 400)
+	call("POST", "/sessions/participant/widget-runs/"+run.ID+"/authorize", staleContext, "token", "desktop", 400)
 	call("PATCH", path, map[string]any{"action": "stop"}, "token", "desktop", 200)
 	call("GET", path, nil, "token", "desktop", 400)
 	call("DELETE", "/studio/items/widget/pages", map[string]any{"scope": "library"}, "token", "desktop", 200)

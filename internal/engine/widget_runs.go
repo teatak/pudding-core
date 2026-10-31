@@ -302,8 +302,11 @@ func participant(run *WidgetRun, id string) *WidgetParticipant {
 	}
 	return nil
 }
+
+// notificationID is retained as caller context, not an authorization credential.
+// Request activity controls notification scheduling; widgets validate business actions.
 func (e *Engine) AuthorizeWidgetRun(ctx context.Context, id, sessionID, notificationID string) (*WidgetParticipant, error) {
-	return e.authorizeWidgetActor(ctx, id, sessionID, "", notificationID)
+	return e.authorizeWidgetActor(ctx, id, sessionID, "")
 }
 
 // Called only by the authenticated desktop host, never directly by an MCP client.
@@ -311,10 +314,10 @@ func (e *Engine) AuthorizeExternalWidgetRun(ctx context.Context, id, externalID,
 	if externalID == "" {
 		return nil, ErrWidgetRun
 	}
-	return e.authorizeWidgetActor(ctx, id, "", externalID, notificationID)
+	return e.authorizeWidgetActor(ctx, id, "", externalID)
 }
 
-func (e *Engine) authorizeWidgetActor(ctx context.Context, id, sessionID, externalID, notificationID string) (*WidgetParticipant, error) {
+func (e *Engine) authorizeWidgetActor(ctx context.Context, id, sessionID, externalID string) (*WidgetParticipant, error) {
 	e.widgetRuns.Lock()
 	defer e.widgetRuns.Unlock()
 	run, err := e.widgetRunLocked(ctx, id)
@@ -326,21 +329,6 @@ func (e *Engine) authorizeWidgetActor(ctx context.Context, id, sessionID, extern
 			if sessionID != "" {
 				s, err := e.store.GetSession(ctx, sessionID)
 				if err != nil || s.ArchivedAt != nil {
-					return nil, ErrWidgetRun
-				}
-			}
-			if notificationID != "" {
-				valid := false
-				for _, r := range run.Receipts {
-					if r.ID == notificationID {
-						for _, d := range r.Deliveries {
-							if d.ParticipantID == p.ID && d.Active {
-								valid = true
-							}
-						}
-					}
-				}
-				if !valid {
 					return nil, ErrWidgetRun
 				}
 			}
