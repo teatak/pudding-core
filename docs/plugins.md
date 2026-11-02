@@ -145,9 +145,18 @@ connection and explicit selection. Every request after `/profile` supplies its
 `mailboxID` and `configRevision`; the widget API also checks the revision after
 I/O. Cached reads include both values. IMAP IDs contain folder, UIDVALIDITY and
 UID, so server UID resets reject old IDs. IMAP reads are read-only with PEEK.
-Lists fetch envelopes only; text parts are fetched on demand (64 KiB limit),
-HTML becomes inert text, and attachments return metadata only. Searches scan
+Lists fetch envelopes only; plain text and HTML parts are fetched on demand
+(64 KiB per representation). HTML is untrusted content and must be sanitized
+before rendering; `text` remains available for HTML-only messages. Attachments
+return metadata only. Searches scan
 at most 5,000 UID positions per page; an empty page can have a continuation.
+
+`POST /messages/{id}/read` adds only the IMAP `\Seen` flag, preserving all
+other flags. It validates mailbox/revision and UIDVALIDITY and verifies the
+result. This idempotent native read receipt is the only Email widget action
+that can run without a modal or broad `widget_writes` permission. It still
+uses prepared action records and binding checks. Other writes keep the usual
+permission and confirmation requirements. GET reads remain read-only.
 
 The tool-only `/send` fixes the sender to the connection, validates recipients,
 and supports plain text, cc/bcc and In-Reply-To. It makes one SMTP attempt.

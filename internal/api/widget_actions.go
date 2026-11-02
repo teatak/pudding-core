@@ -33,16 +33,17 @@ func (s *Server) prepareWidgetAction(c *cart.Context) error {
 	if err != nil {
 		return s.studioItemError(c, err)
 	}
-	if !binding.Endpoint.WidgetWrites {
-		c.JSON(http.StatusForbidden, map[string]string{"error": "plugin_writes_disabled"})
-		return nil
-	}
 	if w.BindingVersion != req.BindingVersion || (req.TargetID == "" && w.ActiveRevision != req.RevisionHash) || (req.TargetID != "" && s.store.AuthorizeWidgetPage(c.Request.Context(), id, req.RevisionHash, req.TargetID) != nil) {
 		return s.studioItemError(c, store.ErrStudioItemConflict)
 	}
 	resolved, err := op.ResolveRequest(req.Params)
 	if err != nil {
 		return badRequest(c, err.Error())
+	}
+	readReceipt := pluginexec.IsEmailReadReceipt(binding, resolved.Method, resolved.Path, resolved.Body)
+	if !binding.Endpoint.WidgetWrites && !readReceipt {
+		c.JSON(http.StatusForbidden, map[string]string{"error": "plugin_writes_disabled"})
+		return nil
 	}
 	if err = pluginexec.ValidateBoundRequest(binding, resolved.Method, resolved.Query, resolved.Body); err != nil {
 		return badRequest(c, err.Error())
@@ -58,7 +59,10 @@ func (s *Server) prepareWidgetAction(c *cart.Context) error {
 	if err != nil {
 		return s.studioItemError(c, err)
 	}
-	c.JSON(http.StatusOK, a)
+	c.JSON(http.StatusOK, struct {
+		*store.WidgetAction
+		ConfirmationRequired bool `json:"confirmationRequired"`
+	}{a, !readReceipt})
 	return nil
 }
 func (s *Server) listWidgetActions(c *cart.Context) error {
@@ -102,12 +106,15 @@ func (s *Server) executeWidgetAction(c *cart.Context) error {
 	if err != nil {
 		return s.studioItemError(c, err)
 	}
-	if !binding.Endpoint.WidgetWrites || fingerprint != a.Spec.BindingFingerprint || op.Hash() != a.Spec.OperationHash || w.BindingVersion != a.Spec.BindingVersion || (a.Spec.TargetID == "" && w.Revision != a.Spec.ResourceRevision) || (a.Spec.TargetID != "" && s.store.AuthorizeWidgetPage(ctx, id, a.Spec.RevisionHash, a.Spec.TargetID) != nil) {
+	if fingerprint != a.Spec.BindingFingerprint || op.Hash() != a.Spec.OperationHash || w.BindingVersion != a.Spec.BindingVersion || (a.Spec.TargetID == "" && w.Revision != a.Spec.ResourceRevision) || (a.Spec.TargetID != "" && s.store.AuthorizeWidgetPage(ctx, id, a.Spec.RevisionHash, a.Spec.TargetID) != nil) {
 		return s.studioItemError(c, store.ErrStudioItemConflict)
 	}
 	resolved, err := op.ResolveRequest(a.Spec.Params)
 	if err != nil {
 		return badRequest(c, err.Error())
+	}
+	if !binding.Endpoint.WidgetWrites && !pluginexec.IsEmailReadReceipt(binding, resolved.Method, resolved.Path, resolved.Body) {
+		return s.studioItemError(c, store.ErrStudioItemConflict)
 	}
 	if err = pluginexec.ValidateBoundRequest(binding, resolved.Method, resolved.Query, resolved.Body); err != nil {
 		return badRequest(c, err.Error())

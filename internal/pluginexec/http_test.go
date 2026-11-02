@@ -1,9 +1,35 @@
 package pluginexec
 
 import (
+	"encoding/base64"
 	"github.com/teatak/pudding-core/internal/plugin"
 	"testing"
 )
+
+func TestOnlyNativeEmailReadReceiptsCanSkipWidgetWriteConfirmation(t *testing.T) {
+	id := base64.RawURLEncoding.EncodeToString([]byte(`{"f":"INBOX","v":1,"u":1}`))
+	for _, tt := range []struct {
+		name, adapter, method, path string
+		body                        any
+		allowed                     bool
+	}{
+		{"read receipt", "email", "POST", "/messages/" + id + "/read", nil, true},
+		{"ordinary endpoint", "", "POST", "/messages/" + id + "/read", nil, false},
+		{"read only query", "email", "GET", "/messages/" + id + "/read", nil, false},
+		{"send", "email", "POST", "/send", nil, false},
+		{"delete", "email", "DELETE", "/messages/" + id, nil, false},
+		{"malformed id", "email", "POST", "/messages/not-a-message/read", nil, false},
+		{"path traversal", "email", "POST", "/messages/../send/read", nil, false},
+		{"extra body", "email", "POST", "/messages/" + id + "/read", map[string]any{"flags": []string{"\\Deleted"}}, false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			binding := &plugin.EndpointBinding{Endpoint: plugin.Endpoint{Kind: "rest", Adapter: tt.adapter}}
+			if got := IsEmailReadReceipt(binding, tt.method, tt.path, tt.body); got != tt.allowed {
+				t.Fatalf("automatic read receipt = %v, want %v", got, tt.allowed)
+			}
+		})
+	}
+}
 
 func TestEndpointURLPreservesEncodedSegment(t *testing.T) {
 	u, err := BuildEndpointURL("https://fixture.test/api", "/projects/owner%2Frepo")

@@ -24,7 +24,7 @@ type widgetEndpointResolver interface {
 }
 
 type widgetEndpointLister interface {
-	ListEndpointBindings(context.Context, string) ([]*plugin.EndpointBinding, error)
+	ListPluginEndpointBindings(context.Context, string, string) ([]*plugin.EndpointBinding, error)
 }
 
 var errWidgetConnectionSelectionRequired = errors.New("connection selection required")
@@ -129,7 +129,7 @@ func (s *Server) resolveWidgetSource(ctx context.Context, w *store.StudioItem, s
 		if !ok {
 			return nil, "", fmt.Errorf("binding_unavailable")
 		}
-		available, err := lister.ListEndpointBindings(ctx, kind)
+		available, err := lister.ListPluginEndpointBindings(ctx, source.PluginID, kind)
 		if err != nil {
 			return nil, "", err
 		}

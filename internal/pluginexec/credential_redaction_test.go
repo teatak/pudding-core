@@ -106,6 +106,10 @@ func TestEmailProfileAndRevisionGuard(t *testing.T) {
 		if result["reason"] != "email_connection_changed" {
 			t.Fatal(result)
 		}
+		result = executor.REST(context.Background(), binding, map[string]any{"path": "/messages/invalid/read", "method": "POST", "query": query})
+		if result["reason"] != "email_connection_changed" {
+			t.Fatal("read receipt bypassed the mailbox/revision guard", result)
+		}
 	}
 	result := executor.REST(context.Background(), binding, map[string]any{"path": "/send", "method": "POST", "query": map[string]any{"mailboxID": body["mailboxID"], "configRevision": "revision-2"}, "body_json": map[string]any{"from": "spoof@example.org"}})
 	if result["reason"] != "email_invalid_message" {

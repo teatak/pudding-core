@@ -15,7 +15,9 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+	"unicode/utf8"
 
+	"github.com/emersion/go-imap"
 	imapid "github.com/emersion/go-imap-id"
 	"github.com/emersion/go-imap/backend/memory"
 	"github.com/emersion/go-imap/server"
@@ -125,11 +127,11 @@ func TestIMAPReadSearchAndIdentity(t *testing.T) {
 	if !identified.Load() {
 		t.Fatal("advertised IMAP ID was not sent")
 	}
-	if page.Messages[0].Subject != "你好" || !page.Messages[0].Unread || page.Messages[0].Text != "" {
+	if page.Messages[0].Subject != "你好" || !page.Messages[0].Unread || page.Messages[0].Text != "" || page.Messages[0].HTML != "" {
 		t.Fatal(page.Messages)
 	}
 	m, err := c.Read(context.Background(), page.Messages[0].ID, false)
-	if err != nil || !strings.Contains(m.Text, "Hello & welcome") || strings.Contains(m.Text, "hidden") || strings.Contains(m.Text, "tracker") || len(m.Attachments) != 1 || len(mb.Messages[0].Flags) != 0 {
+	if err != nil || !strings.Contains(m.Text, "Hello & welcome") || !strings.Contains(m.HTML, "<p>Hello &amp; welcome</p>") || strings.Contains(m.Text, "hidden") || strings.Contains(m.Text, "tracker") || len(m.Attachments) != 1 || len(mb.Messages[0].Flags) != 0 {
 		t.Fatalf("read: %+v %v", m, err)
 	}
 	missing, err := c.List(context.Background(), "INBOX", "no-such-subject", "", 20)
@@ -138,9 +140,29 @@ func TestIMAPReadSearchAndIdentity(t *testing.T) {
 	}
 	var id messageID
 	_ = decode(m.ID, &id)
+	mb.Messages[0].Flags = []string{imap.FlaggedFlag}
+	for range 2 {
+		receipt, err := c.MarkRead(context.Background(), m.ID)
+		if err != nil || receipt.ID != m.ID || receipt.Unread || len(mb.Messages[0].Flags) != 2 {
+			t.Fatalf("mark read did not preserve existing flags: %+v %v %v", receipt, mb.Messages[0].Flags, err)
+		}
+	}
+	page, err = c.List(context.Background(), "INBOX", "", "", 20)
+	if err != nil || page.Messages[0].Unread {
+		t.Fatal("another mailbox read did not observe Seen", err)
+	}
+	mb.Messages[0].Flags = []string{imap.FlaggedFlag}
 	id.Validity++
 	if _, err = c.Read(context.Background(), encode(id), false); err == nil || err.Error() != "email_stale_message" {
 		t.Fatal("UIDVALIDITY not enforced", err)
+	}
+	if _, err = c.MarkRead(context.Background(), encode(id)); err == nil || err.Error() != "email_stale_message" || len(mb.Messages[0].Flags) != 1 {
+		t.Fatal("stale read receipt modified flags", err)
+	}
+	id.Validity--
+	id.UID += 100
+	if _, err = c.MarkRead(context.Background(), encode(id)); err == nil || len(mb.Messages[0].Flags) != 1 {
+		t.Fatal("missing message read receipt modified flags", err)
 	}
 	// UID gaps must page forward without repeating or dropping older messages.
 	template := *mb.Messages[0]
@@ -189,6 +211,56 @@ type discardLogger struct{}
 func (discardLogger) Println(...interface{}) {}
 
 func (discardLogger) Printf(string, ...interface{}) {}
+
+func TestIMAPBodyRepresentations(t *testing.T) {
+	tc, roots := tlsFixture(t)
+	listener, err := tls.Listen("tcp", "127.0.0.1:0", tc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	backend := memory.New()
+	u, _ := backend.Login(nil, "username", "password")
+	box, _ := u.GetMailbox("INBOX")
+	mailbox := box.(*memory.Mailbox)
+	s := server.New(backend)
+	s.TLSConfig, s.ErrorLog = tc, discardLogger{}
+	go s.Serve(listener)
+	t.Cleanup(func() { _ = s.Close(); _ = listener.Close() })
+	c := &Client{RootCAs: roots, Config: Config{IMAP: Server{Host: "127.0.0.1", Port: listener.Addr().(*net.TCPAddr).Port, Security: "tls", Username: "username", Password: "password"}}}
+	for _, tt := range []struct {
+		name, mime, text, html string
+		truncated              bool
+	}{
+		{"plain", "Content-Type: text/plain; charset=utf-8\r\n\r\nPlain only", "Plain only", "", false},
+		{"alternative", "Content-Type: multipart/alternative; boundary=alt\r\n\r\n--alt\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nPlain alternative\r\n--alt\r\nContent-Type: text/html; charset=utf-8\r\nContent-Transfer-Encoding: quoted-printable\r\n\r\n<p style=3D\"color:blue\">Rich =E4=BD=A0=E5=A5=BD</p>\r\n--alt--\r\n", "Plain alternative", "<p style=\"color:blue\">Rich 你好</p>", false},
+		{"html charset", "Content-Type: text/html; charset=gbk\r\nContent-Transfer-Encoding: base64\r\n\r\n" + base64.StdEncoding.EncodeToString([]byte{'<', 'p', '>', 0xc4, 0xe3, 0xba, 0xc3, '<', '/', 'p', '>'}), "你好", "<p>你好</p>", false},
+		{"bounded html", "Content-Type: text/html; charset=utf-8\r\n\r\n<p>" + strings.Repeat("中", textLimit) + "</p>", "中", "<p>", true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			body := "From: sender@example.org\r\nTo: user@example.org\r\nSubject: Fixture\r\nMIME-Version: 1.0\r\n" + tt.mime
+			mailbox.Messages[0].Body, mailbox.Messages[0].Size = []byte(body), uint32(len(body))
+			mailbox.Messages[0].Flags = nil
+			page, err := c.List(context.Background(), "INBOX", "", "", 20)
+			if err != nil || len(page.Messages) != 1 {
+				t.Fatalf("list: %v", err)
+			}
+			metadata, err := c.Read(context.Background(), page.Messages[0].ID, true)
+			if err != nil || metadata.Text != "" || metadata.HTML != "" {
+				t.Fatalf("metadata fetched a body: %v", err)
+			}
+			message, err := c.Read(context.Background(), page.Messages[0].ID, false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(message.Text, tt.text) || (tt.html == "" && message.HTML != "") || (tt.html != "" && !strings.Contains(message.HTML, tt.html)) || message.Truncated != tt.truncated {
+				t.Fatalf("unexpected MIME representations: text=%q html=%q truncated=%v", message.Text[:min(len(message.Text), 60)], message.HTML[:min(len(message.HTML), 60)], message.Truncated)
+			}
+			if len(message.Text) > textLimit || len(message.HTML) > textLimit || !utf8.ValidString(message.Text) || !utf8.ValidString(message.HTML) || len(mailbox.Messages[0].Flags) != 0 {
+				t.Fatal("body bounds, UTF-8 or read-only contract changed")
+			}
+		})
+	}
+}
 
 func TestSMTPTransportAndUncertainDelivery(t *testing.T) {
 	for _, mode := range []string{"tls", "starttls", "login", "uncertain"} {

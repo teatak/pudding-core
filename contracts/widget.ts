@@ -130,6 +130,7 @@ export const widgetAction = z.object({
     request: z.unknown(),
   }),
   result: z.unknown().optional(),
+  confirmationRequired: z.boolean().optional(),
 });
 export const widgetActionsResponse = z.object({
   actions: z.array(widgetAction),

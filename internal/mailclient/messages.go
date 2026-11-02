@@ -34,6 +34,7 @@ type Message struct {
 	Date        string       `json:"date"`
 	Unread      bool         `json:"unread"`
 	Text        string       `json:"text,omitempty"`
+	HTML        string       `json:"html,omitempty"`
 	Truncated   bool         `json:"truncated,omitempty"`
 	Attachments []Attachment `json:"attachments,omitempty"`
 	MessageID   string       `json:"-"`
@@ -82,6 +83,21 @@ func decode(value string, target any) error {
 }
 func validFolder(folder string) bool {
 	return folder != "" && len(folder) <= 512 && !strings.ContainsAny(folder, "\x00\r\n")
+}
+func decodeMessageID(id string) (messageID, error) {
+	var key messageID
+	if err := decode(id, &key); err != nil {
+		return key, err
+	}
+	if !validFolder(key.Folder) || key.UID == 0 || key.Validity == 0 {
+		return key, errors.New("email_invalid_id")
+	}
+	return key, nil
+}
+
+func ValidMessageID(id string) bool {
+	_, err := decodeMessageID(id)
+	return err == nil
 }
 func fetch(i *client.Client, ids *imap.SeqSet, items []imap.FetchItem) ([]*imap.Message, error) {
 	ch := make(chan *imap.Message)
@@ -235,12 +251,9 @@ func (c *Client) List(ctx context.Context, folder, q, token string, limit int) (
 
 func (c *Client) Read(ctx context.Context, id string, metadataOnly bool) (Message, error) {
 	var out Message
-	var key messageID
-	if err := decode(id, &key); err != nil {
+	key, err := decodeMessageID(id)
+	if err != nil {
 		return out, err
-	}
-	if !validFolder(key.Folder) || key.UID == 0 || key.Validity == 0 {
-		return out, errors.New("email_invalid_id")
 	}
 	i, closeConn, err := c.imap(ctx)
 	if err != nil {
@@ -303,69 +316,120 @@ func (c *Client) Read(ctx context.Context, id string, metadataOnly bool) (Messag
 		}
 		return !strings.EqualFold(p.MIMEType, "message")
 	})
-	parts := plain
-	if len(parts) == 0 {
-		parts = htmlParts
-	}
-	if len(parts) > 16 {
-		parts = parts[:16]
-		out.Truncated = true
-	}
-	remaining := textLimit
-	for _, part := range parts {
-		if remaining <= 0 {
-			out.Truncated = true
-			break
+	readParts := func(parts []textPart) (string, bool, error) {
+		var body strings.Builder
+		truncated := false
+		if len(parts) > 16 {
+			parts = parts[:16]
+			truncated = true
 		}
-		section := &imap.BodySectionName{BodyPartName: imap.BodyPartName{Path: part.path}, Peek: true, Partial: []int{0, remaining}}
-		values, err := fetch(i, set, []imap.FetchItem{section.FetchItem()})
-		if err != nil {
-			return out, err
-		}
-		if len(values) != 1 || values[0].GetBody(section) == nil {
-			return out, errors.New("email_body_unavailable")
-		}
-		raw, err := io.ReadAll(io.LimitReader(values[0].GetBody(section), int64(remaining)))
-		if err != nil {
-			return out, errors.New("email_decode_failed")
-		}
-		if int(part.body.Size) > len(raw) {
-			out.Truncated = true
-		}
-		contentType := mime.FormatMediaType(part.body.MIMEType+"/"+part.body.MIMESubType, part.body.Params)
-		h := message.Header{}
-		h.Set("Content-Type", contentType)
-		h.Set("Content-Transfer-Encoding", part.body.Encoding)
-		entity, err := message.New(h, strings.NewReader(string(raw)))
-		if err != nil {
-			return out, errors.New("email_decode_failed")
-		}
-		decoded, err := io.ReadAll(io.LimitReader(entity.Body, int64(remaining)))
-		if err != nil && !out.Truncated {
-			return out, errors.New("email_decode_failed")
-		}
-		text := strings.ToValidUTF8(string(decoded), "\uFFFD")
-		if strings.EqualFold(part.body.MIMESubType, "html") {
-			text = plainHTML(text)
-		}
-		if out.Text != "" {
-			out.Text += "\n"
-		}
-		out.Text += text
-		if len(out.Text) >= textLimit {
-			out.Text = out.Text[:textLimit]
-			for !utf8.ValidString(out.Text) {
-				out.Text = out.Text[:len(out.Text)-1]
+		remaining := textLimit
+		for index, part := range parts {
+			if remaining <= 0 {
+				truncated = true
+				break
 			}
-			out.Truncated = true
+			section := &imap.BodySectionName{BodyPartName: imap.BodyPartName{Path: part.path}, Peek: true, Partial: []int{0, remaining}}
+			values, err := fetch(i, set, []imap.FetchItem{section.FetchItem()})
+			if err != nil {
+				return "", false, err
+			}
+			if len(values) != 1 || values[0].GetBody(section) == nil {
+				return "", false, errors.New("email_body_unavailable")
+			}
+			raw, err := io.ReadAll(io.LimitReader(values[0].GetBody(section), int64(remaining)))
+			if err != nil {
+				return "", false, errors.New("email_decode_failed")
+			}
+			remaining -= len(raw)
+			partTruncated := uint64(part.body.Size) > uint64(len(raw))
+			truncated = truncated || partTruncated
+			contentType := mime.FormatMediaType(part.body.MIMEType+"/"+part.body.MIMESubType, part.body.Params)
+			h := message.Header{}
+			h.Set("Content-Type", contentType)
+			h.Set("Content-Transfer-Encoding", part.body.Encoding)
+			entity, err := message.New(h, strings.NewReader(string(raw)))
+			if err != nil {
+				return "", false, errors.New("email_decode_failed")
+			}
+			decoded, err := io.ReadAll(io.LimitReader(entity.Body, int64(textLimit-body.Len()+1)))
+			if err != nil && !partTruncated {
+				return "", false, errors.New("email_decode_failed")
+			}
+			text := strings.ToValidUTF8(string(decoded), "\uFFFD")
+			if body.Len() > 0 {
+				text = "\n" + text
+			}
+			if len(text) > textLimit-body.Len() {
+				text = text[:textLimit-body.Len()]
+				for !utf8.ValidString(text) {
+					text = text[:len(text)-1]
+				}
+				truncated = true
+			}
+			body.WriteString(text)
+			if body.Len() >= textLimit {
+				truncated = truncated || index+1 < len(parts)
+				break
+			}
 		}
-		remaining = textLimit - len(out.Text) - 1
+		return body.String(), truncated, nil
 	}
+	var plainTruncated, htmlTruncated bool
+	if out.Text, plainTruncated, err = readParts(plain); err != nil {
+		return out, err
+	}
+	if out.HTML, htmlTruncated, err = readParts(htmlParts); err != nil {
+		return out, err
+	}
+	if out.Text == "" && out.HTML != "" {
+		out.Text = plainHTML(out.HTML)
+	}
+	out.Truncated = out.Truncated || plainTruncated || htmlTruncated
 	return out, nil
 }
 
-// Return inert text only. Remote images, scripts, styles and tracking pixels are
-// never rendered or requested by the Email board.
+type ReadReceipt struct {
+	ID     string `json:"id"`
+	Unread bool   `json:"unread"`
+}
+
+// MarkRead only adds \Seen to this UID; existing flags and mailbox contents stay intact.
+func (c *Client) MarkRead(ctx context.Context, id string) (ReadReceipt, error) {
+	key, err := decodeMessageID(id)
+	if err != nil {
+		return ReadReceipt{}, err
+	}
+	i, closeConn, err := c.imap(ctx)
+	if err != nil {
+		return ReadReceipt{}, err
+	}
+	defer closeConn()
+	box, err := i.Select(key.Folder, false)
+	if err != nil || box.ReadOnly {
+		return ReadReceipt{}, errors.New("email_read_only")
+	}
+	if box.UidValidity != key.Validity {
+		return ReadReceipt{}, errors.New("email_stale_message")
+	}
+	set := new(imap.SeqSet)
+	set.AddNum(key.UID)
+	messages, err := fetch(i, set, []imap.FetchItem{imap.FetchUid, imap.FetchFlags})
+	if err != nil || len(messages) != 1 {
+		return ReadReceipt{}, errors.New("email_message_unavailable")
+	}
+	if err = i.UidStore(set, imap.FormatFlagsOp(imap.AddFlags, true), []any{imap.SeenFlag}, nil); err != nil {
+		return ReadReceipt{}, errors.New("email_mark_read_failed")
+	}
+	messages, err = fetch(i, set, []imap.FetchItem{imap.FetchUid, imap.FetchFlags})
+	if err != nil || len(messages) != 1 || summarize(messages[0], key.Folder, key.Validity).Unread {
+		return ReadReceipt{}, errors.New("email_mark_read_failed")
+	}
+	return ReadReceipt{ID: id, Unread: false}, nil
+}
+
+// Keep a plain-text alternative for HTML-only messages. HTML is returned
+// separately as untrusted content; the renderer must sanitize it before display.
 func plainHTML(value string) string {
 	z := html.NewTokenizer(strings.NewReader(value))
 	var out strings.Builder

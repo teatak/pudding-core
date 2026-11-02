@@ -1,5 +1,5 @@
 {
-  "protocolVersion": 59,
+  "protocolVersion": 61,
   "browserTabLimits": {
     "perSession": 20,
     "total": 40

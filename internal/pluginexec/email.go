@@ -74,6 +74,9 @@ func emailRequest(ctx context.Context, binding *plugin.EndpointBinding, args map
 	case method == "GET" && strings.HasPrefix(path, "/messages/"):
 		message, err := client.Read(ctx, strings.TrimPrefix(path, "/messages/"), q("metadataOnly") == "true")
 		return result(message, err)
+	case method == "POST" && strings.HasPrefix(path, "/messages/") && strings.HasSuffix(path, "/read"):
+		receipt, err := client.MarkRead(ctx, strings.TrimSuffix(strings.TrimPrefix(path, "/messages/"), "/read"))
+		return result(receipt, err)
 	case method == "POST" && path == "/send":
 		b, err := json.Marshal(args["body_json"])
 		if err != nil || len(b) > endpointMaxRequestBytes {
@@ -90,4 +93,18 @@ func emailRequest(ctx context.Context, binding *plugin.EndpointBinding, args map
 	default:
 		return result(nil, errors.New("email_unsupported_operation"))
 	}
+}
+
+// The host can execute this narrow, idempotent read receipt without a modal.
+// Generated operation descriptions/effect hints cannot extend this permission.
+func IsEmailReadReceipt(binding *plugin.EndpointBinding, method, path string, body any) bool {
+	if binding == nil || binding.Endpoint.Kind != "rest" || binding.Endpoint.Adapter != "email" || method != "POST" || body != nil {
+		return false
+	}
+	id, ok := strings.CutPrefix(path, "/messages/")
+	if !ok {
+		return false
+	}
+	id, ok = strings.CutSuffix(id, "/read")
+	return ok && mailclient.ValidMessageID(id)
 }

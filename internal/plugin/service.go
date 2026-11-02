@@ -828,6 +828,19 @@ func expiryFromDuration(seconds int64) time.Time {
 }
 
 func (s *Service) ListEndpointBindings(ctx context.Context, kind string) ([]*EndpointBinding, error) {
+	return s.listEndpointBindings(ctx, "", kind)
+}
+
+// ListPluginEndpointBindings restricts discovery and credential refresh to the
+// plugin declared by the caller. An unrelated provider outage must not block it.
+func (s *Service) ListPluginEndpointBindings(ctx context.Context, pluginID, kind string) ([]*EndpointBinding, error) {
+	if strings.TrimSpace(pluginID) == "" {
+		return nil, ErrInvalidID
+	}
+	return s.listEndpointBindings(ctx, pluginID, kind)
+}
+
+func (s *Service) listEndpointBindings(ctx context.Context, pluginID, kind string) ([]*EndpointBinding, error) {
 	kind = strings.TrimSpace(kind)
 	if s == nil {
 		return nil, errors.New("plugin service unavailable")
@@ -845,7 +858,7 @@ func (s *Service) ListEndpointBindings(ctx context.Context, kind string) ([]*End
 	}
 	out := make([]*EndpointBinding, 0)
 	for _, def := range defs {
-		if def == nil || !def.Enabled {
+		if def == nil || !def.Enabled || (pluginID != "" && def.ID != pluginID) {
 			continue
 		}
 		for endpointName, endpoint := range def.Endpoints {

@@ -25,16 +25,20 @@ type widgetFixturePlugins struct {
 	identity string
 	writes   bool
 	multiple bool
+	adapter  string
 }
 
 func (a *widgetFixturePlugins) ResolveBoundEndpoint(_ context.Context, pluginID, endpoint, connection string) (*plugin.EndpointBinding, string, error) {
 	if pluginID != "fixture" || endpoint != "rest" || (connection != "account-1" && !(a.multiple && connection == "account-2")) {
 		return nil, "", fmt.Errorf("wrong connection")
 	}
-	return &plugin.EndpointBinding{PluginID: pluginID, EndpointName: endpoint, ConnectionID: connection, Endpoint: plugin.Endpoint{WidgetWrites: a.writes, Kind: "rest", URL: "https://fixture.test/api"}, Auth: plugin.Auth{Type: plugin.AuthTypeBearer, Token: "fixture-secret"}}, a.identity, nil
+	return &plugin.EndpointBinding{PluginID: pluginID, EndpointName: endpoint, ConnectionID: connection, Endpoint: plugin.Endpoint{WidgetWrites: a.writes, Kind: "rest", Adapter: a.adapter, URL: "https://fixture.test/api"}, Auth: plugin.Auth{Type: plugin.AuthTypeBearer, Token: "fixture-secret"}}, a.identity, nil
 }
 
-func (a *widgetFixturePlugins) ListEndpointBindings(_ context.Context, kind string) ([]*plugin.EndpointBinding, error) {
+func (a *widgetFixturePlugins) ListPluginEndpointBindings(_ context.Context, pluginID, kind string) ([]*plugin.EndpointBinding, error) {
+	if pluginID != "fixture" {
+		return nil, fmt.Errorf("discovery must use the widget's declared plugin")
+	}
 	if kind != "" && kind != "rest" {
 		return nil, nil
 	}
@@ -341,6 +345,14 @@ func TestWidgetActionsAreConfirmedOnceAndInvalidateOnChange(t *testing.T) {
 	_ = json.Unmarshal(call("POST", "/studio/items", map[string]any{"kind": "widget", "name": "Actions"}, 201), &w)
 	base := "/studio/items/" + w.ID
 	pkg := widget.Package{Files: map[string]string{"src/App.tsx": "export default ()=>null", "widget.json": `{"schemaVersion":1,"sdkVersion":"1","entry":"src/App.tsx","sources":{"primary":{"pluginID":"fixture","endpoint":"rest"}},"operations":{"save":{"source":"primary","kind":"rest","effectHint":"write","inputSchema":{"type":"object","properties":{"id":{"type":"string","maxLength":50}},"required":["id"],"additionalProperties":false},"request":{"method":"POST","path":"/items","body":{"id":{"$input":"/id"}}},"result":{"success":{"pointer":"/success","equals":true}}}}}`}}
+	var manifest widget.Manifest
+	_ = json.Unmarshal([]byte(pkg.Files[widget.ManifestFile]), &manifest)
+	readReceipt := manifest.Operations["save"]
+	readReceipt.Request = widget.Request{Method: "POST", Path: "/messages/eyJmIjoiSU5CT1giLCJ2IjoxLCJ1IjoxfQ/read"}
+	readReceipt.Result = widget.Result{}
+	manifest.Operations["markRead"] = readReceipt
+	manifestJSON, _ := json.Marshal(manifest)
+	pkg.Files[widget.ManifestFile] = string(manifestJSON)
 	_ = json.Unmarshal(saveWidgetTestFiles(t, call, base, "save", pkg.Files), &w)
 	call("POST", base+"/build-receipts", map[string]any{"revisionHash": w.HeadRevision, "sdkVersion": contracts.Widget().SDKVersion, "compilerVersion": "fixture", "dependencyHash": strings.Repeat("b", 64), "ok": true}, 200)
 	_ = json.Unmarshal(call("PUT", base+"/bindings", map[string]any{"expectedRevision": w.Revision, "revisionHash": w.HeadRevision, "bindings": map[string]string{"primary": "account-1"}}, 200), &w)
@@ -397,6 +409,31 @@ func TestWidgetActionsAreConfirmedOnceAndInvalidateOnChange(t *testing.T) {
 	prepare("four", 403)
 	if calls != 2 {
 		t.Fatal("App without write capability dispatched")
+	}
+	plugins.adapter = "email"
+	var receipt struct {
+		store.WidgetAction
+		ConfirmationRequired bool `json:"confirmationRequired"`
+	}
+	_ = json.Unmarshal(call("POST", base+"/actions/markRead/prepare", map[string]any{"revisionHash": w.HeadRevision, "bindingVersion": w.BindingVersion, "clientRequestID": "read", "params": map[string]any{"id": "one"}}, 200), &receipt)
+	if receipt.ID == "" || receipt.ConfirmationRequired {
+		t.Fatal("native read receipts should not open a modal", receipt)
+	}
+	call("POST", base+"/queries/markRead", map[string]any{"revisionHash": w.HeadRevision, "bindingVersion": w.BindingVersion, "params": map[string]any{"id": "one"}}, 403)
+	// This fixture has no native email credentials: dispatch must reach the
+	// adapter and fail there, rather than bypassing action/binding checks.
+	_ = json.Unmarshal(call("POST", base+"/action-runs/"+receipt.ID+"/execute", map[string]any{"confirm": true}, 200), &done)
+	if done.State != "unknown" || calls != 2 {
+		t.Fatal("native receipt dispatch did not use its adapter", done.State, calls)
+	}
+	prepare("native-other-write", 403)
+	plugins.writes = true
+	var ordinary struct {
+		ConfirmationRequired bool `json:"confirmationRequired"`
+	}
+	_ = json.Unmarshal(call("POST", base+"/actions/save/prepare", map[string]any{"revisionHash": w.HeadRevision, "bindingVersion": w.BindingVersion, "clientRequestID": "native-confirm", "params": map[string]any{"id": "one"}}, 200), &ordinary)
+	if !ordinary.ConfirmationRequired {
+		t.Fatal("other native email writes must still require confirmation")
 	}
 }
 

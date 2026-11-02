@@ -443,3 +443,7 @@ native requests require both. This is an explicit capability requirement for
 the Email package and Email Board, not a change to ordinary HTTP endpoints.
 
 Protocol 59 / Plugin API 1.3 adds QQ, NetEase 163/126, Yahoo and Fastmail server presets to the Email adapter. Native IMAP sends the standard ID extension when advertised by the server. Older hosts retain their compatible Email package versions.
+
+Protocol 60 adds the optional `html` field to native Email message reads, alongside `text`. Each representation is bounded to 64 KiB and omitted from metadata reads. HTML remains untrusted; compatible widget renderers sanitize it before display. Older Email widgets continue to use `text`.
+
+Protocol 61 adds native Email read receipts (`POST /messages/{id}/read`). Only this exact native action can prepare with `confirmationRequired:false`; it adds `\Seen` and preserves other flags. It still uses action idempotency, binding/revision checks and execution records. Other actions default to requiring confirmation, including older responses that omit the field. GET and model reads stay read-only.

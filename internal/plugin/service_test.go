@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -849,5 +850,52 @@ func TestEmailCredentialRotationPreservesGrant(t *testing.T) {
 	c.Account.ID = "mb_other"
 	if connectionIdentity(c) == before {
 		t.Fatal("another mailbox kept grant")
+	}
+}
+
+func TestPluginEndpointDiscoveryDoesNotRefreshUnrelatedOAuthConnections(t *testing.T) {
+	homeDir := writeTestPlugin(t)
+	dir := filepath.Join(home.PluginsPath(homeDir), "email")
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, PluginFileName), []byte(`id: email
+name: Email
+auth:
+  required: true
+  methods:
+    - id: icloud
+      type: basic
+endpoints:
+  email:
+    kind: rest
+    adapter: email
+`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	var calls atomic.Int32
+	broker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte(`{"error":"temporarily_unavailable"}`))
+	}))
+	defer broker.Close()
+	cfg := fakeConnectionStore{items: map[string]*Connection{
+		"github-main": {ID: "github-main", PluginID: "github", Auth: Auth{Type: AuthTypeOAuth2, MethodID: GitHubAppAuthMethodID, Variant: GitHubAppAuthVariant, AccessToken: "expired", RefreshToken: "synthetic-refresh", ExpiresAt: time.Now().Add(-time.Hour)}},
+		"email-main":  {ID: "email-main", PluginID: "email", Auth: Auth{Type: AuthTypeBasic, MethodID: "icloud", Username: "fixture@example.com", Password: "synthetic-password"}},
+	}}
+	svc := NewService(homeDir, cfg).WithOAuthBroker(oauthbroker.New(broker.URL, broker.Client()))
+	bindings, err := svc.ListPluginEndpointBindings(context.Background(), "email", EndpointKindREST)
+	if err != nil || len(bindings) != 1 || bindings[0].ConnectionID != "email-main" {
+		t.Fatalf("email discovery: %v %v", bindings, err)
+	}
+	if _, _, err := svc.ResolveBoundEndpoint(context.Background(), "email", "email", "email-main"); err != nil {
+		t.Fatal(err)
+	}
+	if calls.Load() != 0 {
+		t.Fatal("email discovery touched an unrelated OAuth provider")
+	}
+	if _, err := svc.ListPluginEndpointBindings(context.Background(), "github", EndpointKindREST); err == nil || calls.Load() != 1 {
+		t.Fatal("selected provider's refresh failure must remain visible", err, calls.Load())
 	}
 }
