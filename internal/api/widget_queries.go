@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"reflect"
 	"strconv"
@@ -28,6 +29,8 @@ type widgetEndpointLister interface {
 }
 
 var errWidgetConnectionSelectionRequired = errors.New("connection selection required")
+var errWidgetConnectionUnavailable = errors.New("widget connection unavailable")
+var errWidgetUpstreamUnavailable = errors.New("widget upstream unavailable")
 
 func (s *Server) WithPluginExecutor(executor *pluginexec.Executor) *Server {
 	s.pluginHTTP = executor
@@ -69,7 +72,7 @@ func (s *Server) bindWidget(c *cart.Context) error {
 			return badRequest(c, "undeclared source slot")
 		}
 		if _, _, err := resolver.ResolveBoundEndpoint(c.Request.Context(), source.PluginID, source.Endpoint, connectionID); err != nil {
-			return badRequest(c, "binding unavailable: "+err.Error())
+			return s.studioItemError(c, widgetSourceResolutionError(err))
 		}
 	}
 	if req.Bindings == nil {
@@ -131,7 +134,7 @@ func (s *Server) resolveWidgetSource(ctx context.Context, w *store.StudioItem, s
 		}
 		available, err := lister.ListPluginEndpointBindings(ctx, source.PluginID, kind)
 		if err != nil {
-			return nil, "", err
+			return nil, "", widgetSourceResolutionError(err)
 		}
 		matches := 0
 		for _, candidate := range available {
@@ -146,9 +149,27 @@ func (s *Server) resolveWidgetSource(ctx context.Context, w *store.StudioItem, s
 	}
 	binding, identity, err := resolver.ResolveBoundEndpoint(ctx, source.PluginID, source.Endpoint, connectionID)
 	if err != nil {
-		return nil, "", err
+		return nil, "", widgetSourceResolutionError(err)
 	}
 	return binding, fmt.Sprintf("%x", sha256.Sum256([]byte(identity))), nil
+}
+
+func widgetSourceResolutionError(err error) error {
+	var networkError net.Error
+	if errors.As(err, &networkError) {
+		return errWidgetUpstreamUnavailable
+	}
+	var required *plugin.EndpointResolveError
+	if errors.As(err, &required) {
+		if required.Reason == "connection_reauthorization_required" {
+			return plugin.ErrConnectionReauthorizationRequired
+		}
+		return errWidgetConnectionUnavailable
+	}
+	if errors.Is(err, store.ErrNotFound) || errors.Is(err, plugin.ErrNotFound) {
+		return errWidgetConnectionUnavailable
+	}
+	return err
 }
 
 func (s *Server) queryWidget(c *cart.Context) error {
@@ -196,6 +217,10 @@ func (s *Server) queryWidget(c *cart.Context) error {
 		}
 	}
 	data, err := widgetResponseData(op, response)
+	if code := widgetConnectionResponseCode(response); code != "" {
+		c.JSON(http.StatusBadGateway, map[string]string{"error": code})
+		return nil
+	}
 	if status, _ := response["status"].(int); status == http.StatusTooManyRequests {
 		retry := 30 * time.Second
 		if headers, ok := response["response_headers"].(map[string]any); ok {
@@ -223,6 +248,30 @@ func (s *Server) queryWidget(c *cart.Context) error {
 	}
 	c.JSON(http.StatusOK, map[string]any{"data": data, "requestID": store.NewID("query"), "revisionHash": req.RevisionHash, "bindingVersion": w.BindingVersion, "fetchedAt": time.Now().UTC()})
 	return nil
+}
+
+// Upstream authentication is distinct from Pudding's API authentication. These
+// codes let the host guide reconnection without exposing tokens or logging out
+// the client. Permission failures must not be mistaken for expired credentials.
+func widgetConnectionResponseCode(response map[string]any) string {
+	// Native adapters use the same structured reason codes as endpoint tools.
+	switch response["reason"] {
+	case "email_imap_auth_failed", "email_smtp_auth_failed":
+		return "connection_reauthorization_required"
+	case "request_error", "read_error", "timeout", "connection_refused", "no_such_host", "network_error", "email_connection_failed":
+		return "upstream_unavailable"
+	}
+	status, _ := response["status"].(int)
+	if status == http.StatusUnauthorized {
+		return "connection_reauthorization_required"
+	}
+	if status == http.StatusForbidden {
+		return "upstream_access_denied"
+	}
+	if status >= http.StatusInternalServerError {
+		return "upstream_unavailable"
+	}
+	return ""
 }
 
 func widgetResponseData(op widget.Operation, response map[string]any) (any, error) {

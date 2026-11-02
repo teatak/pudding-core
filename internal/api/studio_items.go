@@ -11,6 +11,7 @@ import (
 
 	"github.com/teatak/cart/v3"
 	"github.com/teatak/pudding-core/contracts"
+	"github.com/teatak/pudding-core/internal/plugin"
 	"github.com/teatak/pudding-core/internal/store"
 	"github.com/teatak/pudding-core/internal/widget"
 )
@@ -67,6 +68,18 @@ func (s *Server) studioItemError(c *cart.Context, err error) error {
 	}
 	if errors.Is(err, errWidgetConnectionSelectionRequired) {
 		c.JSON(http.StatusConflict, map[string]string{"error": "connection_selection_required"})
+		return nil
+	}
+	if errors.Is(err, errWidgetConnectionUnavailable) {
+		c.JSON(http.StatusConflict, map[string]string{"error": "widget_connection_unavailable"})
+		return nil
+	}
+	if errors.Is(err, plugin.ErrConnectionReauthorizationRequired) {
+		c.JSON(http.StatusConflict, map[string]string{"error": "connection_reauthorization_required"})
+		return nil
+	}
+	if errors.Is(err, errWidgetUpstreamUnavailable) {
+		c.JSON(http.StatusBadGateway, map[string]string{"error": "upstream_unavailable"})
 		return nil
 	}
 	if errors.Is(err, store.ErrInvalidWidgetData) {

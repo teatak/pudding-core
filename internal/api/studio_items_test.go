@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"github.com/teatak/pudding-core/contracts"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -22,13 +23,17 @@ import (
 
 type widgetFixturePlugins struct {
 	pluginService
-	identity string
-	writes   bool
-	multiple bool
-	adapter  string
+	identity     string
+	writes       bool
+	multiple     bool
+	adapter      string
+	resolveError error
 }
 
 func (a *widgetFixturePlugins) ResolveBoundEndpoint(_ context.Context, pluginID, endpoint, connection string) (*plugin.EndpointBinding, string, error) {
+	if a.resolveError != nil {
+		return nil, "", a.resolveError
+	}
 	if pluginID != "fixture" || endpoint != "rest" || (connection != "account-1" && !(a.multiple && connection == "account-2")) {
 		return nil, "", fmt.Errorf("wrong connection")
 	}
@@ -240,12 +245,13 @@ func TestWidgetQueryUsesAuthorizedPluginConnection(t *testing.T) {
 	st := storetest.New(t)
 	plugins := &widgetFixturePlugins{identity: "authorization-1"}
 	calls := 0
+	upstreamStatus := http.StatusOK
 	client := &http.Client{Transport: widgetRoundTrip(func(r *http.Request) (*http.Response, error) {
 		calls++
 		if r.URL.String() != "https://fixture.test/api/items?status=open" || r.Header.Get("Authorization") != "Bearer fixture-secret" {
 			t.Fatalf("wrong request: %s %+v", r.URL, r.Header)
 		}
-		return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"items":[{"id":"1"}],"total":1}`))}, nil
+		return &http.Response{StatusCode: upstreamStatus, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"items":[{"id":"1"}],"total":1}`))}, nil
 	})}
 	handler := New(nil, st, st, nil).WithHome(t.TempDir()).WithPlugins(plugins).WithPluginExecutor(pluginexec.New(client)).Handler("fixture-token", nil)
 	call := func(method, path string, input any, status int) []byte {
@@ -310,6 +316,47 @@ func TestWidgetQueryUsesAuthorizedPluginConnection(t *testing.T) {
 	call("POST", base+"/queries/items", query, 200)
 	if calls != 3 {
 		t.Fatal("selected App account was not used")
+	}
+	for _, tc := range []struct {
+		status int
+		code   string
+	}{{401, "connection_reauthorization_required"}, {403, "upstream_access_denied"}, {500, "upstream_unavailable"}} {
+		upstreamStatus = tc.status
+		var response map[string]any
+		if err := json.Unmarshal(call("POST", base+"/queries/items", query, 502), &response); err != nil {
+			t.Fatal(err)
+		}
+		if response["error"] != tc.code {
+			t.Fatalf("upstream %d: %+v", tc.status, response)
+		}
+	}
+	before := calls
+	for _, tc := range []struct {
+		err    error
+		status int
+		code   string
+	}{
+		{plugin.ErrConnectionReauthorizationRequired, 409, "connection_reauthorization_required"},
+		{store.ErrNotFound, 409, "widget_connection_unavailable"},
+		{&net.DNSError{Err: "synthetic timeout", IsTimeout: true}, 502, "upstream_unavailable"},
+	} {
+		plugins.resolveError = tc.err
+		var response map[string]any
+		if err := json.Unmarshal(call("POST", base+"/queries/items", query, tc.status), &response); err != nil {
+			t.Fatal(err)
+		}
+		if response["error"] != tc.code {
+			t.Fatalf("resolve %v: %+v", tc.err, response)
+		}
+		if err := json.Unmarshal(call("PUT", base+"/bindings", map[string]any{"expectedRevision": w.Revision, "revisionHash": hash, "bindings": map[string]string{"primary": "account-1"}}, tc.status), &response); err != nil {
+			t.Fatal(err)
+		}
+		if response["error"] != tc.code {
+			t.Fatalf("bind %v: %+v", tc.err, response)
+		}
+	}
+	if calls != before {
+		t.Fatal("unavailable authorization reached upstream")
 	}
 }
 
@@ -434,6 +481,27 @@ func TestWidgetActionsAreConfirmedOnceAndInvalidateOnChange(t *testing.T) {
 	_ = json.Unmarshal(call("POST", base+"/actions/save/prepare", map[string]any{"revisionHash": w.HeadRevision, "bindingVersion": w.BindingVersion, "clientRequestID": "native-confirm", "params": map[string]any{"id": "one"}}, 200), &ordinary)
 	if !ordinary.ConfirmationRequired {
 		t.Fatal("other native email writes must still require confirmation")
+	}
+}
+
+func TestWidgetConnectionResponseCodes(t *testing.T) {
+	for _, tc := range []struct{ reason, code string }{
+		{"email_imap_auth_failed", "connection_reauthorization_required"},
+		{"email_smtp_auth_failed", "connection_reauthorization_required"},
+		{"email_connection_failed", "upstream_unavailable"},
+		{"network_error", "upstream_unavailable"},
+		{"timeout", "upstream_unavailable"},
+		{"connection_refused", "upstream_unavailable"},
+		{"no_such_host", "upstream_unavailable"},
+		{"read_error", "upstream_unavailable"},
+		{"email_message_unavailable", ""},
+		{"email_connection_changed", ""},
+		{"response_too_large", ""},
+		{"invalid_query", ""},
+	} {
+		if got := widgetConnectionResponseCode(map[string]any{"ok": false, "reason": tc.reason}); got != tc.code {
+			t.Fatalf("%s: got %q, want %q", tc.reason, got, tc.code)
+		}
 	}
 }
 
