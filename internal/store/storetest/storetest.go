@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/teatak/pudding-core/internal/config"
+	"github.com/teatak/pudding-core/internal/credentialstore/credentialtest"
 	"github.com/teatak/pudding-core/internal/store/sqlitestore"
 )
 
@@ -28,7 +29,7 @@ func New(t testing.TB) *Store {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
-	cfg := config.NewManager(home)
+	cfg := config.NewManager(home).WithCredentialCipher(credentialtest.Cipher{})
 	if err := cfg.Prepare(); err != nil {
 		t.Fatal(err)
 	}

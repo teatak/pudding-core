@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/teatak/pudding-core/internal/credentialstore"
 	"github.com/teatak/pudding-core/internal/prompt"
 	"github.com/teatak/pudding-core/internal/store"
 	"gopkg.in/yaml.v3"
@@ -52,13 +53,28 @@ const (
 var ErrInvalidSetting = errors.New("config: invalid setting")
 
 type Manager struct {
-	homeDir string
-	dir     string
-	mu      sync.Mutex
+	credentials        *credentialstore.Store
+	profileCredentials *credentialstore.Store
+	homeDir            string
+	dir                string
+	mu                 sync.Mutex
 }
 
 func NewManager(homeDir string) *Manager {
-	return &Manager{homeDir: homeDir, dir: filepath.Join(homeDir, "config")}
+	cipher := credentialstore.NewBridge(homeDir)
+	return &Manager{
+		homeDir:            homeDir,
+		dir:                filepath.Join(homeDir, "config"),
+		credentials:        credentialstore.New(homeDir, cipher),
+		profileCredentials: credentialstore.NewScoped(homeDir, "providers", cipher),
+	}
+}
+
+// WithCredentialCipher is configured before use (tests or a native host backend).
+func (m *Manager) WithCredentialCipher(cipher credentialstore.Cipher) *Manager {
+	m.credentials = credentialstore.New(m.homeDir, cipher)
+	m.profileCredentials = credentialstore.NewScoped(m.homeDir, "providers", cipher)
+	return m
 }
 
 func (m *Manager) Prepare() error {
@@ -207,6 +223,10 @@ func (m *Manager) PutProviderProfile(_ context.Context, p *store.ProviderProfile
 	}
 	cp := cloneProfile(id, p)
 	cp.ID = ""
+	cp.CredentialRef = ""
+	if old := cfg.Profiles[id]; old != nil {
+		cp.CredentialRef = old.CredentialRef
+	}
 	cp.CreatedAt = time.Time{}
 	cp.UpdatedAt = time.Time{}
 	cfg.Profiles[id] = cp
@@ -645,30 +665,6 @@ func (m *Manager) writeSettings(cfg settingsYAML) error {
 	return writeYAML(m.path(settingsFile), cfg)
 }
 
-func (m *Manager) readProfiles() (profilesYAML, error) {
-	var cfg profilesYAML
-	if err := readYAML(m.path(profilesFile), &cfg); err != nil {
-		return cfg, err
-	}
-	if cfg.Version == 0 {
-		cfg.Version = 1
-	}
-	if cfg.Profiles == nil {
-		cfg.Profiles = map[string]*store.ProviderProfile{}
-	}
-	return cfg, nil
-}
-
-func (m *Manager) writeProfiles(cfg profilesYAML) error {
-	if cfg.Version == 0 {
-		cfg.Version = 1
-	}
-	if cfg.Profiles == nil {
-		cfg.Profiles = map[string]*store.ProviderProfile{}
-	}
-	return writeYAML(m.path(profilesFile), cfg)
-}
-
 func readYAML(path string, v any) error {
 	b, err := os.ReadFile(path)
 	if err != nil {
@@ -683,7 +679,7 @@ func readYAML(path string, v any) error {
 	return nil
 }
 
-func writeYAML(path string, v any) error {
+func writeYAML(path string, v any, durable ...bool) error {
 	b, err := yaml.Marshal(v)
 	if err != nil {
 		return err
@@ -702,10 +698,22 @@ func writeYAML(path string, v any) error {
 		_ = tmp.Close()
 		return err
 	}
+	if len(durable) > 0 && durable[0] {
+		if err := tmp.Sync(); err != nil {
+			_ = tmp.Close()
+			return err
+		}
+	}
 	if err := tmp.Close(); err != nil {
 		return err
 	}
-	return os.Rename(tmpPath, path)
+	if err := os.Rename(tmpPath, path); err != nil {
+		return err
+	}
+	if len(durable) > 0 && durable[0] {
+		return credentialstore.SyncDirectory(filepath.Dir(path))
+	}
+	return nil
 }
 
 func cloneProfile(id string, p *store.ProviderProfile) *store.ProviderProfile {

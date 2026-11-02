@@ -7,7 +7,7 @@ import (
 
 func TestCoolingSettingsDefaultsPersistenceAndValidation(t *testing.T) {
 	ctx, home := context.Background(), t.TempDir()
-	m := NewManager(home)
+	m := newTestManager(home)
 	if err := m.Prepare(); err != nil {
 		t.Fatal(err)
 	}
@@ -21,7 +21,7 @@ func TestCoolingSettingsDefaultsPersistenceAndValidation(t *testing.T) {
 	if err := m.SetSettings(ctx, map[string]string{SettingToolResultCoolingEnabled: "false", SettingToolResultCoolingKeepTurns: "0"}); err != nil {
 		t.Fatal(err)
 	}
-	m = NewManager(home)
+	m = newTestManager(home)
 	if err := m.Prepare(); err != nil {
 		t.Fatal(err)
 	}

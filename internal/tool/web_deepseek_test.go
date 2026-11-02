@@ -13,6 +13,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/teatak/pudding-core/internal/config"
+	"github.com/teatak/pudding-core/internal/credentialstore/credentialtest"
 )
 
 func TestBuiltinWebSearchCallsDeepSeek(t *testing.T) {
@@ -137,7 +138,7 @@ func TestDeepSeekErrorsAndEmptyResults(t *testing.T) {
 
 func TestWebProviderSelectionControlsExecution(t *testing.T) {
 	ctx := context.Background()
-	cfg := config.NewManager(t.TempDir())
+	cfg := config.NewManager(t.TempDir()).WithCredentialCipher(credentialtest.Cipher{})
 	if err := cfg.Prepare(); err != nil {
 		t.Fatal(err)
 	}

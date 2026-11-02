@@ -1,8 +1,12 @@
 package config
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"sort"
 	"strings"
@@ -98,6 +102,11 @@ func (m *Manager) putPluginConnection(conn *plugin.Connection, expected *time.Ti
 	}
 	cp := plugin.CloneConnection(conn)
 	cp.ID = ""
+	// References belong to the stored connection ID, never to a caller's clone.
+	cp.CredentialRef = ""
+	if existing != nil {
+		cp.CredentialRef = existing.CredentialRef
+	}
 	if strings.TrimSpace(cp.Name) == "" {
 		cp.Name = id
 	}
@@ -171,17 +180,108 @@ func (m *Manager) readPluginConnectionsRaw() (pluginConnectionsYAML, error) {
 	if cfg.Bindings == nil {
 		cfg.Bindings = map[string]map[string]string{}
 	}
+	if cfg.Version > 2 {
+		return cfg, errors.New("unsupported plugin connection storage version")
+	}
+	legacy := false
+	for id, conn := range cfg.Connections {
+		if conn == nil {
+			return cfg, errors.New("invalid plugin connection")
+		}
+		if conn.CredentialRef != "" {
+			if hasPluginSecrets(conn) {
+				return cfg, errors.New("mixed plaintext and encrypted plugin credentials")
+			}
+			data, err := m.credentials.Read(conn.CredentialRef, id)
+			if err != nil {
+				return cfg, err
+			}
+			var secrets pluginSecrets
+			if json.Unmarshal(data, &secrets) != nil {
+				return cfg, errors.New("invalid plugin credentials")
+			}
+			secrets.apply(conn)
+		} else if hasPluginSecrets(conn) {
+			legacy = true
+		}
+	}
+	if legacy {
+		if err := m.writePluginConnections(cfg); err != nil {
+			return cfg, err
+		}
+	}
 	return cfg, nil
 }
 
 func (m *Manager) writePluginConnections(cfg pluginConnectionsYAML) error {
-	if cfg.Version == 0 {
-		cfg.Version = 1
+	disk := cfg
+	disk.Version = 2
+	disk.Connections = make(map[string]*plugin.Connection, len(cfg.Connections))
+	live := map[string]bool{}
+	for id, conn := range cfg.Connections {
+		copy := plugin.CloneConnection(conn)
+		if hasPluginSecrets(conn) {
+			data, err := json.Marshal(secretsFor(conn))
+			if err != nil {
+				return err
+			}
+			ref := conn.CredentialRef
+			same := false
+			if ref != "" {
+				old, err := m.credentials.Read(ref, id)
+				if err != nil {
+					return err
+				}
+				same = bytes.Equal(old, data)
+			}
+			if !same {
+				ref, err = m.credentials.Write(id, data)
+				if err != nil {
+					return err
+				}
+			}
+			copy.CredentialRef = ref
+			live[ref] = true
+		} else {
+			copy.CredentialRef = ""
+		}
+		copy.Auth.Token, copy.Auth.AccessToken, copy.Auth.RefreshToken, copy.Auth.Password = "", "", "", ""
+		copy.Fields = nil
+		disk.Connections[id] = copy
 	}
-	if cfg.Connections == nil {
-		cfg.Connections = map[string]*plugin.Connection{}
+	if err := writeYAML(m.path(pluginConnectionsFile), disk, true); err != nil {
+		return err
 	}
-	return writeYAML(m.path(pluginConnectionsFile), cfg)
+	// Refresh references only after the atomic config commit.
+	for id, conn := range cfg.Connections {
+		conn.CredentialRef = disk.Connections[id].CredentialRef
+	}
+	if err := m.credentials.Prune(live); err != nil {
+		slog.Warn("plugin encrypted credential cleanup incomplete")
+	}
+	return nil
+}
+
+type pluginSecrets struct {
+	Token        string            `json:"token,omitempty"`
+	AccessToken  string            `json:"accessToken,omitempty"`
+	RefreshToken string            `json:"refreshToken,omitempty"`
+	Password     string            `json:"password,omitempty"`
+	Fields       map[string]string `json:"fields,omitempty"`
+}
+
+func secretsFor(c *plugin.Connection) pluginSecrets {
+	return pluginSecrets{c.Auth.Token, c.Auth.AccessToken, c.Auth.RefreshToken, c.Auth.Password, c.Fields}
+}
+func hasPluginSecrets(c *plugin.Connection) bool {
+	return c.Auth.Token != "" || c.Auth.AccessToken != "" || c.Auth.RefreshToken != "" || c.Auth.Password != "" || len(c.Fields) > 0
+}
+func (s pluginSecrets) apply(c *plugin.Connection) {
+	c.Auth.Token = s.Token
+	c.Auth.AccessToken = s.AccessToken
+	c.Auth.RefreshToken = s.RefreshToken
+	c.Auth.Password = s.Password
+	c.Fields = s.Fields
 }
 
 func clonePluginConnection(id string, conn *plugin.Connection) *plugin.Connection {

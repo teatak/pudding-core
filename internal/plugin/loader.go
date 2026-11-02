@@ -576,6 +576,12 @@ func ValidateIcon(icon IconSpec) error {
 }
 
 func ValidateEndpoint(endpoint Endpoint) error {
+	if endpoint.Adapter != "" {
+		if endpoint.Adapter != "email" || endpoint.Kind != EndpointKindREST || endpoint.URL != "" || endpoint.URLConfig != nil || endpoint.Transport != "" || endpoint.Command != "" || len(endpoint.Args)+len(endpoint.Env)+len(endpoint.Headers)+len(endpoint.Platforms) != 0 {
+			return errors.New("email adapter requires a REST endpoint without URL, transport, command, headers or platform overrides")
+		}
+		return nil
+	}
 	kind := strings.TrimSpace(endpoint.Kind)
 	switch kind {
 	case EndpointKindREST, EndpointKindGraphQL:

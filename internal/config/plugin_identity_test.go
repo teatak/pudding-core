@@ -14,7 +14,7 @@ func TestPluginIDEnablementAliasesPreserveStateAndCanonicalPrecedence(t *testing
 			t.Run(fmt.Sprintf("%s/canonical=%v", old, explicit), func(t *testing.T) {
 				ctx := context.Background()
 				home := t.TempDir()
-				m := NewManager(home)
+				m := newTestManager(home)
 				if err := m.Prepare(); err != nil {
 					t.Fatal(err)
 				}
@@ -26,7 +26,7 @@ func TestPluginIDEnablementAliasesPreserveStateAndCanonicalPrecedence(t *testing
 					t.Fatal(err)
 				}
 				for i := 0; i < 2; i++ {
-					got, err := NewManager(home).ListPluginEnablement(ctx)
+					got, err := newTestManager(home).ListPluginEnablement(ctx)
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -51,7 +51,7 @@ func TestPluginIDEnablementAliasesPreserveStateAndCanonicalPrecedence(t *testing
 				if err := m.DeletePluginEnablement(ctx, old); err != nil {
 					t.Fatal(err)
 				}
-				got, err = NewManager(home).ListPluginEnablement(ctx)
+				got, err = newTestManager(home).ListPluginEnablement(ctx)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -65,7 +65,7 @@ func TestPluginIDEnablementAliasesPreserveStateAndCanonicalPrecedence(t *testing
 
 func TestSubsessionEnablementPreservesNewestLegacySetting(t *testing.T) {
 	ctx := context.Background()
-	m := NewManager(t.TempDir())
+	m := newTestManager(t.TempDir())
 	if err := m.Prepare(); err != nil {
 		t.Fatal(err)
 	}

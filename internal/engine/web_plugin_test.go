@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/teatak/pudding-core/internal/config"
+	"github.com/teatak/pudding-core/internal/credentialstore/credentialtest"
 	"github.com/teatak/pudding-core/internal/event"
 	"github.com/teatak/pudding-core/internal/plugin"
 	"github.com/teatak/pudding-core/internal/provider"
@@ -23,7 +24,7 @@ import (
 func TestWebPluginChatLifecyclePreservesConfiguration(t *testing.T) {
 	ctx := context.Background()
 	home := t.TempDir()
-	cfg := config.NewManager(home)
+	cfg := config.NewManager(home).WithCredentialCipher(credentialtest.Cipher{})
 	if err := cfg.Prepare(); err != nil {
 		t.Fatal(err)
 	}
@@ -177,7 +178,7 @@ func TestWebPluginChatLifecyclePreservesConfiguration(t *testing.T) {
 		t.Fatal("Chat web calls requested a capability upgrade")
 	}
 	// A new daemon reuses the session load and existing local configuration.
-	restarted := config.NewManager(home)
+	restarted := config.NewManager(home).WithCredentialCipher(credentialtest.Cipher{})
 	if err := restarted.Prepare(); err != nil {
 		t.Fatal(err)
 	}
@@ -187,12 +188,20 @@ func TestWebPluginChatLifecyclePreservesConfiguration(t *testing.T) {
 	}
 	// Saving another standard account never selects it. Explicitly binding it
 	// changes the next Chat call without a mode upgrade or plugin reload.
-	if err := cfg.PutPluginConnection(ctx, &plugin.Connection{ID:"second-account",PluginID:plugin.BuiltinWebSearchFetchID,Auth:plugin.Auth{MethodID:"deepseek",Type:plugin.AuthTypeBearer,Token:"ds-second"}}); err != nil { t.Fatal(err) }
-	if _, key, err := cfg.ResolveWebTool(ctx,"search"); err != nil || key != deepseekKey { t.Fatal("saving selected another account",err) }
-	if _, err := plugins.PatchConnectionBindings(ctx,plugin.BuiltinWebSearchFetchID,map[string]string{"search":"second-account"}); err != nil { t.Fatal(err) }
+	if err := cfg.PutPluginConnection(ctx, &plugin.Connection{ID: "second-account", PluginID: plugin.BuiltinWebSearchFetchID, Auth: plugin.Auth{MethodID: "deepseek", Type: plugin.AuthTypeBearer, Token: "ds-second"}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, key, err := cfg.ResolveWebTool(ctx, "search"); err != nil || key != deepseekKey {
+		t.Fatal("saving selected another account", err)
+	}
+	if _, err := plugins.PatchConnectionBindings(ctx, plugin.BuiltinWebSearchFetchID, map[string]string{"search": "second-account"}); err != nil {
+		t.Fatal(err)
+	}
 	deepseekKey = "ds-second"
-	run(tool.WebSearch,defs,"","deepseek")
-	if len(e.PendingApprovals("web-session")) != 0 { t.Fatal("standard connection required a mode upgrade") }
+	run(tool.WebSearch, defs, "", "deepseek")
+	if len(e.PendingApprovals("web-session")) != 0 {
+		t.Fatal("standard connection required a mode upgrade")
+	}
 	out, changed = e.unloadPlugin(ctx, "web-session", tool.Call{Name: tool.PluginUnload, Args: json.RawMessage(fmt.Sprintf(`{"plugin_id":%q}`, plugin.BuiltinWebSearchFetchID))})
 	if !out.Ok || !changed {
 		t.Fatal(out)

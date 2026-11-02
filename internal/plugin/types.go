@@ -139,6 +139,7 @@ type ConnectionFieldInject struct {
 }
 
 type Endpoint struct {
+	Adapter string `json:"adapter,omitempty" yaml:"adapter,omitempty"`
 	// Generated widgets cannot write unless the installed plugin explicitly opts in.
 	WidgetWrites bool `json:"widgetWrites,omitempty" yaml:"widget_writes,omitempty"`
 
@@ -203,6 +204,7 @@ type SkillDetail struct {
 }
 
 type Connection struct {
+	CredentialRef       string             `json:"-" yaml:"credential_ref,omitempty"`
 	EndpointInsecureTLS map[string]bool    `json:"-" yaml:"endpoint_insecure_tls,omitempty"`
 	ID                  string             `json:"id" yaml:"-"`
 	Name                string             `json:"name,omitempty" yaml:"name,omitempty"`
@@ -239,14 +241,13 @@ type ConnectionView struct {
 }
 
 type ConnectionDetailView struct {
+	SecretFieldsSet     map[string]bool `json:"secretFieldsSet,omitempty"`
 	EndpointInsecureTLS map[string]bool `json:"endpointInsecureTLS,omitempty"`
 	ConnectionView
 	Fields       map[string]string `json:"fields,omitempty"`
 	EndpointURLs map[string]string `json:"endpointURLs,omitempty"`
-	Token        string            `json:"token,omitempty"`
 	Prefix       string            `json:"prefix,omitempty"`
 	Username     string            `json:"username,omitempty"`
-	Password     string            `json:"password,omitempty"`
 }
 
 type Auth struct {
@@ -268,6 +269,7 @@ type Auth struct {
 }
 
 type EndpointBinding struct {
+	ConfigRevision      string
 	InsecureTLS         bool
 	PluginID            string
 	ConnectionID        string
@@ -304,23 +306,29 @@ func ViewConnection(c *Connection) ConnectionView {
 	}
 }
 
-func ViewConnectionDetail(c *Connection) ConnectionDetailView {
+func ViewConnectionDetail(c *Connection, definitions ...ConnectionField) ConnectionDetailView {
 	if c == nil {
 		return ConnectionDetailView{}
 	}
-	fields := cloneStringMap(c.Fields)
-	if c.Auth.Type == AuthTypeSession {
-		fields = nil
+	fields := map[string]string{}
+	secretFieldsSet := map[string]bool{}
+	if c.Auth.Type != AuthTypeSession {
+		for _, field := range definitions {
+			if field.Secret {
+				secretFieldsSet[field.ID] = c.Fields[field.ID] != ""
+			} else if value, ok := c.Fields[field.ID]; ok {
+				fields[field.ID] = value
+			}
+		}
 	}
 	return ConnectionDetailView{
 		ConnectionView:      ViewConnection(c),
 		Fields:              fields,
+		SecretFieldsSet:     secretFieldsSet,
 		EndpointURLs:        cloneStringMap(c.EndpointURLs),
 		EndpointInsecureTLS: cloneBoolMap(c.EndpointInsecureTLS),
-		Token:               c.Auth.Token,
 		Prefix:              c.Auth.Prefix,
 		Username:            c.Auth.Username,
-		Password:            c.Auth.Password,
 	}
 }
 

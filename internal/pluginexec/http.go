@@ -1,4 +1,4 @@
-// Package pluginexec owns plugin HTTP requests and credential injection. Callers validate their own resource scope before supplying a binding.
+// Package pluginexec owns plugin network requests and credential injection. Callers validate their own resource scope before supplying a binding.
 package pluginexec
 
 import (
@@ -83,6 +83,12 @@ type endpointAuthTokenCacheEntry struct {
 }
 
 func (r *Executor) REST(ctx context.Context, binding *plugin.EndpointBinding, args map[string]any, responseLimit ...int) map[string]any {
+	if binding.Endpoint.Adapter == "email" {
+		response := emailRequest(ctx, binding, args, responseBytes(responseLimit))
+		response["endpoint"], response["plugin"], response["connection"] = binding.EndpointName, binding.PluginID, binding.ConnectionID
+		response["auth_type"], response["auth_method"] = binding.Auth.Type, binding.Auth.MethodID
+		return response
+	}
 	target, err := BuildEndpointURL(binding.Endpoint.URL, stringArg(args, "path"))
 	if err != nil {
 		return (map[string]any{"ok": false, "reason": "invalid_path", "error": err.Error()})

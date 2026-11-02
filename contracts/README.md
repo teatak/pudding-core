@@ -3,7 +3,7 @@
 ## Extension compatibility and Hub sources
 
 Widget SDK and Plugin API are independent stable semantic versions. Their current
-versions are `widget.json.sdkVersion` and `plugin.json.apiVersion` (Widget SDK 1.2.0 and Plugin API 1.1.0).
+versions are `widget.json.sdkVersion` and `plugin.json.apiVersion` (Widget SDK 1.2.0 and Plugin API 1.3.0).
 An extension declares the minimum version it needs; the host accepts the same
 major with a requirement no newer than its own version. Compatible additions
 increment minor, compatible fixes increment patch, and breaking changes increment
@@ -415,3 +415,31 @@ Schema 58 stores assignment and dispatch identities. Result receipts are canonic
 assistant messages; settled results wake the assistant once, including after
 restart. Independent work conversations survive deletion of the assistant; their
 coordination links and source markers are removed with its bound conversation.
+
+
+Protocol 56 makes plugin-connection credentials write-only in settings responses.
+Detail snapshots add `secretFieldsSet`; token/password/secret field values are no
+longer returned. PUT accepts `clearSecretFields` for explicit optional-secret
+removal; blank edits preserve existing secrets. `/tools/web` returns `apiKeySet`
+without the key. `credential_storage_unavailable` is a 503 error. Desktop
+must provide the private OS-encryption bridge before Core accesses encrypted
+connections; see [encrypted connection credentials](../docs/plugins.md#encrypted-connection-credentials-protocol-56).
+
+
+Protocol 57 makes model-provider API keys write-only too. Provider create, patch,
+get, list and model-sync responses expose only `apiKeySet`; `apiKey` remains a
+write input. Empty/omitted updates retain the stored key. Saved model discovery
+uses `/providers/:name/models`, where Core resolves the encrypted key; probing
+unsaved settings requires explicitly supplied credentials. The shared native
+store now uses `credential_storage_unavailable` (503) for plugins and providers.
+`profiles.yaml` v2 migrates plaintext keys into immutable, profile-owned records
+in `credentials/providers/`, independently from plugin records. No model identity,
+selection or metadata changes. [Storage and recovery](../docs/technology-decisions.md#9-安全).
+
+Protocol 58 / Plugin API 1.2 adds the optional `pluginEndpoint.adapter: "email"`
+REST adapter. Its host-owned IMAP/SMTP settings and write-only credentials use
+existing connection APIs. `/profile` returns mailboxID/configRevision; subsequent
+native requests require both. This is an explicit capability requirement for
+the Email package and Email Board, not a change to ordinary HTTP endpoints.
+
+Protocol 59 / Plugin API 1.3 adds QQ, NetEase 163/126, Yahoo and Fastmail server presets to the Email adapter. Native IMAP sends the standard ID extension when advertised by the server. Older hosts retain their compatible Email package versions.

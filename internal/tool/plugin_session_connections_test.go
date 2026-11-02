@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/teatak/pudding-core/internal/config"
+	"github.com/teatak/pudding-core/internal/credentialstore/credentialtest"
 	"github.com/teatak/pudding-core/internal/plugin"
 	"github.com/teatak/pudding-core/internal/store"
 	"github.com/teatak/pudding-core/internal/store/sqlitestore"
@@ -20,7 +21,7 @@ import (
 func TestPluginMCPRequiresUserSessionSelectionAndRechecksCachedTools(t *testing.T) {
 	ctx := context.Background()
 	home := t.TempDir()
-	cfg := config.NewManager(home)
+	cfg := config.NewManager(home).WithCredentialCipher(credentialtest.Cipher{})
 	if err := cfg.Prepare(); err != nil {
 		t.Fatal(err)
 	}

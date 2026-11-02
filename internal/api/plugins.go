@@ -11,6 +11,7 @@ import (
 
 	"github.com/teatak/cart/v3"
 	"github.com/teatak/pudding-core/internal/config"
+	"github.com/teatak/pudding-core/internal/mailclient"
 	"github.com/teatak/pudding-core/internal/plugin"
 	"github.com/teatak/pudding-core/internal/store"
 	"github.com/teatak/pudding-core/internal/tool"
@@ -41,6 +42,7 @@ type pluginEnablementConfig interface {
 }
 
 type putPluginConnectionReq struct {
+	ClearSecretFields   []string          `json:"clearSecretFields"`
 	EndpointInsecureTLS map[string]bool   `json:"endpointInsecureTLS"`
 	PluginID            string            `json:"pluginID"`
 	Name                string            `json:"name"`
@@ -522,7 +524,11 @@ func (s *Server) getPluginConnection(c *cart.Context) error {
 			_ = cfg.PutPluginConnection(c.Request.Context(), conn)
 		}
 	}
-	c.JSON(http.StatusOK, plugin.ViewConnectionDetail(conn))
+	var fields []plugin.ConnectionField
+	if def, err := s.getPluginDefinition(c.Request.Context(), conn.PluginID); err == nil && def.Connection != nil {
+		fields = def.Connection.Fields
+	}
+	c.JSON(http.StatusOK, plugin.ViewConnectionDetail(conn, fields...))
 	return nil
 }
 
@@ -562,6 +568,8 @@ func (s *Server) putPluginConnection(c *cart.Context) error {
 	var existing *plugin.Connection
 	if found, err := cfg.GetPluginConnection(c.Request.Context(), id); err == nil {
 		existing = found
+	} else if !errors.Is(err, store.ErrNotFound) {
+		return s.fail(c, err)
 	}
 	endpointURLsInput := req.EndpointURLs
 	if endpointURLsInput == nil && existing != nil && existing.PluginID == pluginID {
@@ -576,7 +584,7 @@ func (s *Server) putPluginConnection(c *cart.Context) error {
 		if existing == nil || existing.PluginID != pluginID || !samePluginConnectionAuthMethod(existing.Auth, method) {
 			return badRequest(c, "session credentials must be acquired through login")
 		}
-		if !reflect.DeepEqual(endpointURLs, existing.EndpointURLs) || !reflect.DeepEqual(endpointTLS, existing.EndpointInsecureTLS) || len(req.Fields) > 0 {
+		if !reflect.DeepEqual(endpointURLs, existing.EndpointURLs) || !reflect.DeepEqual(endpointTLS, existing.EndpointInsecureTLS) || len(req.Fields) > 0 || len(req.ClearSecretFields) > 0 {
 			return badRequest(c, "login is required to change session credentials or endpoint")
 		}
 		conn := plugin.CloneConnection(existing)
@@ -591,7 +599,11 @@ func (s *Server) putPluginConnection(c *cart.Context) error {
 		c.JSON(http.StatusOK, plugin.ViewConnection(updated))
 		return nil
 	}
-	fields, err := normalizePluginConnectionFields(def.Connection, req.Fields, existing)
+	fieldSource := existing
+	if fieldSource != nil && fieldSource.PluginID != pluginID {
+		fieldSource = nil
+	}
+	fields, err := normalizePluginConnectionFields(def.Connection, req.Fields, fieldSource, req.ClearSecretFields)
 	if err != nil {
 		return badRequest(c, err.Error())
 	}
@@ -643,6 +655,48 @@ func (s *Server) putPluginConnection(c *cart.Context) error {
 	if err := validatePluginConnectionAuth(conn.Auth); err != nil {
 		return badRequest(c, err.Error())
 	}
+	for _, endpoint := range def.Endpoints {
+		if endpoint.Adapter != "email" {
+			continue
+		}
+		mailConfig, err := mailclient.Parse(conn.Auth.MethodID, conn.Auth.Username, conn.Auth.Password, conn.Fields)
+		if err != nil {
+			return badRequest(c, err.Error())
+		}
+		changed := true
+		if existing != nil && existing.PluginID == pluginID && existing.Account != nil && existing.Account.Type == "email" {
+			if existing.Account.ID != mailConfig.MailboxID {
+				return badRequest(c, "email_mailbox_change_requires_new_connection")
+			}
+			oldConfig, err := mailclient.Parse(existing.Auth.MethodID, existing.Auth.Username, existing.Auth.Password, existing.Fields)
+			if err != nil {
+				return badRequest(c, err.Error())
+			}
+			changed = oldConfig != mailConfig
+			if (oldConfig.SMTP.Host != mailConfig.SMTP.Host || oldConfig.SMTP.Port != mailConfig.SMTP.Port || oldConfig.SMTP.Username != mailConfig.SMTP.Username || oldConfig.SMTP.Security != mailConfig.SMTP.Security) && (req.Fields["smtpPassword"] == "" && (req.Password == "" || conn.Fields["smtpPassword"] != "")) {
+				return badRequest(c, "email_new_server_requires_password")
+			}
+		}
+		if changed {
+			if err := (&mailclient.Client{Config: mailConfig}).Validate(c.Request.Context()); err != nil {
+				return badRequest(c, err.Error())
+			}
+		}
+		conn.Account = &plugin.ConnectionAccount{ID: mailConfig.MailboxID, Login: mailConfig.Address, Type: "email"}
+		var expected time.Time
+		if existing != nil {
+			expected = existing.UpdatedAt
+		}
+		if err := cfg.PutPluginConnectionIfUnchanged(c.Request.Context(), conn, expected); err != nil {
+			return s.fail(c, err)
+		}
+		updated, err := cfg.GetPluginConnection(c.Request.Context(), id)
+		if err != nil {
+			return s.fail(c, err)
+		}
+		c.JSON(http.StatusOK, plugin.ViewConnection(updated))
+		return nil
+	}
 	patTokenChanged := strings.TrimSpace(req.Token) != "" && (existing == nil || req.Token != existing.Auth.Token)
 	if pluginID == "github" && method.ID == plugin.GitHubPATAuthMethodID && (patTokenChanged || conn.Account == nil) {
 		account, err := s.github.Account(c.Request.Context(), conn.Auth.Token)
@@ -690,9 +744,15 @@ func samePluginConnectionAuthMethod(auth plugin.Auth, method plugin.AuthMethod) 
 	return strings.TrimSpace(auth.Type) == strings.TrimSpace(method.Type)
 }
 
-func normalizePluginConnectionFields(config *plugin.ConnectionConfig, values map[string]string, existing *plugin.Connection) (map[string]string, error) {
+func normalizePluginConnectionFields(config *plugin.ConnectionConfig, values map[string]string, existing *plugin.Connection, clearLists ...[]string) (map[string]string, error) {
+	clear := map[string]bool{}
+	for _, list := range clearLists {
+		for _, id := range list {
+			clear[id] = true
+		}
+	}
 	if config == nil || len(config.Fields) == 0 {
-		if len(values) > 0 {
+		if len(values) > 0 || len(clear) > 0 {
 			return nil, errors.New("connection fields are not supported by plugin")
 		}
 		return nil, nil
@@ -706,7 +766,10 @@ func normalizePluginConnectionFields(config *plugin.ConnectionConfig, values map
 		}
 		seen[id] = struct{}{}
 		value := strings.TrimSpace(values[id])
-		if value == "" && field.Secret && existing != nil {
+		if clear[id] && (!field.Secret || field.Required || value != "") {
+			return nil, errors.New("only an optional stored secret can be cleared")
+		}
+		if value == "" && field.Secret && existing != nil && !clear[id] {
 			value = strings.TrimSpace(existing.Fields[id])
 		}
 		if field.Required && value == "" {
@@ -726,6 +789,11 @@ func normalizePluginConnectionFields(config *plugin.ConnectionConfig, values map
 				}
 			}
 			out[id] = value
+		}
+	}
+	for id := range clear {
+		if _, ok := seen[id]; !ok {
+			return nil, errors.New("unknown secret field")
 		}
 	}
 	for id := range values {

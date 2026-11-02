@@ -28,6 +28,7 @@ import (
 	"github.com/teatak/pudding-core/internal/attachment"
 	"github.com/teatak/pudding-core/internal/audio/voice"
 	"github.com/teatak/pudding-core/internal/config"
+	"github.com/teatak/pudding-core/internal/credentialstore/credentialtest"
 	"github.com/teatak/pudding-core/internal/desktopcamera"
 	"github.com/teatak/pudding-core/internal/engine"
 	"github.com/teatak/pudding-core/internal/event"
@@ -306,7 +307,7 @@ func newConfigTestServerWithGitHub(t *testing.T, github *githubapp.Client) (*htt
 	t.Helper()
 	ms := storetest.New(t)
 	homeDir := t.TempDir()
-	cfg := config.NewManager(homeDir)
+	cfg := config.NewManager(homeDir).WithCredentialCipher(credentialtest.Cipher{})
 	if err := cfg.Prepare(); err != nil {
 		t.Fatal(err)
 	}
@@ -326,7 +327,7 @@ func newGitHubAppTestServer(t *testing.T, broker, github *httptest.Server) (*htt
 	t.Helper()
 	ms := storetest.New(t)
 	homeDir := t.TempDir()
-	cfg := config.NewManager(homeDir)
+	cfg := config.NewManager(homeDir).WithCredentialCipher(credentialtest.Cipher{})
 	if err := cfg.Prepare(); err != nil {
 		t.Fatal(err)
 	}
@@ -1361,8 +1362,8 @@ func TestPutPluginConnectionStoresFieldsWithoutAuth(t *testing.T) {
 		t.Fatalf("detail status = %d", resp.StatusCode)
 	}
 	detail := decodeJSON[appsvc.ConnectionDetailView](t, resp)
-	if detail.Fields["apiKey"] != "secret" {
-		t.Fatalf("connection fields not stored: %+v", detail.Fields)
+	if detail.Fields["apiKey"] != "" || !detail.SecretFieldsSet["apiKey"] {
+		t.Fatal("secret field must return only configured state")
 	}
 }
 
@@ -1957,7 +1958,7 @@ func TestBuiltinPluginEnablementAPI(t *testing.T) {
 	ms := storetest.New(t)
 	hub := event.NewHub()
 	home := t.TempDir()
-	cfg := config.NewManager(home)
+	cfg := config.NewManager(home).WithCredentialCipher(credentialtest.Cipher{})
 	if err := cfg.Prepare(); err != nil {
 		t.Fatal(err)
 	}
@@ -2014,7 +2015,7 @@ func TestDeletePluginRemovesConnections(t *testing.T) {
 	ms := storetest.New(t)
 	hub := event.NewHub()
 	home := t.TempDir()
-	cfg := config.NewManager(home)
+	cfg := config.NewManager(home).WithCredentialCipher(credentialtest.Cipher{})
 	if err := cfg.Prepare(); err != nil {
 		t.Fatal(err)
 	}
@@ -2293,8 +2294,8 @@ func TestWebToolsAPI(t *testing.T) {
 	if got.SearchProvider != "tavily" || got.FetchProvider != "tavily" {
 		t.Fatalf("explicit selection should enable tavily: %+v", got)
 	}
-	if got.Providers[0].APIKey != "tvly-http-secret" || !got.Providers[0].APIKeySet {
-		t.Fatalf("patch should return editable key and status: %+v", got.Providers[0])
+	if got.Providers[0].APIKey != "" || !got.Providers[0].APIKeySet {
+		t.Fatalf("patch should return only configured status: %+v", got.Providers[0])
 	}
 	stored, ok, err := cfg.TavilyAPIKey(context.Background())
 	if err != nil {
@@ -2310,7 +2311,7 @@ func TestWebToolsAPI(t *testing.T) {
 		t.Fatalf("want 200, got %d", resp.StatusCode)
 	}
 	got = decodeJSON[config.WebToolsView](t, resp)
-	if got.SearchProvider != "tavily" || got.FetchProvider != "tavily" || got.Providers[1].Name != "deepseek" || got.Providers[1].APIKey != "ds-http-key" {
+	if got.SearchProvider != "tavily" || got.FetchProvider != "tavily" || got.Providers[1].Name != "deepseek" || !got.Providers[1].APIKeySet {
 		t.Fatalf("saving DeepSeek must keep Tavily selected: %+v", got)
 	}
 	resp = req(t, http.MethodPatch, srv.URL+"/tools/web", map[string]any{"searchProvider": "deepseek", "fetchProvider": "deepseek"})
@@ -2318,7 +2319,7 @@ func TestWebToolsAPI(t *testing.T) {
 		t.Fatalf("want 200, got %d", resp.StatusCode)
 	}
 	got = decodeJSON[config.WebToolsView](t, resp)
-	if got.SearchProvider != "deepseek" || got.FetchProvider != "deepseek" || got.Providers[0].APIKey != "tvly-http-secret" {
+	if got.SearchProvider != "deepseek" || got.FetchProvider != "deepseek" || got.Providers[0].APIKey != "" {
 		t.Fatalf("switching to DeepSeek must retain Tavily credentials: %+v", got)
 	}
 
@@ -3319,8 +3320,8 @@ func readSSE(t *testing.T, url string, stopKind string, timeout time.Duration, r
 	return nil
 }
 
-func TestProvidersCRUDReturnsEditableAPIKey(t *testing.T) {
-	srv, _, _ := newConfigTestServer(t)
+func TestProvidersCRUDKeepsAPIKeyWriteOnly(t *testing.T) {
+	srv, _, cfg := newConfigTestServer(t)
 
 	resp := req(t, http.MethodPost, srv.URL+"/providers", map[string]any{
 		"id": "work", "displayName": "Work", "protocol": "openai-compatible",
@@ -3333,8 +3334,8 @@ func TestProvidersCRUDReturnsEditableAPIKey(t *testing.T) {
 	if created["apiKeySet"] != true {
 		t.Fatalf("want apiKeySet true, got %+v", created)
 	}
-	if created["apiKey"] != "sk-secret" {
-		t.Fatalf("want editable apiKey in response, got %+v", created)
+	if created["apiKey"] != nil {
+		t.Fatalf("must not return apiKey in response, got %+v", created)
 	}
 	if created["baseURL"] != "https://example.com/v1" {
 		t.Fatalf("baseURL must be trimmed: %+v", created)
@@ -3367,16 +3368,25 @@ func TestProvidersCRUDReturnsEditableAPIKey(t *testing.T) {
 	if patched["apiKeySet"] != true {
 		t.Fatalf("empty apiKey must not clear stored key: %+v", patched)
 	}
-	if patched["apiKey"] != "sk-secret" {
+	if patched["apiKey"] != nil {
 		t.Fatalf("empty apiKey must keep stored key: %+v", patched)
+	}
+	kept, err := cfg.GetProviderProfile(context.Background(), "work")
+	if err != nil || kept.APIKey != "sk-secret" {
+		t.Fatal("blank edit discarded key", err)
 	}
 	resp = req(t, http.MethodPatch, srv.URL+"/providers/work", map[string]any{"protocol": "google", "apiKey": "g-key"})
 	patched = decodeJSON[map[string]any](t, resp)
 	if patched["protocol"] != "google" {
 		t.Fatalf("protocol patch failed: %+v", patched)
 	}
-	if patched["apiKey"] != "g-key" {
+	if patched["apiKey"] != nil {
 		t.Fatalf("apiKey patch failed: %+v", patched)
+	}
+
+	stored, err := cfg.GetProviderProfile(context.Background(), "work")
+	if err != nil || stored.APIKey != "g-key" {
+		t.Fatal("replacement key not available to host", err)
 	}
 
 	// 空模型列表必须可显式保存,再次读取时不能恢复默认模型。
@@ -3403,8 +3413,8 @@ func TestProvidersCRUDReturnsEditableAPIKey(t *testing.T) {
 	if len(list["providers"]) != 1 {
 		t.Fatalf("want 1 profile, got %+v", list)
 	}
-	if list["providers"][0]["apiKey"] != "g-key" {
-		t.Fatalf("list must return editable apiKey: %+v", list)
+	if list["providers"][0]["apiKey"] != nil {
+		t.Fatalf("list must not return apiKey: %+v", list)
 	}
 	resp = req(t, http.MethodDelete, srv.URL+"/providers/work", nil)
 	resp.Body.Close()

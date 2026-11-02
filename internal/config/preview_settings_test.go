@@ -11,7 +11,7 @@ import (
 
 func TestPreviewSettingsAreIndependentAndPersistAcrossRestart(t *testing.T) {
 	home := t.TempDir()
-	m := NewManager(home)
+	m := newTestManager(home)
 	if err := m.Prepare(); err != nil {
 		t.Fatal(err)
 	}
@@ -34,7 +34,7 @@ func TestPreviewSettingsAreIndependentAndPersistAcrossRestart(t *testing.T) {
 		if err := m.SetSettings(ctx, map[string]string{key: "true"}); err != nil {
 			t.Fatal(err)
 		}
-		m = NewManager(home)
+		m = newTestManager(home)
 		got, err := m.Settings(ctx)
 		if err != nil || got[key] != "true" {
 			t.Fatal(got, err)
@@ -43,7 +43,7 @@ func TestPreviewSettingsAreIndependentAndPersistAcrossRestart(t *testing.T) {
 	if err := m.SetSettings(ctx, map[string]string{SettingShowPluginPreviewVersions: "false"}); err != nil {
 		t.Fatal(err)
 	}
-	got, err := NewManager(home).Settings(ctx)
+	got, err := newTestManager(home).Settings(ctx)
 	if err != nil || got[SettingShowPluginPreviewVersions] != "false" || got[SettingShowWidgetPreviewVersions] != "true" {
 		t.Fatal(got, err)
 	}
@@ -67,7 +67,7 @@ func TestPreviewSettingsAreIndependentAndPersistAcrossRestart(t *testing.T) {
 			t.Fatal(reset)
 		}
 	}
-	got, err = NewManager(home).Settings(ctx)
+	got, err = newTestManager(home).Settings(ctx)
 	if err != nil || got[SettingShowPluginPreviewVersions] != "false" || got[SettingShowWidgetPreviewVersions] != "false" {
 		t.Fatal(got, err)
 	}

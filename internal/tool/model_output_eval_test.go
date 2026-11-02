@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/teatak/pudding-core/internal/config"
+	"github.com/teatak/pudding-core/internal/credentialstore/credentialtest"
 	"github.com/teatak/pudding-core/internal/modeloutput"
 	"github.com/teatak/pudding-core/internal/provider"
 	"github.com/teatak/pudding-core/internal/provider/registry"
@@ -183,7 +184,7 @@ func TestModelOutputLiveEvaluation(t *testing.T) {
 	if home == "" || profileID == "" || model == "" || output == "" {
 		t.Fatal("explicit home, profile, model and report path required")
 	}
-	cfg := config.NewManager(home)
+	cfg := config.NewManager(home).WithCredentialCipher(credentialtest.Cipher{})
 	profile, err := cfg.GetProviderProfile(context.Background(), profileID)
 	if err != nil {
 		t.Fatal(err)

@@ -421,3 +421,22 @@ func jsonResponse(status int, body string) *http.Response {
 		Body:       io.NopCloser(strings.NewReader(body)),
 	}
 }
+
+type changingEmailEndpointSource struct{ calls int }
+
+func (f *changingEmailEndpointSource) ResolveEndpoint(context.Context, string, string, string) (*plugin.EndpointBinding, error) {
+	f.calls++
+	revision := "first"
+	if f.calls > 1 {
+		revision = "changed"
+	}
+	return &plugin.EndpointBinding{ConnectionID: "mail", ConfigRevision: revision, Endpoint: plugin.Endpoint{Kind: "rest", Adapter: "email"}, Auth: plugin.Auth{Type: "basic", MethodID: "gmail", Username: "user@gmail.com", Password: "private-secret"}}, nil
+}
+func TestEmailToolRejectsResultAfterConnectionChanges(t *testing.T) {
+	runner := NewBuiltinRunner(WithPluginEndpoints(&changingEmailEndpointSource{}))
+	result := runner.Call(context.Background(), Call{SessionID: "session", Name: RESTRequest, Args: json.RawMessage(`{"endpoint":"email","method":"GET","path":"/profile"}`)})
+	encoded, _ := json.Marshal(result)
+	if !strings.Contains(string(encoded), "email_connection_changed") || strings.Contains(string(encoded), "user@gmail.com") || strings.Contains(string(encoded), "private-secret") {
+		t.Fatalf("stale profile escaped: %s", encoded)
+	}
+}

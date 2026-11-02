@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/teatak/pudding-core/internal/config"
+	"github.com/teatak/pudding-core/internal/credentialstore/credentialtest"
 	"github.com/teatak/pudding-core/internal/home"
 	"github.com/teatak/pudding-core/internal/store"
 )
@@ -49,7 +50,7 @@ func TestSelectProviderModelPrefersBuzzHiveDeepSeek(t *testing.T) {
 	if err := home.Prepare(dir); err != nil {
 		t.Fatal(err)
 	}
-	cfg := config.NewManager(dir)
+	cfg := config.NewManager(dir).WithCredentialCipher(credentialtest.Cipher{})
 	if err := cfg.Prepare(); err != nil {
 		t.Fatal(err)
 	}

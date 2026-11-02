@@ -8,6 +8,7 @@ import (
 
 	"github.com/teatak/pudding-core/internal/audio/driver/portaudio"
 	"github.com/teatak/pudding-core/internal/config"
+	"github.com/teatak/pudding-core/internal/credentialstore/credentialtest"
 )
 
 func TestNativeVoiceWiringKeepsCaptureAndInstaller(t *testing.T) {
@@ -17,7 +18,7 @@ func TestNativeVoiceWiringKeepsCaptureAndInstaller(t *testing.T) {
 	if _, ok := driver.(*portaudio.Driver); !ok {
 		t.Fatalf("native capture driver = %T", driver)
 	}
-	service, installer := newVoiceRuntime(dir, config.NewManager(dir), cfg, nil, nil)
+	service, installer := newVoiceRuntime(dir, config.NewManager(dir).WithCredentialCipher(credentialtest.Cipher{}), cfg, nil, nil)
 	if service == nil || installer == nil {
 		t.Fatal("native voice runtime was removed")
 	}

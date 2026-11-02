@@ -188,6 +188,13 @@ func (s *Server) queryWidget(c *cart.Context) error {
 	}
 	defer release()
 	response := s.executeWidgetRequest(c.Request.Context(), binding, op, resolved)
+	if binding.Endpoint.Adapter == "email" {
+		current, _, err := s.plugins.(widgetEndpointResolver).ResolveBoundEndpoint(c.Request.Context(), binding.PluginID, binding.EndpointName, binding.ConnectionID)
+		if err != nil || current.ConfigRevision != binding.ConfigRevision {
+			c.JSON(http.StatusConflict, map[string]string{"error": "email_connection_changed"})
+			return nil
+		}
+	}
 	data, err := widgetResponseData(op, response)
 	if status, _ := response["status"].(int); status == http.StatusTooManyRequests {
 		retry := 30 * time.Second

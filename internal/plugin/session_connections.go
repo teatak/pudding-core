@@ -53,7 +53,7 @@ func connectionIdentity(c *Connection) string {
 			identity.AccountID = c.Account.Login
 		}
 	}
-	if c.Auth.Type == AuthTypeSession && identity.AccountID != "" {
+	if (c.Auth.Type == AuthTypeSession || (c.Account != nil && c.Account.Type == "email")) && identity.AccountID != "" {
 		// Session credential rotation does not change the account grant.
 		identity.Fields = nil
 	}

@@ -28,7 +28,7 @@ urls:
 		t.Fatal(err)
 	}
 	ctx := context.Background()
-	m := NewManager(home)
+	m := newTestManager(home)
 	sources, err := m.WidgetSources(ctx)
 	if err != nil || len(sources) != 3 {
 		t.Fatalf("migration: %+v %v", sources, err)
@@ -40,7 +40,7 @@ urls:
 	if err != nil || string(before) != string(original) {
 		t.Fatal("listing rewrote configuration", err)
 	}
-	restarted, err := NewManager(home).WidgetSources(ctx)
+	restarted, err := newTestManager(home).WidgetSources(ctx)
 	if err != nil || len(restarted) != 3 || restarted[1] != sources[1] {
 		t.Fatal(restarted, err)
 	}
@@ -48,14 +48,14 @@ urls:
 	if err != nil {
 		t.Fatal(err)
 	}
-	persisted, err := NewManager(home).WidgetSources(ctx)
+	persisted, err := newTestManager(home).WidgetSources(ctx)
 	if err != nil || len(persisted) != 4 || persisted[3] != added {
 		t.Fatal(persisted, err)
 	}
 	if err := m.RemoveWidgetSource(ctx, sources[1].ID); err != nil {
 		t.Fatal(err)
 	}
-	removed, err := NewManager(home).WidgetSources(ctx)
+	removed, err := newTestManager(home).WidgetSources(ctx)
 	if err != nil || len(removed) != 3 || removed[1] != sources[2] {
 		t.Fatal(removed, err)
 	}
@@ -94,7 +94,7 @@ urls:
 		t.Fatal(err)
 	}
 	ctx := context.Background()
-	m := NewManager(home)
+	m := newTestManager(home)
 	sources, err := m.PluginSources(ctx)
 	if err != nil || len(sources) != 3 {
 		t.Fatalf("migration: %+v %v", sources, err)
@@ -106,7 +106,7 @@ urls:
 	if err != nil || string(before) != string(original) {
 		t.Fatal("listing rewrote configuration", err)
 	}
-	restarted, err := NewManager(home).PluginSources(ctx)
+	restarted, err := newTestManager(home).PluginSources(ctx)
 	if err != nil || len(restarted) != 3 || restarted[1] != sources[1] {
 		t.Fatal(restarted, err)
 	}
@@ -114,14 +114,14 @@ urls:
 	if err != nil {
 		t.Fatal(err)
 	}
-	persisted, err := NewManager(home).PluginSources(ctx)
+	persisted, err := newTestManager(home).PluginSources(ctx)
 	if err != nil || len(persisted) != 4 || persisted[3] != added {
 		t.Fatal(persisted, err)
 	}
 	if err := m.RemovePluginSource(ctx, sources[1].ID); err != nil {
 		t.Fatal(err)
 	}
-	removed, err := NewManager(home).PluginSources(ctx)
+	removed, err := newTestManager(home).PluginSources(ctx)
 	if err != nil || len(removed) != 3 || removed[1] != sources[2] {
 		t.Fatal(removed, err)
 	}

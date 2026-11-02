@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/teatak/pudding-core/internal/config"
+	"github.com/teatak/pudding-core/internal/credentialstore/credentialtest"
 	"github.com/teatak/pudding-core/internal/event"
 	"github.com/teatak/pudding-core/internal/plugin"
 	"github.com/teatak/pudding-core/internal/provider"
@@ -26,7 +27,7 @@ func TestContentPluginsLoadIndependently(t *testing.T) {
 		t.Run(id, func(t *testing.T) {
 			ctx := context.Background()
 			st := storetest.New(t)
-			cfg := config.NewManager(t.TempDir())
+			cfg := config.NewManager(t.TempDir()).WithCredentialCipher(credentialtest.Cipher{})
 			if err := cfg.Prepare(); err != nil {
 				t.Fatal(err)
 			}
@@ -162,7 +163,7 @@ func TestLegacyPageAliasesRespectPluginAvailability(t *testing.T) {
 		t.Run(scenario.name, func(t *testing.T) {
 			ctx := context.Background()
 			st := storetest.New(t)
-			cfg := config.NewManager(t.TempDir())
+			cfg := config.NewManager(t.TempDir()).WithCredentialCipher(credentialtest.Cipher{})
 			if err := cfg.Prepare(); err != nil {
 				t.Fatal(err)
 			}
@@ -231,7 +232,7 @@ func TestLegacySheetAliasesRespectPluginAvailability(t *testing.T) {
 		t.Run(scenario.name, func(t *testing.T) {
 			ctx := context.Background()
 			st := storetest.New(t)
-			cfg := config.NewManager(t.TempDir())
+			cfg := config.NewManager(t.TempDir()).WithCredentialCipher(credentialtest.Cipher{})
 			if err := cfg.Prepare(); err != nil {
 				t.Fatal(err)
 			}

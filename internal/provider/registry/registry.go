@@ -5,6 +5,7 @@ package registry
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"net/url"
@@ -60,8 +61,11 @@ func (r *Registry) Resolve(ctx context.Context, name string) (provider.Client, e
 		return nil, fmt.Errorf("provider profile name is required")
 	}
 	p, err := r.profiles.GetProviderProfile(ctx, name)
-	if err != nil {
+	if errors.Is(err, store.ErrNotFound) {
 		return nil, fmt.Errorf("provider profile %q not found: configure it via POST /providers", name)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("provider profile %q: %w", name, err)
 	}
 
 	apiKey := config.EffectiveAPIKey(p)

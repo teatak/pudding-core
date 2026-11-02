@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"github.com/teatak/pudding-core/internal/plugin"
 	"github.com/teatak/pudding-core/internal/store"
+	"strings"
 	"unicode/utf8"
 )
 
@@ -28,6 +29,12 @@ func (r *BuiltinRunner) pluginHTTPRequest(ctx context.Context, call Call, kind s
 	var response map[string]any
 	if kind == plugin.EndpointKindREST {
 		response = r.pluginHTTP.REST(ctx, binding, args)
+		if binding.Endpoint.Adapter == "email" && (stringArg(args, "method") == "" || strings.EqualFold(stringArg(args, "method"), "GET")) {
+			current, err := r.resolvePluginEndpoint(ctx, call.SessionID, stringArg(args, "endpoint"), stringArg(args, "connection"), kind)
+			if err != nil || current.ConnectionID != binding.ConnectionID || current.ConfigRevision != binding.ConfigRevision {
+				response = map[string]any{"ok": false, "reason": "email_connection_changed"}
+			}
+		}
 	} else {
 		if stringArg(args, "query") == "" {
 			return toolJSON(out, false, map[string]any{"ok": false, "reason": "missing_query"})

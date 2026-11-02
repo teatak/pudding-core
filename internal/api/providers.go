@@ -19,8 +19,7 @@ import (
 	"golang.org/x/sync/singleflight"
 )
 
-// providerProfileView 是 profile 的响应形状:api_key 存在本地配置中,
-// 允许设置界面编辑时回显;apiKeySet 用于列表状态点。
+// Settings expose configured state only; credentials stay in the host.
 type providerProfileView struct {
 	ID          string                `json:"id"`
 	DisplayName string                `json:"displayName"`
@@ -28,7 +27,6 @@ type providerProfileView struct {
 	Group       string                `json:"group,omitempty"`
 	Protocol    string                `json:"protocol"`
 	BaseURL     string                `json:"baseURL"`
-	APIKey      string                `json:"apiKey,omitempty"`
 	APIKeySet   bool                  `json:"apiKeySet"`
 	Models      []store.ProviderModel `json:"models"`
 }
@@ -41,7 +39,6 @@ func viewProfile(p *store.ProviderProfile) providerProfileView {
 		Group:       strings.TrimSpace(p.Group),
 		Protocol:    p.Protocol,
 		BaseURL:     p.BaseURL,
-		APIKey:      p.APIKey,
 		APIKeySet:   config.EffectiveAPIKey(p) != "",
 		Models:      append([]store.ProviderModel{}, p.Models...),
 	}
@@ -259,7 +256,7 @@ func (s *Server) probeProviderModels(c *cart.Context) error {
 	defer cancel()
 	models, err := fetchProviderModels(ctx, req.Protocol, req.BaseURL, req.APIKey)
 	if err != nil {
-		c.JSON(http.StatusBadGateway, map[string]string{"error": err.Error()})
+		c.JSON(http.StatusBadGateway, map[string]string{"error": modelCatalogError(err, req.APIKey)})
 		return nil
 	}
 	if models == nil {
@@ -314,7 +311,7 @@ func (s *Server) listProviderModels(c *cart.Context) error {
 	defer cancel()
 	models, err := fetchProviderModels(ctx, modelProtocol, modelBaseURL, apiKey)
 	if err != nil {
-		c.JSON(http.StatusBadGateway, map[string]string{"error": err.Error()})
+		c.JSON(http.StatusBadGateway, map[string]string{"error": modelCatalogError(err, apiKey)})
 		return nil
 	}
 	if models == nil {
@@ -418,7 +415,7 @@ func fetchAndMergeProviderModels(ctx context.Context, cfg providerWriter, p *sto
 
 	candidates, err := fetchProviderModels(ctx, modelProtocol, modelBaseURL, apiKey)
 	if err != nil {
-		return providerSyncResponse{http.StatusBadGateway, map[string]string{"error": err.Error()}}, nil
+		return providerSyncResponse{http.StatusBadGateway, map[string]string{"error": modelCatalogError(err, apiKey)}}, nil
 	}
 
 	// Merge into the latest profile, not the snapshot from before the network
@@ -557,4 +554,13 @@ func mergeModelCapabilities(existing *store.ModelCaps, reported map[string]bool)
 		caps.Tools = v
 	}
 	return &caps
+}
+
+// Provider errors can echo an authorization value. Never send it back to settings.
+func modelCatalogError(err error, apiKey string) string {
+	text := err.Error()
+	if apiKey != "" {
+		text = strings.ReplaceAll(text, apiKey, "[redacted]")
+	}
+	return text
 }

@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/teatak/pudding-core/internal/config"
+	"github.com/teatak/pudding-core/internal/credentialstore/credentialtest"
 	"github.com/teatak/pudding-core/internal/engine"
 	"github.com/teatak/pudding-core/internal/event"
 	"github.com/teatak/pudding-core/internal/plugin"
@@ -24,7 +25,7 @@ import (
 func TestSessionLoginAPI(t *testing.T) {
 	ctx := context.Background()
 	home := t.TempDir()
-	cfg := config.NewManager(home)
+	cfg := config.NewManager(home).WithCredentialCipher(credentialtest.Cipher{})
 	if err := cfg.Prepare(); err != nil {
 		t.Fatal(err)
 	}
@@ -160,8 +161,8 @@ auth:
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(string(contents), "pass&word") || strings.Contains(string(contents), "123456") {
-		t.Fatal("login inputs persisted")
+	if strings.Contains(string(contents), "pass&word") || strings.Contains(string(contents), "123456") || strings.Contains(string(contents), "private-") {
+		t.Fatal("login inputs or session credentials persisted in plaintext")
 	}
 	detail := req(t, http.MethodGet, srv.URL+"/plugin-connections/nas", nil)
 	text, _ := io.ReadAll(detail.Body)
@@ -173,7 +174,7 @@ auth:
 	if err := st.CreateSession(ctx, &store.Session{ID: "chat", Provider: "mock", Model: "mock"}); err != nil {
 		t.Fatal(err)
 	}
-	fresh := plugin.NewService(home, config.NewManager(home)).WithSessionConnections(st)
+	fresh := plugin.NewService(home, config.NewManager(home).WithCredentialCipher(credentialtest.Cipher{})).WithSessionConnections(st)
 	binding, err := fresh.ResolveEndpoint(ctx, "chat", "appliance_api", "")
 	if err != nil {
 		t.Fatal(err)

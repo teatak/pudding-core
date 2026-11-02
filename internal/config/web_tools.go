@@ -15,7 +15,7 @@ const webToolsFile = "web.yaml"
 
 type WebToolProviderView struct {
 	Name      string `json:"name"`
-	APIKey    string `json:"apiKey,omitempty"`
+	APIKey    string `json:"-"` // Internal execution only; settings responses expose APIKeySet.
 	APIKeySet bool   `json:"apiKeySet"`
 }
 

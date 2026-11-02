@@ -8,7 +8,7 @@ import (
 func TestWebToolsSaveAndSelectionAreIndependent(t *testing.T) {
 	ctx := context.Background()
 	home := t.TempDir()
-	m := NewManager(home)
+	m := newTestManager(home)
 	if err := m.Prepare(); err != nil {
 		t.Fatal(err)
 	}
@@ -40,7 +40,7 @@ func TestWebToolsSaveAndSelectionAreIndependent(t *testing.T) {
 	patch(WebToolsUpdate{SearchProvider: &selected}, "deepseek", "deepseek")
 
 	// Restarting retains both credentials and the shared selection.
-	m = NewManager(home)
+	m = newTestManager(home)
 	for _, feature := range []string{"search", "fetch"} {
 		name, key, err := m.ResolveWebTool(ctx, feature)
 		wantName, wantKey := "deepseek", "ds-key"
@@ -69,7 +69,7 @@ func TestWebToolsSaveAndSelectionAreIndependent(t *testing.T) {
 }
 
 func TestWebToolsLegacyTavilyConfig(t *testing.T) {
-	m := NewManager(t.TempDir())
+	m := newTestManager(t.TempDir())
 	if err := m.Prepare(); err != nil {
 		t.Fatal(err)
 	}

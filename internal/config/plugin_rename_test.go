@@ -18,7 +18,7 @@ func TestStudioEnablementMigratesAndCurrentValueWins(t *testing.T) {
 		{"current disabled", "    studio: true\n    artifacts: false\n", false},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			m := NewManager(t.TempDir())
+			m := newTestManager(t.TempDir())
 			if err := m.Prepare(); err != nil {
 				t.Fatal(err)
 			}

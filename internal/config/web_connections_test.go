@@ -13,7 +13,7 @@ import (
 func TestWebConnectionsMigrationPreservesSelectionsAndDoesNotResurrectDeletedKeys(t *testing.T) {
 	ctx := context.Background()
 	home := t.TempDir()
-	m := NewManager(home)
+	m := newTestManager(home)
 	if err := m.Prepare(); err != nil {
 		t.Fatal(err)
 	}
@@ -56,7 +56,7 @@ func TestWebConnectionsMigrationPreservesSelectionsAndDoesNotResurrectDeletedKey
 	if err := m.DeletePluginConnection(ctx, bindings["active"]); err != nil {
 		t.Fatal(err)
 	}
-	m = NewManager(home)
+	m = newTestManager(home)
 	if err := m.Prepare(); err != nil {
 		t.Fatal(err)
 	}
@@ -72,7 +72,7 @@ func TestWebConnectionsMigrationPreservesSelectionsAndDoesNotResurrectDeletedKey
 
 func TestStandardConnectionsAndBindingsKeepSavingSelectionAndEnablementIndependent(t *testing.T) {
 	ctx := context.Background()
-	m := NewManager(t.TempDir())
+	m := newTestManager(t.TempDir())
 	if err := m.Prepare(); err != nil {
 		t.Fatal(err)
 	}
@@ -138,7 +138,7 @@ func TestStandardConnectionsAndBindingsKeepSavingSelectionAndEnablementIndepende
 
 func TestWebMigrationKeepsLegacyKeyWhenStandardProviderAlreadyExists(t *testing.T) {
 	ctx := context.Background()
-	m := NewManager(t.TempDir())
+	m := newTestManager(t.TempDir())
 	if err := m.Prepare(); err != nil {
 		t.Fatal(err)
 	}

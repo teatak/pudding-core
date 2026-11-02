@@ -40,7 +40,7 @@ Core requests Gmail read/send and account identity scopes. Existing read-only to
 
 ## Connection Fields
 
-Field definitions and injection examples are maintained in [Hub](https://github.com/teatak/pudding-hub/blob/main/docs/plugin-development.md#connection-fields-and-injection). Connection detail APIs include configured values while list APIs do not. Managed session credentials are redacted; the model must not read private connection configuration through package file scope.
+Field definitions and injection examples are maintained in [Hub](https://github.com/teatak/pudding-hub/blob/main/docs/plugin-development.md#connection-fields-and-injection). Connection detail APIs return only non-secret fields and `secretFieldsSet`; list APIs omit field values. Token/password values and managed session credentials are never returned. The model must not read private connection configuration through package file scope.
 
 ## Token Exchange Authentication
 
@@ -77,3 +77,84 @@ The HTTP login is bounded to 15 seconds and 64 KiB without redirects. The host p
 Protocol 53 adds `endpointInsecureTLS?: Record<string, boolean>` to connection write, login and OAuth-start requests and detail responses; configuration stores `endpoint_insecure_tls`. Only configurable HTTPS REST/GraphQL endpoints may opt in. Omission preserves an exception only while the effective URL remains unchanged; `{}` clears it. A default-address exception stores that effective address explicitly so a plugin upgrade cannot redirect it to another server.
 
 Login, REST/GraphQL, schema discovery and Core widget requests share a scoped client helper. Strict/insecure transports have separate pools, do not change global TLS behavior and do not follow redirects. OAuth/token-exchange URLs and browser navigation do not inherit exceptions. URL/trust-policy changes invalidate schema caches and saved connection grants. Managed credentials are redacted from textual responses, URLs, echoed headers/JSON and network errors; outgoing requests still receive their actual credentials.
+
+
+## Encrypted connection credentials (protocol 56)
+
+`config/plugin-connections.yaml` version 2 stores public metadata, account identity,
+bindings and an opaque `credential_ref`. The corresponding immutable record in
+`credentials/plugins/` encrypts access/refresh tokens, API tokens, passwords and
+all connection fields, including credentials for plugins that are no longer
+installed. Non-secret fields are encrypted too so storage does not depend on a
+manifest being present. Synology-style session login persists only declared session
+outputs (such as SID and CSRF token); login passwords and OTP inputs stay transient.
+Model-provider API keys use the same native cipher in a separate `providers`
+namespace as of protocol 57. Literal secrets embedded in MCP/package configuration
+are outside this migration.
+
+Desktop supplies the cipher through an authenticated loopback bridge described by
+`run/plugin-credentials.json` (0600, separate random token, never sent to renderers).
+It uses Electron safeStorage and rejects unavailable encryption or Linux
+`basic_text`. The encrypted envelope is scoped to its purpose and home; the record
+is bound to the connection ID. There is no file-based master key or plaintext
+fallback. Core re-reads the bridge descriptor so a Desktop restart can reconnect.
+Desktop starts the bridge before attaching/starting Core, and keeps it available
+until its managed daemon stops. Standalone Core without a native host bridge can
+use non-credential features but cannot read/write secret-bearing connections.
+
+Legacy connections migrate on first access. Encryption and decrypt verification
+precede the config replacement. Files use restricted permissions; record data is
+flushed before the config's atomic rename, and Unix directory entries are synced.
+Old ciphertext is pruned only after the new config commits. A failed encryption or
+pre-commit write leaves the previous snapshot intact; interrupted writes may leave
+encrypted orphans, collected on a later successful write. Corrupt/missing records
+fail explicitly. Migration preserves connection IDs, account data, timestamps and
+bindings; OAuth refresh and session re-login use the same write path.
+
+`GET /plugin-connections/:id` returns `tokenSet` and
+`secretFieldsSet: Record<string, boolean>` without stored token/password/secret
+values. Blank secret edits preserve existing values. `clearSecretFields: string[]`
+on PUT explicitly clears optional secret fields; clearing required/unknown/public
+fields or combining clear with a replacement is rejected. Session outputs can only
+be replaced by successful login. The legacy `/tools/web` API likewise returns only
+`apiKeySet`. Credential-store unavailability returns 503
+`credential_storage_unavailable`, without raw native errors.
+
+Back up both the connection config and encrypted records. They remain dependent on
+the original OS credential store, Desktop encryption identity and home path; moving
+to another machine/profile/path may require reconnecting accounts. Do not downgrade
+to a Core version that writes the old plaintext format. Successful migration does
+not erase old external backups. Encryption protects stored files, not a process
+that already has access to the same OS account or credentials in memory.
+
+## Native Email adapter (Plugin API 1.2 / protocol 58)
+
+A REST endpoint with `adapter: email` delegates to the host IMAP/SMTP client;
+URL, headers, platform overrides and commands are disallowed. The connection
+uses Basic credentials with method `icloud`, `gmail` or `custom`. Presets pin
+server addresses. Custom connections supply `imapHost`, `imapPort`,
+`imapSecurity`, `smtpHost`, `smtpPort`, `smtpSecurity` (`tls` or `starttls`), with
+optional `imapUsername`, `smtpUsername`, and secret `smtpPassword` overrides.
+All passwords use the existing encrypted credential store. TLS verification
+cannot be disabled. Saving verifies both IMAP and SMTP authentication without
+sending a message, then commits only if the prior connection is unchanged.
+
+The verified account ID hashes normalized IMAP host/port/login. Password
+rotation preserves grants and local drafts; switching mailboxes requires a new
+connection and explicit selection. Every request after `/profile` supplies its
+`mailboxID` and `configRevision`; the widget API also checks the revision after
+I/O. Cached reads include both values. IMAP IDs contain folder, UIDVALIDITY and
+UID, so server UID resets reject old IDs. IMAP reads are read-only with PEEK.
+Lists fetch envelopes only; text parts are fetched on demand (64 KiB limit),
+HTML becomes inert text, and attachments return metadata only. Searches scan
+at most 5,000 UID positions per page; an empty page can have a continuation.
+
+The tool-only `/send` fixes the sender to the connection, validates recipients,
+and supports plain text, cc/bcc and In-Reply-To. It makes one SMTP attempt.
+`email_send_uncertain` must never trigger automatic retries. Acceptance means
+SMTP accepted the message, not guaranteed delivery. Sent-copy behavior belongs
+to the server; the adapter does not append another copy. The Email Board only
+persists local card metadata, notes and draft text, without caching full mail
+or changing server mail. See the Hub Email guide for provider setup/migration.
+
+Plugin API 1.3 / protocol 59 extends the host presets with `qq`, `163`, `126`, `yahoo`, and `fastmail`. These use pinned TLS servers and the account address for both logins by default. Advertised IMAP ID support identifies the client before login for provider compatibility.

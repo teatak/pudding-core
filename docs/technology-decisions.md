@@ -118,7 +118,9 @@ Engine 和 API 不再自行发布返回的持久事件，避免并发调用方�
 ## 9. 安全
 
 - daemon 只监听 loopback，请求按启动 token 认证；Electron 启动页面注入连接信息，前端读取后清理地址栏。
-- provider API key 当前保存在本地 YAML，文件权限 0600；不能描述为已接入系统 Keychain。
+- provider API key 和插件连接凭据通过 Electron `safeStorage` 使用系统保护的密钥加密；`profiles.yaml` / `plugin-connections.yaml` v2 只保存 `credential_ref`，密文分别存于 `credentials/providers/` / `credentials/plugins/`。不同命名空间独立清理，记录绑定配置 ID。编辑 API 只返回 `apiKeySet` / `tokenSet` 等状态，不返回已保存的秘密。
+- 旧明文配置首次访问时迁移：加密并验证成功后原子替换配置，再清理旧密文；失败不回退到明文写入。后台模型请求和模型目录请求按需读取密钥；空 API Key 更新保留旧值，非空替换，删除配置清理其密文。系统加密桥不可用返回 `503 credential_storage_unavailable`；仅包含无密钥本地模型的配置不需要凭据桥。
+- 模型配置备份需同时包含 `config/profiles.yaml` 和 `credentials/providers/`，并依赖原系统凭据库、桌面身份及数据目录路径；跨机器／系统用户／路径迁移可能需要重新填写密钥。不要用旧版本覆盖 v2 配置；迁移不会抹除外部旧备份。
 - 模式、插件加载、项目目录和工具审批是不同边界。plugin load 不直接授予文件目录或操作权限。
 - Code CLI 的 Ask / Auto / Full、host 请求和授权复用以 [沙箱说明](code-cli-sandbox-design.md)及当前 engine/tool 策略为准。
 

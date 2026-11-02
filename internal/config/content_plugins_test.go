@@ -19,7 +19,7 @@ func TestContentPluginEnablementSplitsOnce(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := context.Background()
 			home := t.TempDir()
-			m := NewManager(home)
+			m := newTestManager(home)
 			if err := m.Prepare(); err != nil {
 				t.Fatal(err)
 			}
@@ -45,7 +45,7 @@ func TestContentPluginEnablementSplitsOnce(t *testing.T) {
 			if err := m.DeletePluginEnablement(ctx, "sheet-authoring"); err != nil {
 				t.Fatal(err)
 			}
-			got, err = NewManager(home).ListPluginEnablement(ctx)
+			got, err = newTestManager(home).ListPluginEnablement(ctx)
 			if err != nil {
 				t.Fatal(err)
 			}

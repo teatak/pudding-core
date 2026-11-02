@@ -569,3 +569,14 @@ func TestCatalogUpdatesPreserveSourceAndRejectCollisions(t *testing.T) {
 		t.Fatalf("catalog replaced a local plugin: %v", err)
 	}
 }
+
+func TestEmailAdapterEndpointContract(t *testing.T) {
+	if err := ValidateEndpoint(Endpoint{Kind: "rest", Adapter: "email"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range []Endpoint{{Kind: "rest", Adapter: "unknown"}, {Kind: "graphql", Adapter: "email"}, {Kind: "rest", Adapter: "email", URL: "https://example.org"}, {Kind: "rest", Adapter: "email", Headers: map[string]string{"Authorization": "x"}}, {Kind: "rest", Adapter: "email", URLConfig: &EndpointURLConfig{Label: "Host"}}} {
+		if err := ValidateEndpoint(e); err == nil {
+			t.Fatalf("accepted conflicting adapter: %+v", e)
+		}
+	}
+}

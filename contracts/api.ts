@@ -484,7 +484,6 @@ export const providerProfile = z.object({
   group: z.string().optional(),
   protocol: providerProtocol,
   baseURL: z.string(),
-  apiKey: z.string().optional(),
   apiKeySet: z.boolean(),
   // 配置的可选模型清单;选择器只显示这里的内容,没有默认模型语义。
   models: z.array(providerModel),
@@ -1201,6 +1200,7 @@ export const pluginEndpointURLConfig = z.object({
 });
 
 export const pluginEndpoint = z.object({
+  adapter: z.literal("email").optional(),
   widgetWrites:z.boolean().optional(),
   kind: z.enum(["rest", "graphql", "mcp"]),
   transport: z.enum(["stdio", "streamable_http"]).optional(),
@@ -1377,12 +1377,11 @@ export const pluginConnection = z.object({
   reauthorizationRequired: z.boolean().optional(),
   header: z.string().optional(),
   fields: z.record(z.string(), z.string()).optional(),
+  secretFieldsSet: z.record(z.string(), z.boolean()).optional(),
   endpointURLs: z.record(z.string(), z.string()).optional(),
   endpointInsecureTLS: z.record(z.string(), z.boolean()).optional(),
   prefix: z.string().optional(),
-  token: z.string().optional(),
   username: z.string().optional(),
-  password: z.string().optional(),
   createdAt: z.string().optional(),
   updatedAt: z.string().optional(),
 });

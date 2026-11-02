@@ -22,6 +22,16 @@ require (
 	mvdan.cc/sh/v3 v3.13.1
 )
 
+require github.com/emersion/go-imap-id v0.0.0-20190926060100-f94a56b9ecde
+
+require (
+	github.com/emersion/go-imap v1.2.1
+	github.com/emersion/go-message v0.18.2
+	github.com/emersion/go-sasl v0.0.0-20200509203442-7bfe0ed36a21 // indirect
+	golang.org/x/net v0.56.0
+	golang.org/x/text v0.39.0 // indirect
+)
+
 require (
 	github.com/gen2brain/shm v0.1.0 // indirect
 	github.com/godbus/dbus/v5 v5.2.2 // indirect

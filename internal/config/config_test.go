@@ -14,7 +14,7 @@ import (
 
 func TestManagerPersistsSettingsAndProfiles(t *testing.T) {
 	home := t.TempDir()
-	m := NewManager(home)
+	m := newTestManager(home)
 	if err := m.Prepare(); err != nil {
 		t.Fatal(err)
 	}
@@ -145,7 +145,7 @@ func TestManagerPersistsSettingsAndProfiles(t *testing.T) {
 
 func TestManagerPersistsPluginEnablement(t *testing.T) {
 	home := t.TempDir()
-	manager := NewManager(home)
+	manager := newTestManager(home)
 	if err := manager.Prepare(); err != nil {
 		t.Fatal(err)
 	}
@@ -157,7 +157,7 @@ func TestManagerPersistsPluginEnablement(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	reloaded := NewManager(home)
+	reloaded := newTestManager(home)
 	enabled, err := reloaded.ListPluginEnablement(ctx)
 	if err != nil {
 		t.Fatal(err)
@@ -192,7 +192,7 @@ func TestManagerPersistsPluginEnablement(t *testing.T) {
 
 func TestManagerPersistsSettingsAndUserPrompt(t *testing.T) {
 	home := t.TempDir()
-	m := NewManager(home)
+	m := newTestManager(home)
 	if err := m.Prepare(); err != nil {
 		t.Fatal(err)
 	}
@@ -242,7 +242,7 @@ func TestManagerPersistsSettingsAndUserPrompt(t *testing.T) {
 		!strings.Contains(settingsYAML, "show_preview_versions: true") {
 		t.Fatalf("expected settings in settings.yaml:\n%s", settingsYAML)
 	}
-	reloaded := NewManager(home)
+	reloaded := newTestManager(home)
 	reloadedSettings, err := reloaded.Settings(ctx)
 	if err != nil {
 		t.Fatal(err)
@@ -287,7 +287,7 @@ func TestManagerPersistsSettingsAndUserPrompt(t *testing.T) {
 
 // The system prompt comes from <home>/pudding.md, never from a setting.
 func TestManagerRejectsUnknownSettings(t *testing.T) {
-	m := NewManager(t.TempDir())
+	m := newTestManager(t.TempDir())
 	if err := m.Prepare(); err != nil {
 		t.Fatal(err)
 	}
@@ -298,7 +298,7 @@ func TestManagerRejectsUnknownSettings(t *testing.T) {
 
 func TestManagerRejectsInvalidEditorSettings(t *testing.T) {
 	home := t.TempDir()
-	m := NewManager(home)
+	m := newTestManager(home)
 	if err := m.Prepare(); err != nil {
 		t.Fatal(err)
 	}
@@ -325,7 +325,7 @@ func TestManagerRejectsInvalidEditorSettings(t *testing.T) {
 
 func TestManagerResetSettingsOnlyRewritesSettingsYAML(t *testing.T) {
 	home := t.TempDir()
-	m := NewManager(home)
+	m := newTestManager(home)
 	if err := m.Prepare(); err != nil {
 		t.Fatal(err)
 	}
@@ -405,7 +405,7 @@ func TestManagerResetSettingsOnlyRewritesSettingsYAML(t *testing.T) {
 
 func TestManagerResetAudioOnlyRewritesAudioYAML(t *testing.T) {
 	home := t.TempDir()
-	m := NewManager(home)
+	m := newTestManager(home)
 	if err := m.Prepare(); err != nil {
 		t.Fatal(err)
 	}
@@ -475,7 +475,7 @@ func TestManagerResetReportsWriteErrors(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			home := t.TempDir()
-			m := NewManager(home)
+			m := newTestManager(home)
 			if err := m.Prepare(); err != nil {
 				t.Fatal(err)
 			}
@@ -495,7 +495,7 @@ func TestManagerResetReportsWriteErrors(t *testing.T) {
 
 func TestManagerPersistsWebTools(t *testing.T) {
 	home := t.TempDir()
-	m := NewManager(home)
+	m := newTestManager(home)
 	if err := m.Prepare(); err != nil {
 		t.Fatal(err)
 	}
@@ -547,8 +547,8 @@ func TestManagerPersistsWebTools(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(b), "token: tvly-secret") || !strings.Contains(string(b), "method_id: tavily") {
-		t.Fatalf("expected tavily config in web.yaml:\n%s", b)
+	if strings.Contains(string(b), "tvly-secret") || !strings.Contains(string(b), "credential_ref:") || !strings.Contains(string(b), "method_id: tavily") {
+		t.Fatal("expected encrypted tavily credential reference")
 	}
 
 	empty := ""
@@ -607,7 +607,7 @@ func TestWriteYAMLDoesNotFollowPredictableTempSymlink(t *testing.T) {
 func TestToolOutputTextSettingDefaultsOffAndPersists(t *testing.T) {
 	ctx := context.Background()
 	home := t.TempDir()
-	m := NewManager(home)
+	m := newTestManager(home)
 	if err := m.Prepare(); err != nil {
 		t.Fatal(err)
 	}
@@ -618,7 +618,7 @@ func TestToolOutputTextSettingDefaultsOffAndPersists(t *testing.T) {
 	if err := m.SetSettings(ctx, map[string]string{SettingToolOutputTextEnabled: "true"}); err != nil {
 		t.Fatal(err)
 	}
-	reloaded := NewManager(home)
+	reloaded := newTestManager(home)
 	if err := reloaded.Prepare(); err != nil {
 		t.Fatal(err)
 	}

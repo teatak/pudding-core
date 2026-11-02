@@ -200,16 +200,17 @@ const (
 // store 里保留 provider 配置契约是为了让 registry / API / 测试共用。
 // APIKey 存在本地配置中,API 设置视图会显式映射为 apiKey 用于编辑回显。
 type ProviderProfile struct {
-	ID          string          `json:"id" yaml:"-"`
-	DisplayName string          `json:"displayName" yaml:"display_name,omitempty"`
-	Brand       string          `json:"brand,omitempty" yaml:"brand,omitempty"`
-	Group       string          `json:"group,omitempty" yaml:"group,omitempty"`
-	Protocol    string          `json:"protocol" yaml:"protocol"` // openai-compatible | openai-responses | google | ...
-	BaseURL     string          `json:"baseURL" yaml:"base_url,omitempty"`
-	APIKey      string          `json:"-" yaml:"api_key,omitempty"`
-	Models      []ProviderModel `json:"models" yaml:"models"`
-	CreatedAt   time.Time       `json:"createdAt,omitempty" yaml:"-"`
-	UpdatedAt   time.Time       `json:"updatedAt,omitempty" yaml:"-"`
+	CredentialRef string          `json:"-" yaml:"credential_ref,omitempty"`
+	ID            string          `json:"id" yaml:"-"`
+	DisplayName   string          `json:"displayName" yaml:"display_name,omitempty"`
+	Brand         string          `json:"brand,omitempty" yaml:"brand,omitempty"`
+	Group         string          `json:"group,omitempty" yaml:"group,omitempty"`
+	Protocol      string          `json:"protocol" yaml:"protocol"` // openai-compatible | openai-responses | google | ...
+	BaseURL       string          `json:"baseURL" yaml:"base_url,omitempty"`
+	APIKey        string          `json:"-" yaml:"api_key,omitempty"`
+	Models        []ProviderModel `json:"models" yaml:"models"`
+	CreatedAt     time.Time       `json:"createdAt,omitempty" yaml:"-"`
+	UpdatedAt     time.Time       `json:"updatedAt,omitempty" yaml:"-"`
 }
 
 func (p *ProviderProfile) ProfileID() string {

@@ -10,7 +10,7 @@ import (
 func TestWidgetSourcesPersistAndRemainIndependent(t *testing.T) {
 	ctx := context.Background()
 	home := t.TempDir()
-	m := NewManager(home)
+	m := newTestManager(home)
 	first, err := m.WidgetSources(ctx)
 	if err != nil || len(first) != 1 || !first[0].Official {
 		t.Fatalf("initial %+v %v", first, err)
@@ -23,7 +23,7 @@ func TestWidgetSourcesPersistAndRemainIndependent(t *testing.T) {
 	if err != nil || duplicate.ID != added.ID {
 		t.Fatal("duplicate", duplicate, err)
 	}
-	restarted := NewManager(home)
+	restarted := newTestManager(home)
 	saved, err := restarted.WidgetSources(ctx)
 	if err != nil || len(saved) != 2 || saved[1] != added {
 		t.Fatalf("restart %+v %v", saved, err)
@@ -34,7 +34,7 @@ func TestWidgetSourcesPersistAndRemainIndependent(t *testing.T) {
 	if err := restarted.RemoveWidgetSource(ctx, added.ID); err != nil {
 		t.Fatal(err)
 	}
-	saved, err = NewManager(home).WidgetSources(ctx)
+	saved, err = newTestManager(home).WidgetSources(ctx)
 	if err != nil || len(saved) != 1 {
 		t.Fatal("remove not persisted", saved, err)
 	}
@@ -53,7 +53,7 @@ func TestWidgetSourcesPersistAndRemainIndependent(t *testing.T) {
 }
 
 func TestOfficialWidgetIndexReferenceDoesNotAddADuplicateSource(t *testing.T) {
-	m := NewManager(t.TempDir())
+	m := newTestManager(t.TempDir())
 	source, err := m.AddWidgetSource(context.Background(), "https://teatak.github.io/pudding-hub/index.json?source=teatak%2Fpudding-hub")
 	if err != nil || !source.Official || source.URL != OfficialWidgetRegistry {
 		t.Fatal(source, err)

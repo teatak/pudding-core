@@ -88,3 +88,27 @@ func TestExchangedAccessTokenIsRedactedFromProviderEcho(t *testing.T) {
 		t.Fatal("exchanged credential exposed or response changed")
 	}
 }
+
+func TestEmailProfileAndRevisionGuard(t *testing.T) {
+	binding := &plugin.EndpointBinding{Endpoint: plugin.Endpoint{Kind: "rest", Adapter: "email"}, ConfigRevision: "revision-2", Auth: plugin.Auth{Type: "basic", MethodID: "gmail", Username: "user@gmail.com", Password: "private-app-password"}}
+	executor := New(nil)
+	profile := executor.REST(context.Background(), binding, map[string]any{"path": "/profile"})
+	if profile["ok"] != true {
+		t.Fatal(profile)
+	}
+	encoded, _ := json.Marshal(profile)
+	if strings.Contains(string(encoded), binding.Auth.Password) {
+		t.Fatal("password leaked")
+	}
+	body := profile["body_json"].(map[string]any)
+	for _, query := range []map[string]any{{}, {"mailboxID": body["mailboxID"], "configRevision": "revision-1"}, {"mailboxID": "another-mailbox", "configRevision": "revision-2"}} {
+		result := executor.REST(context.Background(), binding, map[string]any{"path": "/messages", "query": query})
+		if result["reason"] != "email_connection_changed" {
+			t.Fatal(result)
+		}
+	}
+	result := executor.REST(context.Background(), binding, map[string]any{"path": "/send", "method": "POST", "query": map[string]any{"mailboxID": body["mailboxID"], "configRevision": "revision-2"}, "body_json": map[string]any{"from": "spoof@example.org"}})
+	if result["reason"] != "email_invalid_message" {
+		t.Fatal(result)
+	}
+}

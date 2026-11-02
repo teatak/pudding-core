@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/teatak/pudding-core/internal/config"
+	"github.com/teatak/pudding-core/internal/credentialstore/credentialtest"
 	"github.com/teatak/pudding-core/internal/engine"
 	"github.com/teatak/pudding-core/internal/event"
 	"github.com/teatak/pudding-core/internal/provider/mock"
@@ -47,7 +48,7 @@ func TestProviderSyncSharesOverlappingRequests(t *testing.T) {
 				}))
 				defer upstream.Close()
 				defer unblock()
-				cfg := &countingProviderSyncConfig{Manager: config.NewManager(t.TempDir())}
+				cfg := &countingProviderSyncConfig{Manager: config.NewManager(t.TempDir()).WithCredentialCipher(credentialtest.Cipher{})}
 				if err := cfg.Prepare(); err != nil {
 					t.Fatal(err)
 				}
@@ -130,7 +131,7 @@ func TestProviderSyncIndependentProfilesAndConnections(t *testing.T) {
 			}))
 			defer upstream.Close()
 			defer unblock()
-			cfg := config.NewManager(t.TempDir())
+			cfg := config.NewManager(t.TempDir()).WithCredentialCipher(credentialtest.Cipher{})
 			if err := cfg.Prepare(); err != nil {
 				t.Fatal(err)
 			}
@@ -222,7 +223,7 @@ func TestProviderSyncConcurrentChanges(t *testing.T) {
 				ms, hub := storetest.New(t), event.NewHub()
 				var cfg engine.ConfigSource = ms
 				if backend == "yaml" {
-					manager := config.NewManager(t.TempDir())
+					manager := config.NewManager(t.TempDir()).WithCredentialCipher(credentialtest.Cipher{})
 					if err := manager.Prepare(); err != nil {
 						t.Fatal(err)
 					}
@@ -299,7 +300,7 @@ func TestProviderSyncPreservesClearedModelName(t *testing.T) {
 			}))
 			defer upstream.Close()
 			homeDir := t.TempDir()
-			cfg := config.NewManager(homeDir)
+			cfg := config.NewManager(homeDir).WithCredentialCipher(credentialtest.Cipher{})
 			if err := cfg.Prepare(); err != nil {
 				t.Fatal(err)
 			}
@@ -342,7 +343,7 @@ func TestProviderSyncPreservesClearedModelName(t *testing.T) {
 				}
 				// Reopen the YAML configuration to verify this is persisted state,
 				// not just a corrected response or in-memory overlay.
-				reloaded, err := config.NewManager(homeDir).GetProviderProfile(context.Background(), "sync-name")
+				reloaded, err := config.NewManager(homeDir).WithCredentialCipher(credentialtest.Cipher{}).GetProviderProfile(context.Background(), "sync-name")
 				if err != nil {
 					t.Fatal(err)
 				}

@@ -837,3 +837,17 @@ func TestAutomaticConnectionSelectionRemainsUnavailable(t *testing.T) {
 		t.Fatal("automatic mode unexpectedly enabled")
 	}
 }
+
+func TestEmailCredentialRotationPreservesGrant(t *testing.T) {
+	c := &Connection{ID: "mail", PluginID: "email", Auth: Auth{Type: "basic", MethodID: "gmail", Username: "user@gmail.com", Password: "old"}, Account: &ConnectionAccount{ID: "mb_verified", Type: "email"}, Fields: map[string]string{"smtpPassword": "old-smtp"}}
+	before := connectionIdentity(c)
+	c.Auth.Password = "new"
+	c.Fields["smtpPassword"] = "new-smtp"
+	if connectionIdentity(c) != before {
+		t.Fatal("credential rotation revoked verified mailbox grant")
+	}
+	c.Account.ID = "mb_other"
+	if connectionIdentity(c) == before {
+		t.Fatal("another mailbox kept grant")
+	}
+}

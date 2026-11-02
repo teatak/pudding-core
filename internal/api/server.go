@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/teatak/cart/v3"
+	"github.com/teatak/pudding-core/internal/credentialstore"
 	"github.com/teatak/pudding-core/internal/attachment"
 	"github.com/teatak/pudding-core/internal/audio/runtimeassets"
 	"github.com/teatak/pudding-core/internal/audio/voice"
@@ -1764,6 +1765,10 @@ func (s *Server) putUserPrompt(c *cart.Context) error {
 }
 
 func (s *Server) fail(c *cart.Context, err error) error {
+	if errors.Is(err, credentialstore.ErrUnavailable) {
+		c.JSON(http.StatusServiceUnavailable, map[string]string{"error": credentialstore.ErrUnavailable.Error()})
+		return nil
+	}
 	if errors.Is(err, widget.ErrIncompatibleSDK) {
 		c.JSON(http.StatusConflict, map[string]string{"error": "widget_sdk_incompatible", "detail": err.Error()})
 		return nil

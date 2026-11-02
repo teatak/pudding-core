@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/teatak/pudding-core/internal/config"
+	"github.com/teatak/pudding-core/internal/credentialstore/credentialtest"
 	"github.com/teatak/pudding-core/internal/plugin"
 	"github.com/teatak/pudding-core/internal/store/storetest"
 )
@@ -16,7 +17,7 @@ import (
 func TestPluginCatalogInstallUpgradeAndRemoveSource(t *testing.T) {
 	home := t.TempDir()
 	st := storetest.New(t)
-	handler := New(nil, st, config.NewManager(home), nil).WithHome(home).WithPlugins(plugin.NewService(home, nil)).Handler("test-token", nil)
+	handler := New(nil, st, config.NewManager(home).WithCredentialCipher(credentialtest.Cipher{}), nil).WithHome(home).WithPlugins(plugin.NewService(home, nil)).Handler("test-token", nil)
 	call := func(method, path string, body any, status int) []byte {
 		t.Helper()
 		data, _ := json.Marshal(body)
@@ -44,7 +45,7 @@ func TestPluginCatalogInstallUpgradeAndRemoveSource(t *testing.T) {
 	install("1.0.0", sourceURL, "external", "2.0.0", 400)
 	install("1.0.0", sourceURL, "external", "1.0.0", 200)
 	// Reopening the config and package service models a daemon restart.
-	handler = New(nil, st, config.NewManager(home), nil).WithHome(home).WithPlugins(plugin.NewService(home, nil)).Handler("test-token", nil)
+	handler = New(nil, st, config.NewManager(home).WithCredentialCipher(credentialtest.Cipher{}), nil).WithHome(home).WithPlugins(plugin.NewService(home, nil)).Handler("test-token", nil)
 	install("2.0.0", sourceURL, "external", "2.0.0", 200)
 	install("9.0.0", "https://other.test/plugins/registry.json", "external", "9.0.0", 409)
 	call("DELETE", "/plugins/sources/"+source.ID, nil, 200)

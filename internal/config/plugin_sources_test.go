@@ -10,7 +10,7 @@ import (
 func TestPluginSourcesPersistAndRemainIndependent(t *testing.T) {
 	ctx := context.Background()
 	home := t.TempDir()
-	m := NewManager(home)
+	m := newTestManager(home)
 	first, err := m.PluginSources(ctx)
 	if err != nil || len(first) != 1 || !first[0].Official {
 		t.Fatalf("initial %+v %v", first, err)
@@ -23,7 +23,7 @@ func TestPluginSourcesPersistAndRemainIndependent(t *testing.T) {
 	if err != nil || duplicate.ID != added.ID {
 		t.Fatal("duplicate", duplicate, err)
 	}
-	restarted := NewManager(home)
+	restarted := newTestManager(home)
 	saved, err := restarted.PluginSources(ctx)
 	if err != nil || len(saved) != 2 || saved[1] != added {
 		t.Fatalf("restart %+v %v", saved, err)
@@ -34,7 +34,7 @@ func TestPluginSourcesPersistAndRemainIndependent(t *testing.T) {
 	if err := restarted.RemovePluginSource(ctx, added.ID); err != nil {
 		t.Fatal(err)
 	}
-	saved, err = NewManager(home).PluginSources(ctx)
+	saved, err = newTestManager(home).PluginSources(ctx)
 	if err != nil || len(saved) != 1 {
 		t.Fatal("remove not persisted", saved, err)
 	}
@@ -53,7 +53,7 @@ func TestPluginSourcesPersistAndRemainIndependent(t *testing.T) {
 }
 
 func TestOfficialPluginIndexReferenceDoesNotAddADuplicateSource(t *testing.T) {
-	m := NewManager(t.TempDir())
+	m := newTestManager(t.TempDir())
 	source, err := m.AddPluginSource(context.Background(), "https://teatak.github.io/pudding-hub/index.json?source=teatak%2Fpudding-hub")
 	if err != nil || !source.Official || source.URL != OfficialPluginRegistry {
 		t.Fatal(source, err)

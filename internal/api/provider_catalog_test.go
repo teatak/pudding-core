@@ -3,12 +3,19 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"strings"
+	"sync/atomic"
 	"testing"
 
+	"github.com/teatak/pudding-core/internal/credentialstore"
 	"github.com/teatak/pudding-core/internal/provider"
+	"github.com/teatak/pudding-core/internal/provider/registry"
 	"github.com/teatak/pudding-core/internal/store"
 )
 
@@ -217,4 +224,78 @@ func TestSyncOpenRouterModels(t *testing.T) {
 
 func float64Ptr(v float64) *float64 {
 	return &v
+}
+
+func TestEncryptedProviderKeyWorksForCatalogAndModelCallsWithoutReturningIt(t *testing.T) {
+	const key = "stored-provider-private-key"
+	var reject atomic.Bool
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer "+key {
+			t.Error("backend did not decrypt saved key")
+		}
+		if reject.Load() {
+			w.WriteHeader(401)
+			fmt.Fprintf(w, `{"error":{"message":"rejected %s"}}`, key)
+			return
+		}
+		if r.URL.Path == "/models" {
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprint(w, `{"data":[{"id":"fixture-model"}]}`)
+			return
+		}
+		if r.URL.Path != "/chat/completions" {
+			t.Error("unexpected model path", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\ndata: [DONE]\n\n")
+	}))
+	defer upstream.Close()
+	srv, _, cfg := newConfigTestServer(t)
+	if err := cfg.PutProviderProfile(context.Background(), &store.ProviderProfile{ID: "encrypted", DisplayName: "Encrypted", Brand: "openrouter", Protocol: "openai-compatible", BaseURL: upstream.URL, APIKey: key}); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{"/providers/encrypted/models", "/providers/encrypted", "/providers"} {
+		resp := req(t, http.MethodGet, srv.URL+path, nil)
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode != 200 || strings.Contains(string(body), key) {
+			t.Fatal("settings leaked key or catalog failed", path, resp.StatusCode)
+		}
+	}
+	client, err := registry.New(cfg).Resolve(context.Background(), "encrypted")
+	if err != nil {
+		t.Fatal(err)
+	}
+	chunks, err := client.Stream(context.Background(), provider.Request{Model: "fixture-model"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := ""
+	for chunk := range chunks {
+		if chunk.Err != nil {
+			t.Fatal(chunk.Err)
+		}
+		text += chunk.Delta
+	}
+	if text != "ok" {
+		t.Fatal("model stream failed")
+	}
+	reject.Store(true)
+	// Sync bypasses the catalog cache. Raw upstream errors must not echo the key.
+	resp := req(t, http.MethodPost, srv.URL+"/providers/encrypted/sync", nil)
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != 502 || strings.Contains(string(body), key) {
+		t.Fatal("catalog error exposed saved key", resp.StatusCode)
+	}
+	cfg.WithCredentialCipher(unavailableCredentialCipher{})
+	resp = req(t, http.MethodGet, srv.URL+"/providers/encrypted/models", nil)
+	body, _ = io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != 503 || !strings.Contains(string(body), "credential_storage_unavailable") {
+		t.Fatal("missing credential store must fail explicitly", resp.StatusCode)
+	}
+	if _, err := registry.New(cfg).Resolve(context.Background(), "encrypted"); !errors.Is(err, credentialstore.ErrUnavailable) {
+		t.Fatal("runtime hid storage failure", err)
+	}
 }

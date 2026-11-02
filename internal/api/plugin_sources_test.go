@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"github.com/teatak/pudding-core/internal/config"
+	"github.com/teatak/pudding-core/internal/credentialstore/credentialtest"
 	"github.com/teatak/pudding-core/internal/store/storetest"
 	"net/http/httptest"
 	"testing"
@@ -12,7 +13,7 @@ import (
 func TestPluginSourcesRoutes(t *testing.T) {
 	home := t.TempDir()
 	st := storetest.New(t)
-	cfg := config.NewManager(home)
+	cfg := config.NewManager(home).WithCredentialCipher(credentialtest.Cipher{})
 	handler := New(nil, st, cfg, nil).WithHome(home).Handler("test-token", nil)
 	call := func(method, path, body, token string, status int) []byte {
 		t.Helper()
