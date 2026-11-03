@@ -1,6 +1,7 @@
 // REST payload 的 web 侧镜像。Go 侧来源:internal/store/store.go(实体)
 // 与 internal/api/server.go(请求/响应);字段名一一对应。
 import { z } from "zod";
+import { iconSpec, iconThemeColor } from "./icon";
 import { studioItem } from "./studio";
 
 // Renderer-owned JSON. New parts and formats do not change the Core protocol.
@@ -363,7 +364,7 @@ export const studioMount = z.object({
   updatedBySessionID: z.string().optional(),
   kind: z.preprocess((v) => (v === "doc" || v === "note" ? "page" : v), z.enum(["page", "sheet", "widget"])),
   title: z.string().optional(),
-  icon: z.string().optional(),
+  icon: studioItem.shape.icon,
   iconColor: z.string().optional(),
   itemID: z.string(),
   revision: z.number().int(),
@@ -381,7 +382,7 @@ export const libraryEntry = z.object({
  id: z.string(), kind: z.enum(["studio", "web"]), sourceSessionID: z.string(),
  savedItemID: z.string().optional(), url: z.string().optional(),
  title: z.string().optional(), createdAt: z.string(), updatedAt: z.string(), favoriteID: z.string().optional(),
- icon: z.string().optional(), iconColor: z.string().optional(),
+ icon: studioItem.shape.icon, iconColor: z.string().optional(),
  itemKind: z.string().optional(), revision: z.number().optional(), sourceSessionTitle: z.string().optional(), sourceSessionAvailable: z.boolean(),
  sourceProjectName: z.string().optional(), available: z.boolean(),
 });
@@ -1250,17 +1251,9 @@ export const pluginToolRef = z.object({
 });
 export type PluginToolRef = z.infer<typeof pluginToolRef>;
 
-export const pluginIconThemeColor = z.object({
-  light: z.string().optional(),
-  dark: z.string().optional(),
-});
+export const pluginIconThemeColor = iconThemeColor;
 export type PluginIconThemeColor = z.infer<typeof pluginIconThemeColor>;
-
-export const pluginIconSpec = z.object({
-  svg: z.string().optional(),
-  color: pluginIconThemeColor.optional(),
-  background: pluginIconThemeColor.optional(),
-});
+export const pluginIconSpec = iconSpec;
 export type PluginIconSpec = z.infer<typeof pluginIconSpec>;
 
 export const pluginSessionLogin = z.object({

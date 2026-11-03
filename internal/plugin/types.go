@@ -4,6 +4,7 @@ package plugin
 
 import (
 	"encoding/json"
+	"github.com/teatak/pudding-core/contracts"
 	"runtime"
 	"strings"
 	"time"
@@ -69,16 +70,8 @@ type Definition struct {
 	DefaultSkillID string              `json:"defaultSkillID,omitempty" yaml:"-"`
 }
 
-type IconSpec struct {
-	SVG        string      `json:"svg,omitempty" yaml:"svg,omitempty"`
-	Color      *ThemeColor `json:"color,omitempty" yaml:"color,omitempty"`
-	Background *ThemeColor `json:"background,omitempty" yaml:"background,omitempty"`
-}
-
-type ThemeColor struct {
-	Light string `json:"light,omitempty" yaml:"light,omitempty"`
-	Dark  string `json:"dark,omitempty" yaml:"dark,omitempty"`
-}
+type IconSpec = contracts.IconSpec
+type ThemeColor = contracts.IconThemeColor
 
 type AuthConfig struct {
 	Required bool         `json:"required,omitempty" yaml:"required,omitempty"`

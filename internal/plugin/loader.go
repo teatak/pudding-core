@@ -558,6 +558,9 @@ func normalizeStringMap(in map[string]string) map[string]string {
 }
 
 func ValidateIcon(icon IconSpec) error {
+	if err := contracts.ValidateIconColors(icon); err != nil {
+		return err
+	}
 	if strings.TrimSpace(icon.SVG) == "" {
 		return errors.New("icon svg is required")
 	}

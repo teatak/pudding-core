@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/teatak/pudding-core/contracts"
 	"net/url"
 	"path/filepath"
 	"sort"
@@ -2198,21 +2199,21 @@ func (s SessionUsageStat) CumulativeTotalTokens() int {
 }
 
 type StudioMount struct {
-	Origin             *WidgetOrigin `json:"origin,omitempty"`
-	ID                 string        `json:"id"`
-	SessionID          string        `json:"sessionID"`
-	SourceSessionID    string        `json:"sourceSessionID,omitempty"`
-	CreatedBySessionID string        `json:"createdBySessionID,omitempty"`
-	UpdatedBySessionID string        `json:"updatedBySessionID,omitempty"`
-	Kind               string        `json:"kind"`
-	Title              string        `json:"title,omitempty"`
-	Icon               string        `json:"icon,omitempty"`
-	IconColor          string        `json:"iconColor,omitempty"`
-	ItemID             string        `json:"itemID"`
-	Revision           int64         `json:"revision"`
-	Visible            bool          `json:"visible"`
-	CreatedAt          time.Time     `json:"createdAt"`
-	UpdatedAt          time.Time     `json:"updatedAt"`
+	Origin             *WidgetOrigin  `json:"origin,omitempty"`
+	ID                 string         `json:"id"`
+	SessionID          string         `json:"sessionID"`
+	SourceSessionID    string         `json:"sourceSessionID,omitempty"`
+	CreatedBySessionID string         `json:"createdBySessionID,omitempty"`
+	UpdatedBySessionID string         `json:"updatedBySessionID,omitempty"`
+	Kind               string         `json:"kind"`
+	Title              string         `json:"title,omitempty"`
+	Icon               contracts.Icon `json:"icon,omitempty"`
+	IconColor          string         `json:"iconColor,omitempty"`
+	ItemID             string         `json:"itemID"`
+	Revision           int64          `json:"revision"`
+	Visible            bool           `json:"visible"`
+	CreatedAt          time.Time      `json:"createdAt"`
+	UpdatedAt          time.Time      `json:"updatedAt"`
 }
 
 // LibraryFavorite refers to one canonical Studio item or a web bookmark.

@@ -19,7 +19,7 @@ type Distribution struct {
 	Channel       string            `json:"channel,omitempty"`
 	Preview       bool              `json:"preview,omitempty"`
 	Title         map[string]string `json:"title"`
-	Icon          string            `json:"icon,omitempty"`
+	Icon          contracts.Icon    `json:"icon,omitempty"`
 	Description   map[string]string `json:"description"`
 	Requires      struct {
 		ProtocolVersion int    `json:"protocolVersion"`
@@ -54,6 +54,9 @@ func DecodeDistribution(data []byte, expectedHash string) (Distribution, string,
 	if d.Requires.ProtocolVersion < policy.Distribution.MinProtocolVersion || d.Requires.ProtocolVersion > contracts.Runtime().ProtocolVersion || !contracts.SupportsVersion(d.Requires.SDKVersion, policy.SDKVersion) {
 		return d, "", errors.New("unsupported widget host requirements")
 	}
+	if spec, _ := d.Icon.Spec(); spec != nil && d.Requires.ProtocolVersion < 62 {
+		return d, "", errors.New("structured widget icons require protocol 62")
+	}
 	if len(d.Title) == 0 || len(d.Title) > 20 || len(d.Description) > 20 || len(d.Channel) > 64 {
 		return d, "", errors.New("invalid widget metadata")
 	}
@@ -67,7 +70,7 @@ func DecodeDistribution(data []byte, expectedHash string) (Distribution, string,
 			return d, "", errors.New("invalid widget description")
 		}
 	}
-	if d.Icon != "" && !ValidIconImage(d.Icon) {
+	if d.Icon != "" && !ValidIcon(d.Icon) {
 		return d, "", errors.New("invalid widget icon")
 	}
 	manifest, sourceHash, err := d.Source.Validate()

@@ -25,3 +25,15 @@ func ValidIconImage(icon string) bool {
 	}
 	return xml.Unmarshal(data, &svg) == nil
 }
+
+// ValidIcon checks the same embedded-image boundary for both supported shapes.
+func ValidIcon(icon contracts.Icon) bool {
+	spec, err := icon.Spec()
+	if err != nil {
+		return false
+	}
+	if spec != nil {
+		return ValidIconImage(spec.SVG)
+	}
+	return ValidIconImage(string(icon))
+}

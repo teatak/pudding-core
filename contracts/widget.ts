@@ -1,7 +1,7 @@
 import { modelOutput } from "./api";
 import { parseVersion } from "./compatibility.mjs";
 import { z } from "zod";
-import { studioItem, studioItemRevision, studioIconImage } from "./studio";
+import { studioItem, studioItemRevision, widgetIcon } from "./studio";
 
 export const widgetHash = z.string().regex(/^[a-f0-9]{64}$/);
 export const widgetPackage = z
@@ -285,7 +285,7 @@ export const widgetRegistry = z.object({
   items: z.array(z.object({
     id: z.string().regex(/^[a-zA-Z0-9_-]+\/[a-zA-Z0-9_.-]+\/widgets\/[a-z][a-z0-9-]{0,63}$/),
     title: z.record(z.string(), z.string()), description: z.record(z.string(), z.string()),
-    icon: studioIconImage.optional(),
+    icon: widgetIcon.optional(),
     releases: z.array(widgetRegistryRelease).max(100),
   }).strict()).max(500),
 }).strict();

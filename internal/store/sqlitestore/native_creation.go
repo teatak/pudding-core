@@ -26,7 +26,7 @@ func prepareStudioCreation(item *store.StudioItem, body any, author store.Conten
 		Kind, Name, NameMode, NameFallback, Icon, IconColor, SourceSessionID string
 		Body                                                                 any
 		Author                                                               store.ContentAuthor
-	}{item.Kind, item.Name, item.NameMode, item.NameFallback, item.Icon, item.IconColor, item.SourceSessionID, body, author})
+	}{item.Kind, item.Name, item.NameMode, item.NameFallback, string(item.Icon), item.IconColor, item.SourceSessionID, body, author})
 	if err != nil {
 		return "", err
 	}

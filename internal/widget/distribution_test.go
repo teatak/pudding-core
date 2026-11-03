@@ -28,27 +28,41 @@ func TestDistributionRejectsTamperingAndUnsupportedHost(t *testing.T) {
 		}
 		return d
 	}
+	structured := func(d *Distribution, svg string) {
+		data, err := json.Marshal(contracts.IconSpec{SVG: svg, Color: &contracts.IconThemeColor{Dark: "#FFFFFF"}, Background: &contracts.IconThemeColor{Light: "#2563EB"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err = json.Unmarshal(data, &d.Icon); err != nil {
+			t.Fatal(err)
+		}
+		d.Requires.ProtocolVersion = 62
+	}
+	embedded := "data:image/svg+xml;base64," + base64.StdEncoding.EncodeToString([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/></svg>`))
 	for _, tc := range []struct {
 		name   string
 		mutate func(*Distribution)
 		ok     bool
 	}{
 		{"valid", func(*Distribution) {}, true},
+		{"structured image", func(d *Distribution) { structured(d, embedded) }, true},
+		{"structured image requires supported host", func(d *Distribution) { structured(d, embedded); d.Requires.ProtocolVersion = 61 }, false},
+		{"structured remote image", func(d *Distribution) { structured(d, "https://bad.test/icon.svg") }, false},
 		{"preview", func(d *Distribution) { d.Version = "1.1.0-preview.1"; d.Channel = "preview"; d.Preview = true }, true},
 		{"invalid channel", func(d *Distribution) { d.Channel = strings.Repeat("x", 65) }, false},
 		{"SVG icon", func(d *Distribution) {
-			d.Icon = "data:image/svg+xml;base64," + base64.StdEncoding.EncodeToString([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/></svg>`))
+			d.Icon = contracts.Icon("data:image/svg+xml;base64," + base64.StdEncoding.EncodeToString([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/></svg>`)))
 		}, true},
 		{"remote icon", func(d *Distribution) { d.Icon = "https://hub.test/icon.svg" }, false},
 		{"bad base64", func(d *Distribution) { d.Icon = "data:image/svg+xml;base64,???" }, false},
 		{"HTML icon", func(d *Distribution) {
-			d.Icon = "data:image/svg+xml;base64," + base64.StdEncoding.EncodeToString([]byte(`<html></html>`))
+			d.Icon = contracts.Icon("data:image/svg+xml;base64," + base64.StdEncoding.EncodeToString([]byte(`<html></html>`)))
 		}, false},
 		{"broken SVG", func(d *Distribution) {
-			d.Icon = "data:image/svg+xml;base64," + base64.StdEncoding.EncodeToString([]byte(`<svg xmlns="http://www.w3.org/2000/svg"><g></svg>`))
+			d.Icon = contracts.Icon("data:image/svg+xml;base64," + base64.StdEncoding.EncodeToString([]byte(`<svg xmlns="http://www.w3.org/2000/svg"><g></svg>`)))
 		}, false},
 		{"large icon", func(d *Distribution) {
-			d.Icon = "data:image/svg+xml;base64," + base64.StdEncoding.EncodeToString([]byte(strings.Repeat(" ", contracts.Widget().Distribution.MaxIconBytes+1)))
+			d.Icon = contracts.Icon("data:image/svg+xml;base64," + base64.StdEncoding.EncodeToString([]byte(strings.Repeat(" ", contracts.Widget().Distribution.MaxIconBytes+1))))
 		}, false},
 		{"old HTML", func(d *Distribution) { d.Kind = "pudding.widget.package" }, false},
 		{"new host", func(d *Distribution) { d.Requires.ProtocolVersion = 999 }, false},

@@ -580,3 +580,21 @@ func TestEmailAdapterEndpointContract(t *testing.T) {
 		}
 	}
 }
+
+func TestPluginIconThemeDefinitions(t *testing.T) {
+	for _, c := range []struct {
+		name  string
+		theme *ThemeColor
+		valid bool
+	}{
+		{"optional", nil, true}, {"one theme", &ThemeColor{Dark: "#fff"}, true}, {"literal", &ThemeColor{Light: "rgb(1 2 3 / 50%)"}, true},
+		{"invalid hex", &ThemeColor{Light: "#12"}, false}, {"URL", &ThemeColor{Light: "url(https://bad.test)"}, false}, {"declaration", &ThemeColor{Dark: "red;display:none"}, false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			err := ValidateIcon(IconSpec{SVG: "assets/icon.svg", Color: c.theme})
+			if (err == nil) != c.valid {
+				t.Fatal(err)
+			}
+		})
+	}
+}

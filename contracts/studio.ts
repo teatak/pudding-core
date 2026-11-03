@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { iconSpec } from "./icon";
 import widgetPolicy from "./widget.json";
 
 // Embedded images are rendered only through <img>, never as inline SVG.
@@ -6,6 +7,10 @@ export const studioIconImage = z.string()
   .max(26 + 4 * Math.ceil(widgetPolicy.distribution.maxIconBytes / 3))
   .regex(/^data:image\/svg\+xml;base64,(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/)
   .min(30);
+
+export const widgetIcon = z.union([studioIconImage, iconSpec.extend({ svg: studioIconImage })]);
+export const studioIcon = z.union([z.string(), iconSpec.extend({ svg: studioIconImage })]);
+export type StudioIcon = z.infer<typeof studioIcon>;
 
 // Content addresses of item versions.
 export const itemHash = z.string().regex(/^[a-f0-9]{64}$/);
@@ -17,7 +22,7 @@ export const studioItem = z.object({
   name: z.string(),
   nameMode: z.enum(["auto", "manual"]).optional(),
   nameFallback: z.string().optional(),
-  icon: z.string().optional(),
+  icon: studioIcon.optional(),
   iconColor: z.string().optional(),
   sourceSessionID: z.string().optional(),
   revision: z.number().int(),

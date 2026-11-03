@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"errors"
+	"github.com/teatak/pudding-core/contracts"
 	"net/http"
 	"net/url"
 	"strings"
@@ -14,12 +15,12 @@ import (
 
 type libraryEntry struct {
 	store.LibraryFavorite
-	FavoriteID string    `json:"favoriteID,omitempty"`
-	Icon       string    `json:"icon,omitempty"`
-	IconColor  string    `json:"iconColor,omitempty"`
-	ItemKind   string    `json:"itemKind,omitempty"`
-	Revision   int64     `json:"revision,omitempty"`
-	UpdatedAt  time.Time `json:"updatedAt"`
+	FavoriteID string         `json:"favoriteID,omitempty"`
+	Icon       contracts.Icon `json:"icon,omitempty"`
+	IconColor  string         `json:"iconColor,omitempty"`
+	ItemKind   string         `json:"itemKind,omitempty"`
+	Revision   int64          `json:"revision,omitempty"`
+	UpdatedAt  time.Time      `json:"updatedAt"`
 	librarySource
 	Available bool `json:"available"`
 }

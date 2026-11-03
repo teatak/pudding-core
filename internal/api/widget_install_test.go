@@ -28,6 +28,15 @@ func distributionFixture(t *testing.T, version, source string) map[string]any {
 	return map[string]any{"kind": "pudding.widget.source-package", "schemaVersion": 2, "id": "test/hub/widgets/todo", "version": version, "title": map[string]string{"en": "Todo"}, "description": map[string]string{"en": "Shared list"}, "requires": map[string]any{"protocolVersion": 18, "sdkVersion": "1"}, "source": widget.Package{Files: files}, "fileHashes": hashes}
 }
 func TestWidgetInstallUpgradeProtectsEditsAndData(t *testing.T) {
+	for _, structured := range []bool{false, true} {
+		name := "legacy"
+		if structured {
+			name = "structured"
+		}
+		t.Run(name, func(t *testing.T) { exerciseWidgetIconInstall(t, structured) })
+	}
+}
+func exerciseWidgetIconInstall(t *testing.T, structured bool) {
 	st := storetest.New(t)
 	home := t.TempDir()
 	handler := New(nil, st, st, nil).WithHome(home).Handler("fixture-token", nil)
@@ -62,7 +71,17 @@ func TestWidgetInstallUpgradeProtectsEditsAndData(t *testing.T) {
 		return w
 	}
 	pkg := distributionFixture(t, "1.0.0", "export default ()=> <p>One</p>")
-	icon := "data:image/svg+xml;base64," + base64.StdEncoding.EncodeToString([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/></svg>`))
+	icon := contracts.Icon("data:image/svg+xml;base64," + base64.StdEncoding.EncodeToString([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/></svg>`)))
+	if structured {
+		data, err := json.Marshal(contracts.IconSpec{SVG: string(icon), Color: &contracts.IconThemeColor{Light: "#FFFFFF"}, Background: &contracts.IconThemeColor{Light: "#2563EB", Dark: "#1D4ED8"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err = json.Unmarshal(data, &icon); err != nil {
+			t.Fatal(err)
+		}
+		pkg["requires"].(map[string]any)["protocolVersion"] = 62
+	}
 	pkg["icon"] = icon
 	pkg["title"] = map[string]string{"en": "Todo", "zh-CN": "待办", "zh-TW": "待辦"}
 	w := install(request(pkg, "install", "install-1", nil))
@@ -108,6 +127,9 @@ func TestWidgetInstallUpgradeProtectsEditsAndData(t *testing.T) {
 	next["preview"] = true
 	next["channel"] = "preview"
 	next["icon"] = icon
+	if structured {
+		next["requires"].(map[string]any)["protocolVersion"] = 62
+	}
 	previousActive := w.ActiveRevision
 	w = install(request(next, "upgrade", "upgrade-1", &w))
 	if w.ActiveRevision != previousActive || w.HeadRevision == previousActive || w.Origin.Version != "2.0.0-preview.1" || !w.Origin.Preview {

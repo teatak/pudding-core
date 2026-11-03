@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/teatak/pudding-core/contracts"
 	"github.com/teatak/pudding-core/internal/store"
 )
 
@@ -285,5 +286,43 @@ func TestWidgetLinksRetainOriginalAccounts(t *testing.T) {
 	links, err = s.ListWidgetLinks(ctx, w.ID)
 	if err != nil || len(links) != 0 {
 		t.Fatal("link removal failed", err)
+	}
+}
+
+func TestStructuredStudioIconPersistsWithoutSchemaChange(t *testing.T) {
+	s, path := openTestStore(t)
+	ctx := context.Background()
+	createTestSession(t, s, "structured-icon")
+	var icon contracts.Icon
+	if err := json.Unmarshal([]byte(`{"svg":"data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=","background":{"dark":"#123456"}}`), &icon); err != nil {
+		t.Fatal(err)
+	}
+	w, err := s.CreateStudioItem(ctx, &store.StudioItem{ID: "structured-icon", Kind: store.StudioItemKindWidget, Name: "Icon", Icon: icon})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.OpenStudioItem(ctx, "structured-icon", w.ID, "view"); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	s, err = Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	item, err := s.GetStudioItem(ctx, w.ID)
+	if err != nil || item.Icon != icon {
+		t.Fatalf("stored icon lost: %+v %v", item, err)
+	}
+	mounts, err := s.ListStudioMounts(ctx, "structured-icon")
+	if err != nil || len(mounts) != 1 || mounts[0].Icon != icon {
+		t.Fatalf("mount icon lost: %+v %v", mounts, err)
+	}
+	item.Icon = "star"
+	item, err = s.UpdateStudioItem(ctx, item, item.Revision)
+	if err != nil || item.Icon != "star" {
+		t.Fatal("manual icon did not replace object", err)
 	}
 }

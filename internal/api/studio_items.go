@@ -18,8 +18,8 @@ import (
 
 var itemIconID = regexp.MustCompile(`^[a-z][a-z0-9-]{0,47}$`)
 
-func validItemAppearance(icon, color string) bool {
-	if icon != "" && !itemIconID.MatchString(icon) && !widget.ValidIconImage(icon) {
+func validItemAppearance(icon contracts.Icon, color string) bool {
+	if icon != "" && !itemIconID.MatchString(string(icon)) && !widget.ValidIcon(icon) {
 		return false
 	}
 	switch color {
@@ -126,7 +126,7 @@ func (s *Server) createStudioItem(c *cart.Context) error {
 		Kind            string            `json:"kind"`
 		Body            json.RawMessage   `json:"body,omitempty"`
 		SourceSessionID string            `json:"sourceSessionID,omitempty"`
-		Icon            string            `json:"icon,omitempty"`
+		Icon            contracts.Icon    `json:"icon,omitempty"`
 		IconColor       string            `json:"iconColor,omitempty"`
 		InitialFiles    map[string]string `json:"initialFiles,omitempty"`
 	}
@@ -237,9 +237,9 @@ func (s *Server) getStudioItem(c *cart.Context) error {
 func (s *Server) patchStudioItemAppearance(c *cart.Context) error {
 	id, _ := c.Param("itemID")
 	var req struct {
-		ExpectedRevision int64   `json:"expectedRevision"`
-		Icon             *string `json:"icon"`
-		IconColor        *string `json:"iconColor"`
+		ExpectedRevision int64           `json:"expectedRevision"`
+		Icon             *contracts.Icon `json:"icon"`
+		IconColor        *string         `json:"iconColor"`
 	}
 	if err := decodeStudioRequest(c, &req); err != nil {
 		return badRequest(c, err.Error())

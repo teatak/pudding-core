@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/teatak/pudding-core/contracts"
 	"time"
 )
 
@@ -38,7 +39,7 @@ type StudioItem struct {
 	Name            string            `json:"name"`
 	NameMode        string            `json:"nameMode,omitempty"`
 	NameFallback    string            `json:"nameFallback,omitempty"`
-	Icon            string            `json:"icon,omitempty"`
+	Icon            contracts.Icon    `json:"icon,omitempty"`
 	IconColor       string            `json:"iconColor,omitempty"`
 	SourceSessionID string            `json:"sourceSessionID,omitempty"`
 	Revision        int64             `json:"revision"`
