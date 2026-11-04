@@ -312,7 +312,9 @@ export const projectGitCommitRequest = projectGitRootRequest.extend({
   stageAll: z.boolean().default(false),
 });
 
-export const projectGitGenerateCommitMessageRequest = projectGitRootRequest;
+export const projectGitGenerateCommitMessageRequest = projectGitRootRequest.extend({
+  language: z.string().trim().max(64).optional(),
+});
 
 export const projectGitGenerateCommitMessageResponse = z.object({
   message: z.string(),

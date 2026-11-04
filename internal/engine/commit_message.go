@@ -10,15 +10,41 @@ import (
 	"github.com/teatak/pudding-core/internal/provider"
 )
 
-const commitMessageSystemPrompt = `You generate concise, high-quality Git commit messages based on provided git diffs and status.
+const commitMessageSystemPromptTemplate = `You generate concise, high-quality Git commit messages based on provided git diffs and status.
 
 Requirements:
 - Follow the Conventional Commits specification (e.g. feat:, fix:, refactor:, chore:, docs:, style:, test:).
 - When applicable, include a scope in parentheses, e.g. feat(widgets): or fix(git):.
 - The description must be concise, accurate, and summarize the intent and key impact of the changes.
-- Write in the dominant language of the changes or comments. If Chinese is used, write the description in Simplified Chinese; otherwise write in English.
+- Write the commit message and description in %s.
 - Do not wrap the message in code blocks, quotes, or markdown backticks.
 - Output ONLY the commit message header (and optional brief bullet points if there are multiple substantial changes), nothing else.`
+
+func resolveCommitMessageLanguage(language string) string {
+	switch strings.ToLower(strings.TrimSpace(language)) {
+	case "zh", "zh-cn", "zh_cn", "simplified chinese", "chinese":
+		return "Simplified Chinese"
+	case "zh-tw", "zh_tw", "zh-hk", "traditional chinese":
+		return "Traditional Chinese"
+	case "ja", "japanese":
+		return "Japanese"
+	case "ko", "korean":
+		return "Korean"
+	case "de", "german":
+		return "German"
+	case "es", "spanish":
+		return "Spanish"
+	case "fr", "french":
+		return "French"
+	case "en", "english":
+		return "English"
+	default:
+		if trimmed := strings.TrimSpace(language); trimmed != "" {
+			return trimmed
+		}
+		return "English"
+	}
+}
 
 const commitMessageUserTemplate = `<git_diff>
 %s
@@ -32,7 +58,7 @@ const (
 	commitMessageMaxDiffBytes    = 64 * 1024
 )
 
-func (e *Engine) GenerateCommitMessage(ctx context.Context, sessionID, diffText string) (string, error) {
+func (e *Engine) GenerateCommitMessage(ctx context.Context, sessionID, diffText, language string) (string, error) {
 	sess, err := e.store.GetSession(ctx, sessionID)
 	if err != nil {
 		return "", err
@@ -57,7 +83,7 @@ func (e *Engine) GenerateCommitMessage(ctx context.Context, sessionID, diffText 
 	cfg := commitMessageConfig(resolved.config)
 	req := provider.Request{
 		Model:  resolved.model,
-		System: commitMessageSystemPrompt,
+		System: fmt.Sprintf(commitMessageSystemPromptTemplate, resolveCommitMessageLanguage(language)),
 		Messages: []provider.Message{
 			{Role: provider.RoleUser, Text: fmt.Sprintf(commitMessageUserTemplate, trimmedDiff)},
 		},

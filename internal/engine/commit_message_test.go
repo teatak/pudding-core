@@ -65,7 +65,7 @@ func TestGenerateCommitMessageWithMock(t *testing.T) {
 		st,
 	)
 
-	got, err := eng.GenerateCommitMessage(ctx, "s", "diff --git a/test.txt b/test.txt\n+hello")
+	got, err := eng.GenerateCommitMessage(ctx, "s", "diff --git a/test.txt b/test.txt\n+hello", "en")
 	if err != nil {
 		t.Fatal(err)
 	}

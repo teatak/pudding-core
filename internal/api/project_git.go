@@ -61,7 +61,8 @@ type projectGitCommitReq struct {
 }
 
 type projectGitGenerateCommitMessageReq struct {
-	RootID string `json:"rootID"`
+	RootID   string `json:"rootID"`
+	Language string `json:"language,omitempty"`
 }
 
 type projectGitGenerateCommitMessageResp struct {
@@ -231,7 +232,7 @@ func (s *Server) generateProjectGitCommitMessage(c *cart.Context) error {
 		return nil
 	}
 
-	message, err := s.engine.GenerateCommitMessage(c.Request.Context(), sessionID, diffText)
+	message, err := s.engine.GenerateCommitMessage(c.Request.Context(), sessionID, diffText, req.Language)
 	if err != nil {
 		return s.fail(c, err)
 	}
