@@ -60,17 +60,20 @@ endpoints:
 			t.Fatal(err)
 		}
 	}
-	checkBlocked := func(session, ref string) {
+	checkBlocked := func(session, ref, reason string) {
 		t.Helper()
 		for _, endpoint := range []string{"accounts_rest", "accounts_graphql"} {
-			_, err := plugins.ResolveEndpoint(ctx, session, endpoint, ref)
+			binding, err := plugins.ResolveEndpoint(ctx, session, endpoint, ref)
 			var required *plugin.EndpointResolveError
-			if !errors.As(err, &required) || required.Reason != "connection_required" || required.PluginID != "accounts" {
-				t.Fatalf("expected unresolved connection: %v", err)
+			if binding != nil || !errors.As(err, &required) || required.Reason != reason || required.PluginID != "accounts" || required.Connection != ref {
+				t.Fatalf("expected %s for %s: %v", reason, endpoint, err)
+			}
+			if ref != "" && (required.Recovery == nil || required.Recovery.Tool != "builtin_plugin_load" || required.Recovery.Arguments["plugin_id"] != "accounts" || required.Recovery.Arguments["connection_id"] != ref) {
+				t.Fatalf("expected explicit selection of %s: %+v", ref, required.Recovery)
 			}
 		}
 	}
-	checkBlocked("one", "")
+	checkBlocked("one", "", "connection_required")
 	save("work")
 	if err := cfg.PutPluginConnection(ctx, &plugin.Connection{ID: "unconfigured", PluginID: "accounts", Auth: plugin.Auth{Type: "bearer", MethodID: "key"}}); err != nil {
 		t.Fatal(err)
@@ -92,8 +95,8 @@ endpoints:
 		t.Fatal("selection metadata", string(raw))
 	}
 	save("personal")
-	checkBlocked("one", "")
-	checkBlocked("one", "work")
+	checkBlocked("one", "", "connection_required")
+	checkBlocked("one", "work", "connection_not_selected")
 	view = decodeJSON[plugin.SessionConnectionView](t, req(t, http.MethodGet, route, nil))
 	if !view.Required || view.ConnectionID != "" {
 		t.Fatal("multiple usable accounts must require selection", view)
@@ -113,8 +116,8 @@ endpoints:
 			t.Fatal(b, err)
 		}
 	}
-	checkBlocked("one", "personal")
-	checkBlocked("two", "work")
+	checkBlocked("one", "personal", "connection_not_selected")
+	checkBlocked("two", "work", "connection_not_selected")
 	// Saving/enablement cannot replace the selection. Disabling still blocks execution.
 	save("third")
 	if _, err := plugins.SetEnabled(ctx, "accounts", false); err != nil {
@@ -141,9 +144,9 @@ endpoints:
 	}
 	cfg.DeletePluginConnection(ctx, "personal")
 	cfg.DeletePluginConnection(ctx, "third")
-	checkBlocked("one", "")
+	checkBlocked("one", "", "connection_required")
 	save("personal")
-	checkBlocked("one", "personal")
+	checkBlocked("one", "personal", "connection_not_selected")
 	if resp := req(t, http.MethodPut, srv.URL+"/sessions/missing/plugins/accounts/connection", map[string]string{"connectionID": "work"}); resp.StatusCode != 404 {
 		t.Fatal(resp.StatusCode)
 	} else {
