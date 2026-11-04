@@ -45,7 +45,7 @@ const (
 	DefaultToolResultCoolingKeepTurns  = 2
 	DefaultCompactTailInputTurns       = 2
 	DefaultCompactAutoThresholdPercent = 80
-	DefaultEditorFontFamily            = "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace"
+	DefaultEditorFontFamily            = "ui-monospace, SFMono-Regular, Menlo, Monaco, Cascadia Code, Consolas, monospace"
 	DefaultEditorFontSize              = 12
 	DefaultEditorLineHeight            = 20
 )
