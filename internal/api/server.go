@@ -324,6 +324,7 @@ func (s *Server) Handler(token string, static http.Handler) http.Handler {
 	app.Route("/sessions/:id/project/git/unstage").POST(s.unstageProjectGit)
 	app.Route("/sessions/:id/project/git/discard").POST(s.discardProjectGit)
 	app.Route("/sessions/:id/project/git/commit").POST(s.commitProjectGit)
+	app.Route("/sessions/:id/project/git/commit/generate").POST(s.generateProjectGitCommitMessage)
 	app.Route("/sessions/:id/project/git/sync").POST(s.syncProjectGit)
 	app.Route("/sessions/:id/project/git/publish").POST(s.publishProjectGit)
 	app.Route("/sessions/:id/project/git/branches").GET(s.listProjectGitBranches).POST(s.createProjectGitBranch)

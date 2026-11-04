@@ -60,6 +60,14 @@ type projectGitCommitReq struct {
 	StageAll         bool   `json:"stageAll"`
 }
 
+type projectGitGenerateCommitMessageReq struct {
+	RootID string `json:"rootID"`
+}
+
+type projectGitGenerateCommitMessageResp struct {
+	Message string `json:"message"`
+}
+
 type projectGitBranchReq struct {
 	ClientRequestID  string `json:"clientRequestID"`
 	ExpectedRevision string `json:"expectedRevision"`
@@ -170,6 +178,68 @@ func (s *Server) commitProjectGit(c *cart.Context) error {
 	return nil
 }
 
+func (s *Server) generateProjectGitCommitMessage(c *cart.Context) error {
+	var req projectGitGenerateCommitMessageReq
+	if err := decode(c, &req); err != nil {
+		return badRequest(c, "invalid json body")
+	}
+	_, repo, ok := s.projectGitRepository(c, req.RootID)
+	if !ok {
+		return nil
+	}
+	sessionID, _ := c.Param("id")
+
+	status, err := projectgit.ReadStatus(c.Request.Context(), repo)
+	if err != nil {
+		return projectGitError(c, err)
+	}
+	if len(status.Files) == 0 {
+		c.JSON(http.StatusOK, projectGitGenerateCommitMessageResp{Message: ""})
+		return nil
+	}
+
+	var diffBuilder strings.Builder
+	hasStaged := status.Staged > 0
+
+	patch, err := projectgit.ReadPatchDiff(c.Request.Context(), repo, hasStaged, projectGitDiffMaxBytes)
+	if err != nil {
+		return projectGitError(c, err)
+	}
+	diffBuilder.WriteString(patch.Patch)
+
+	if !hasStaged {
+		var untrackedFiles []string
+		for _, f := range status.Files {
+			if f.Kind == "untracked" {
+				untrackedFiles = append(untrackedFiles, f.Path)
+			}
+		}
+		if len(untrackedFiles) > 0 {
+			if diffBuilder.Len() > 0 {
+				diffBuilder.WriteString("\n\n")
+			}
+			diffBuilder.WriteString("Untracked new files:\n")
+			for _, p := range untrackedFiles {
+				diffBuilder.WriteString("? " + p + "\n")
+			}
+		}
+	}
+
+	diffText := strings.TrimSpace(diffBuilder.String())
+	if diffText == "" {
+		c.JSON(http.StatusOK, projectGitGenerateCommitMessageResp{Message: ""})
+		return nil
+	}
+
+	message, err := s.engine.GenerateCommitMessage(c.Request.Context(), sessionID, diffText)
+	if err != nil {
+		return s.fail(c, err)
+	}
+
+	c.JSON(http.StatusOK, projectGitGenerateCommitMessageResp{Message: message})
+	return nil
+}
+
 func (s *Server) listProjectGitBranches(c *cart.Context) error {
 	root, repo, ok := s.projectGitRepository(c, c.Request.URL.Query().Get("rootID"))
 	if !ok {
@@ -193,7 +263,9 @@ func (s *Server) createProjectGitBranch(c *cart.Context) error {
 		return nil
 	}
 	sessionID, _ := c.Param("id")
-	status, err := projectgit.CreateBranchOnce(c.Request.Context(), repo, req.Name, projectgit.MutationRequest{ID: req.ClientRequestID, Scope: sessionID, ExpectedRevision: req.ExpectedRevision})
+	status, err := projectgit.CreateBranchOnce(c.Request.Context(), repo, req.Name, projectgit.MutationRequest{
+		ID: req.ClientRequestID, Scope: sessionID, ExpectedRevision: req.ExpectedRevision,
+	})
 	if err != nil {
 		return projectGitError(c, err)
 	}

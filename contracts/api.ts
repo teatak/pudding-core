@@ -312,6 +312,13 @@ export const projectGitCommitRequest = projectGitRootRequest.extend({
   stageAll: z.boolean().default(false),
 });
 
+export const projectGitGenerateCommitMessageRequest = projectGitRootRequest;
+
+export const projectGitGenerateCommitMessageResponse = z.object({
+  message: z.string(),
+});
+export type ProjectGitGenerateCommitMessageResponse = z.infer<typeof projectGitGenerateCommitMessageResponse>;
+
 export const projectGitBranchRequest = projectGitRootRequest.extend({
   clientRequestID: z.string().regex(/^[A-Za-z0-9_-]{1,200}$/).optional(),
   expectedRevision: z.string().regex(/^[a-f0-9]{64}$/).optional(),
