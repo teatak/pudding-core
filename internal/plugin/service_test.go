@@ -454,6 +454,82 @@ func TestLegacyGitHubOAuthRequiresReauthorization(t *testing.T) {
 	}
 }
 
+func TestSessionConnectionErrorsDescribeRequestedAccountWithoutSwitching(t *testing.T) {
+	ctx := context.Background()
+	connections := fakeConnectionStore{items: map[string]*Connection{}}
+	for _, id := range []string{"work", "personal", "unconfigured"} {
+		connections.items[id] = &Connection{ID: id, Name: id, PluginID: "github", Auth: Auth{MethodID: GitHubPATAuthMethodID, Type: AuthTypeBearer, Token: "secret-" + id}}
+	}
+	connections.items["unconfigured"].Auth.Token = ""
+	connections.items["expired"] = &Connection{ID: "expired", PluginID: "github", Auth: Auth{MethodID: "github-oauth", Type: AuthTypeOAuth2, Variant: GitHubAppAuthVariant, AccessToken: "secret-legacy"}}
+	connections.items["unrelated"] = &Connection{ID: "unrelated", PluginID: "another-plugin", Auth: Auth{Type: AuthTypeBearer, Token: "secret-other"}}
+	svc := NewService(writeTestPlugin(t), connections)
+	bindServiceTestConnection(t, svc, "session", "github", "personal")
+	for _, tc := range []struct {
+		ref, reason, status string
+		recovery            bool
+	}{
+		{"work", "connection_not_selected", "available", true},
+		{"missing", "connection_not_found", "", false},
+		{"expired", "connection_reauthorization_required", "reauthorization_required", false},
+		{"unconfigured", "connection_not_configured", "not_configured", false},
+		{"unrelated", "connection_not_found", "", false},
+	} {
+		t.Run(tc.ref, func(t *testing.T) {
+			_, err := svc.ResolveEndpoint(ctx, "session", "github_rest", tc.ref)
+			var detail *EndpointResolveError
+			if !errors.As(err, &detail) || detail.Reason != tc.reason || detail.Connection != tc.ref || detail.CurrentConnectionID != "personal" || len(detail.Connections) != 4 {
+				t.Fatalf("incorrect account diagnostic: %+v %v", detail, err)
+			}
+			found := false
+			for _, choice := range detail.Connections {
+				if choice.ID == "unrelated" {
+					t.Fatal("another plugin's connection leaked")
+				}
+				if choice.ID == tc.ref {
+					found = true
+					if choice.Status != tc.status {
+						t.Fatal(choice)
+					}
+				}
+			}
+			if found != (tc.status != "") {
+				t.Fatal("requested connection missing or invented")
+			}
+			if (detail.Recovery != nil) != tc.recovery {
+				t.Fatalf("incorrect recovery: %+v", detail.Recovery)
+			}
+			if tc.recovery && (detail.Recovery.Tool != "builtin_plugin_load" || detail.Recovery.Arguments["plugin_id"] != "github" || detail.Recovery.Arguments["connection_id"] != "work") {
+				t.Fatal(detail.Recovery)
+			}
+			raw, _ := json.Marshal(detail)
+			if strings.Contains(string(raw), "secret-") {
+				t.Fatal("credentials leaked")
+			}
+			binding, err := svc.ResolveEndpoint(ctx, "session", "github_rest", "")
+			if err != nil || binding.ConnectionID != "personal" {
+				t.Fatal("diagnostic changed the binding", err)
+			}
+		})
+	}
+	// Names remain accepted, but recovery always uses the canonical ID.
+	connections.items["work"].Name = "Work mailbox"
+	_, err := svc.ResolveEndpoint(ctx, "session", "github_rest", "Work mailbox")
+	var detail *EndpointResolveError
+	if !errors.As(err, &detail) || detail.Recovery == nil || detail.Recovery.Arguments["connection_id"] != "work" {
+		t.Fatal(err)
+	}
+	connections.items["unconfigured"].Name = "Work mailbox"
+	_, err = svc.ResolveEndpoint(ctx, "session", "github_rest", "Work mailbox")
+	if !errors.As(err, &detail) || detail.Reason != "connection_ambiguous" || detail.Recovery != nil {
+		t.Fatalf("ambiguous account got a guessed recovery: %+v %v", detail, err)
+	}
+	_, err = svc.ResolveEndpoint(ctx, "session", "github_rest", "work")
+	if !errors.As(err, &detail) || detail.Recovery == nil || detail.Recovery.Arguments["connection_id"] != "work" {
+		t.Fatalf("canonical ID did not disambiguate: %+v %v", detail, err)
+	}
+}
+
 func TestReadyConnectionRefreshesGitHubAppToken(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/oauth/refresh" {

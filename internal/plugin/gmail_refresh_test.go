@@ -222,6 +222,14 @@ func TestGmailSessionRefreshReportsReauthorizationOnlyForInvalidGrant(t *testing
 					if !errors.As(err, &selection) || selection.Reason != "connection_reauthorization_required" {
 						t.Fatal(err)
 					}
+					choices, err := connections.ListPluginConnections(ctx)
+					if err != nil {
+						t.Fatal(err)
+					}
+					detail := requestedSessionConnectionError(def, choices, "gmail-main", selection)
+					if detail.Reason != "connection_reauthorization_required" || detail.Recovery != nil || len(detail.Connections) != 1 || detail.Connections[0].Status != "reauthorization_required" {
+						t.Fatalf("refresh rejection misreported as selectable: %+v", detail)
+					}
 				} else if errors.As(err, &selection) {
 					t.Fatalf("temporary error requested a new connection: %v", err)
 				}

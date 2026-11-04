@@ -30,6 +30,10 @@ Public policy and account switching: [Hub connections](https://github.com/teatak
 
 REST, GraphQL and MCP resolve the same current binding or sole usable connection. Automatic sole resolution does not persist a binding. Cached MCP calls revalidate identity/credentials before execution. Session bindings are SQLite-owned, survive restart, do not propagate to cloned/child sessions, and are deleted with the session. Missing/deleted/recreated identities require a new choice without fallback. Widgets maintain their own explicit resource bindings.
 
+A request's `connection` asserts the account to use; it does not switch the chat binding. For an explicitly requested configured account, `connection_not_selected` includes `currentConnectionID`, the requested `connection`, and a `recovery` object with executable `tool` and `arguments` (`builtin_plugin_load` with `plugin_id` and canonical `connection_id`). The model may select that account according to the user's intent, then retry. Unknown accounts, incomplete configuration, ambiguous names and reauthorization needs have distinct reasons; they do not offer a misleading load recovery. `connections` includes all accounts for that plugin with local configuration status, not just the current selection, and never includes credentials. Endpoint resolution errors report `executed:false`; generating diagnostics never changes the binding or calls the requested endpoint.
+
+Plugin loading does not fetch account-specific business context. For email, the model continues to call `GET /profile` explicitly after selection and use its `mailboxID` and `configRevision` on subsequent requests.
+
 The Web Search & Fetch `single_active` plugin migrates the previous single-provider record into standard Connections. The legacy `web` ID and `/tools/web` projection remain compatible; contradictory provider selections fail atomically, and saving a key alone never changes the active selection.
 
 ## Gmail OAuth

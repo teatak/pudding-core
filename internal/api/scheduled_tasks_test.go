@@ -78,6 +78,15 @@ func TestScheduledTaskHTTPAdmissionScopeAndHistory(t *testing.T) {
 	if response = request("PATCH", "/scheduled-tasks/"+task.ID, `{"revision":0,"enabled":false}`); response.Code != 409 {
 		t.Fatal("stale edit", response.Code)
 	}
+	var conflict struct {
+		Error           string              `json:"error"`
+		CurrentRevision int64               `json:"currentRevision"`
+		Current         store.ScheduledTask `json:"current"`
+		Executed        bool                `json:"executed"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &conflict); err != nil || conflict.Error != "schedule_conflict" || conflict.CurrentRevision != task.Revision || conflict.Current.ID != task.ID || !conflict.Current.Enabled || conflict.Executed {
+		t.Fatalf("conflict details: %s %v", response.Body.String(), err)
+	}
 	response = request("POST", "/scheduled-tasks/"+task.ID+"/runs", `{"requestID":"run"}`)
 	if response.Code != 202 {
 		t.Fatal(response.Code, response.Body.String())

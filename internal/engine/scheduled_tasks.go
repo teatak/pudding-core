@@ -470,7 +470,7 @@ func (e *Engine) scheduledTick(ctx context.Context, now time.Time, offline bool)
 				skip = "busy"
 			}
 		}
-		r, err := e.store.AcceptScheduledTask(ctx, t.ID, store.ScheduledTaskAccept{Revision: t.Revision, Now: now, SkipReason: skip})
+		r, err := e.store.AcceptScheduledTask(ctx, t.ID, store.ScheduledTaskAccept{Revision: t.Revision, ExpectedNextAt: t.NextAt, Now: now, SkipReason: skip})
 		if errors.Is(err, store.ErrNotFound) || errors.Is(err, store.ErrScheduleConflict) {
 			continue
 		}

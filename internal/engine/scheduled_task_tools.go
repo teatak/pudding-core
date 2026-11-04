@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"github.com/teatak/pudding-core/internal/provider"
 	"github.com/teatak/pudding-core/internal/store"
 	"github.com/teatak/pudding-core/internal/tool"
@@ -27,7 +28,15 @@ func (e *Engine) scheduledToolDefinitions(ctx context.Context, sessionID string,
 }
 func (e *Engine) executeScheduledTask(ctx context.Context, sessionID, turnID string, call tool.Call) tool.Result {
 	result := tool.Result{CallID: call.CallID, Name: call.Name}
-	fail := func(err error) tool.Result { result.Content = err.Error(); return result }
+	fail := func(err error) tool.Result {
+		result.Content = err.Error()
+		var conflict *store.ScheduleConflictError
+		if errors.As(err, &conflict) {
+			raw, _ := json.Marshal(conflict.Details())
+			result.Content = string(raw)
+		}
+		return result
+	}
 	if err := ctx.Err(); err != nil {
 		return fail(err)
 	}

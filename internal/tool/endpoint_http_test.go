@@ -440,3 +440,23 @@ func TestEmailToolRejectsResultAfterConnectionChanges(t *testing.T) {
 		t.Fatalf("stale profile escaped: %s", encoded)
 	}
 }
+
+func TestEndpointConnectionRecoveryIsStructured(t *testing.T) {
+	detail := &plugin.EndpointResolveError{
+		Reason: "connection_not_selected", PluginID: "mail", Endpoint: "mail_rest", Connection: "work", CurrentConnectionID: "personal",
+		Connections: []plugin.ConnectionChoice{{ID: "work", Status: "available"}, {ID: "personal", Status: "available"}},
+		Recovery:    &plugin.ConnectionRecovery{Tool: PluginLoad, Arguments: map[string]string{"plugin_id": "mail", "connection_id": "work"}},
+	}
+	payload := endpointResolveError("rest_endpoint", detail)
+	if payload["executed"] != false || payload["currentConnectionID"] != "personal" || payload["connection"] != "work" || payload["recovery"] != detail.Recovery {
+		t.Fatalf("connection diagnostic dropped fields: %+v", payload)
+	}
+	args, err := json.Marshal(detail.Recovery.Arguments)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request, err := DecodePluginLoadRequest(args)
+	if err != nil || request.PluginID != "mail" || request.ConnectionID != "work" {
+		t.Fatalf("recovery is not executable: %+v %v", request, err)
+	}
+}

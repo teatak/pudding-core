@@ -63,7 +63,7 @@ func endpointResolveError(kind string, err error) map[string]any {
 	reason := "endpoint_unavailable"
 	var resolveErr *plugin.EndpointResolveError
 	if errors.As(err, &resolveErr) {
-		out := map[string]any{"ok": false, "reason": resolveErr.Reason, "error": resolveErr.Error()}
+		out := map[string]any{"ok": false, "executed": false, "reason": resolveErr.Reason, "error": resolveErr.Error()}
 		if resolveErr.PluginID != "" {
 			out["pluginID"] = resolveErr.PluginID
 		}
@@ -75,6 +75,12 @@ func endpointResolveError(kind string, err error) map[string]any {
 		}
 		if len(resolveErr.Connections) > 0 {
 			out["connections"] = resolveErr.Connections
+		}
+		if resolveErr.CurrentConnectionID != "" {
+			out["currentConnectionID"] = resolveErr.CurrentConnectionID
+		}
+		if resolveErr.Recovery != nil {
+			out["recovery"] = resolveErr.Recovery
 		}
 		return out
 	}

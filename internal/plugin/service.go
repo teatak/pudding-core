@@ -52,14 +52,22 @@ type ConnectionChoice struct {
 	AuthMethodID string             `json:"authMethodID,omitempty"`
 	AuthVariant  string             `json:"authVariant,omitempty"`
 	Account      *ConnectionAccount `json:"account,omitempty"`
+	Status       string             `json:"status,omitempty"`
+}
+
+type ConnectionRecovery struct {
+	Tool      string            `json:"tool"`
+	Arguments map[string]string `json:"arguments"`
 }
 
 type EndpointResolveError struct {
-	Reason      string             `json:"reason"`
-	PluginID    string             `json:"pluginID,omitempty"`
-	Endpoint    string             `json:"endpoint,omitempty"`
-	Connection  string             `json:"connection,omitempty"`
-	Connections []ConnectionChoice `json:"connections,omitempty"`
+	Reason              string              `json:"reason"`
+	PluginID            string              `json:"pluginID,omitempty"`
+	Endpoint            string              `json:"endpoint,omitempty"`
+	Connection          string              `json:"connection,omitempty"`
+	Connections         []ConnectionChoice  `json:"connections,omitempty"`
+	CurrentConnectionID string              `json:"currentConnectionID,omitempty"`
+	Recovery            *ConnectionRecovery `json:"recovery,omitempty"`
 }
 
 func (e *EndpointResolveError) Error() string {
@@ -73,6 +81,12 @@ func (e *EndpointResolveError) Error() string {
 		return "a usable connection is required for this chat; inspect the available accounts and call builtin_plugin_load with plugin_id and connection_id to select one matching the user's intent. If the account is ambiguous, ask the user in chat"
 	case "connection_not_found":
 		return fmt.Sprintf("connection %q is not available for endpoint %q", e.Connection, e.Endpoint)
+	case "connection_not_selected":
+		return "the requested connection exists but is not selected for this chat; use recovery to select it, then retry the request"
+	case "connection_not_configured":
+		return "the requested connection exists but must be configured before it can be selected"
+	case "connection_ambiguous":
+		return "the requested connection name matches multiple accounts; use an exact connection ID"
 	case "endpoint_ambiguous":
 		return fmt.Sprintf("endpoint %q matches multiple plugin connections", e.Endpoint)
 	default:

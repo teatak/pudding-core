@@ -9,6 +9,11 @@ import (
 )
 
 func (s *Server) scheduledFail(c *cart.Context, err error) error {
+	var conflict *store.ScheduleConflictError
+	if errors.As(err, &conflict) {
+		c.JSON(http.StatusConflict, conflict.Details())
+		return nil
+	}
 	if errors.Is(err, store.ErrInvalidSchedule) {
 		return badRequest(c, err.Error())
 	}

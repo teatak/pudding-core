@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -12,6 +13,39 @@ import (
 	"github.com/teatak/pudding-core/internal/store"
 	"github.com/teatak/pudding-core/internal/tool"
 )
+
+func TestScheduledToolConflictReturnsCurrentDefinition(t *testing.T) {
+	ctx := context.Background()
+	eng, st, _ := newCollaborationEngine(t, mock.New())
+	task, err := eng.CreateScheduledTask(ctx, store.ScheduledTaskCreate{SessionID: "root", RequestID: "conflict", Name: "Original", Prompt: "Private task instructions", Schedule: store.TaskSchedule{Kind: "daily", Timezone: "UTC", Time: "09:00"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	name := "Changed"
+	current, err := eng.UpdateScheduledTask(ctx, task.ID, store.ScheduledTaskUpdate{Revision: task.Revision, Name: &name})
+	if err != nil {
+		t.Fatal(err)
+	}
+	args, _ := json.Marshal(map[string]any{"action": "delete", "taskID": task.ID, "revision": task.Revision})
+	call := tool.Call{Name: tool.ScheduledTask, Args: args}
+	result := eng.executeScheduledTask(ctx, "root", "turn", call)
+	var detail struct {
+		Error           string              `json:"error"`
+		CurrentRevision int64               `json:"currentRevision"`
+		Current         store.ScheduledTask `json:"current"`
+		Executed        bool                `json:"executed"`
+	}
+	if err := json.Unmarshal([]byte(result.Content), &detail); err != nil || result.Ok || detail.Error != "schedule_conflict" || detail.CurrentRevision != current.Revision || detail.Current.Name != name || detail.Executed {
+		t.Fatalf("missing tool conflict snapshot: %+v %v", result, err)
+	}
+	if err := st.CreateSession(ctx, &store.Session{ID: "other", Provider: "mock", Model: "model"}); err != nil {
+		t.Fatal(err)
+	}
+	result = eng.executeScheduledTask(ctx, "other", "turn", call)
+	if result.Ok || strings.Contains(result.Content, "Private task instructions") || strings.Contains(result.Content, "currentRevision") {
+		t.Fatalf("cross-session conflict leaked definition: %+v", result)
+	}
+}
 
 func TestScheduledNewSessionRequiresApprovalAndReusesSession(t *testing.T) {
 	ctx := context.Background()
@@ -188,7 +222,7 @@ func TestScheduledTaskMissedAndAcceptedBeforeRestart(t *testing.T) {
 			t.Fatal(err)
 		}
 		if id == "accepted" {
-			if _, err = st.AcceptScheduledTask(ctx, task.ID, store.ScheduledTaskAccept{Revision: task.Revision, Now: now.Add(time.Minute)}); err != nil {
+			if _, err = st.AcceptScheduledTask(ctx, task.ID, store.ScheduledTaskAccept{Revision: task.Revision, ExpectedNextAt: task.NextAt, Now: now.Add(time.Minute)}); err != nil {
 				t.Fatal(err)
 			}
 		}

@@ -147,6 +147,31 @@ func connectionConfiguredFor(def *Definition, c *Connection) bool {
 	return ok && method.Type == c.Auth.Type && (method.Type == AuthTypeNone || ViewConnection(c).TokenSet) && !ViewConnection(c).ReauthorizationRequired
 }
 
+func sessionConnectionChoices(def *Definition, connections []*Connection) []ConnectionChoice {
+	choices := make([]ConnectionChoice, 0, len(connections))
+	for _, c := range connectionsForPlugin(connections, def.ID) {
+		choice := viewConnectionChoice(c)
+		switch {
+		case ViewConnection(c).ReauthorizationRequired:
+			choice.Status = "reauthorization_required"
+		case !connectionConfiguredFor(def, c):
+			choice.Status = "not_configured"
+		default:
+			choice.Status = "available"
+		}
+		choices = append(choices, choice)
+	}
+	return choices
+}
+
+func markConnectionReauthorization(choices []ConnectionChoice, id string) {
+	for i := range choices {
+		if choices[i].ID == id {
+			choices[i].Status = "reauthorization_required"
+		}
+	}
+}
+
 func (s *Service) selectedSessionConnection(ctx context.Context, sessionID string, def *Definition) (*Connection, error) {
 	required := &EndpointResolveError{Reason: "connection_required", PluginID: def.ID}
 	var connections []*Connection
@@ -156,9 +181,7 @@ func (s *Service) selectedSessionConnection(ctx context.Context, sessionID strin
 		if err != nil {
 			return nil, err
 		}
-		for _, c := range connectionsForPlugin(connections, def.ID) {
-			required.Connections = append(required.Connections, viewConnectionChoice(c))
-		}
+		required.Connections = sessionConnectionChoices(def, connections)
 	}
 	switch ConnectionSelection(def) {
 	case ConnectionSelectionSingleActive:
@@ -188,6 +211,7 @@ func (s *Service) selectedSessionConnection(ctx context.Context, sessionID strin
 				ready, err := s.ReadyConnection(ctx, candidate.ID)
 				if errors.Is(err, ErrConnectionReauthorizationRequired) {
 					reauthorizationRequired = true
+					markConnectionReauthorization(required.Connections, candidate.ID)
 					continue
 				}
 				if err != nil {
@@ -206,9 +230,11 @@ func (s *Service) selectedSessionConnection(ctx context.Context, sessionID strin
 			}
 			return selected, nil
 		}
+		required.CurrentConnectionID = saved.ConnectionID
 		c, err := s.ReadyConnection(ctx, saved.ConnectionID)
 		if errors.Is(err, ErrConnectionReauthorizationRequired) {
 			required.Reason = "connection_reauthorization_required"
+			markConnectionReauthorization(required.Connections, saved.ConnectionID)
 			return nil, required
 		}
 		if errors.Is(err, store.ErrNotFound) {
@@ -255,13 +281,68 @@ func (s *Service) ResolveSessionEndpoint(ctx context.Context, sessionID, pluginI
 		var choice *EndpointResolveError
 		if errors.As(err, &choice) {
 			choice.Endpoint, choice.PluginID = endpointName, def.ID
+			return nil, requestedSessionConnectionError(def, connections, connectionID, choice)
 		}
 		return nil, err
 	}
 	if connectionID != "" && !connectionMatches(c, connectionID) {
-		return nil, &EndpointResolveError{Reason: "connection_required", PluginID: def.ID, Endpoint: endpointName, Connection: connectionID, Connections: []ConnectionChoice{viewConnectionChoice(c)}}
+		return nil, requestedSessionConnectionError(def, connections, connectionID, &EndpointResolveError{
+			Reason: "connection_required", PluginID: def.ID, Endpoint: endpointName, CurrentConnectionID: c.ID,
+		})
 	}
 	return endpointBindingForConnection(def, endpointName, endpoint, c), nil
+}
+
+// Describe the requested account without selecting it or refreshing its credentials.
+// Only the explicit selection path may change the chat's connection grant.
+func requestedSessionConnectionError(def *Definition, connections []*Connection, ref string, failure *EndpointResolveError) *EndpointResolveError {
+	if failure.Connections == nil {
+		failure.Connections = sessionConnectionChoices(def, connections)
+	}
+	failure.Connection = strings.TrimSpace(ref)
+	if failure.Connection == "" {
+		return failure
+	}
+	var requested *Connection
+	candidates := connectionsForPlugin(connections, def.ID)
+	for _, candidate := range candidates {
+		if strings.EqualFold(candidate.ID, failure.Connection) {
+			requested = candidate
+			break
+		}
+	}
+	if requested == nil {
+		for _, candidate := range candidates {
+			if connectionMatches(candidate, failure.Connection) {
+				if requested != nil {
+					failure.Reason = "connection_ambiguous"
+					return failure
+				}
+				requested = candidate
+			}
+		}
+	}
+	if requested == nil {
+		failure.Reason = "connection_not_found"
+		return failure
+	}
+	for _, choice := range failure.Connections {
+		if choice.ID == requested.ID && choice.Status == "reauthorization_required" {
+			failure.Reason = "connection_reauthorization_required"
+			return failure
+		}
+	}
+	if !connectionConfiguredFor(def, requested) {
+		failure.Reason = "connection_not_configured"
+		return failure
+	}
+	if ConnectionSelection(def) == ConnectionSelectionUser {
+		failure.Reason = "connection_not_selected"
+		failure.Recovery = &ConnectionRecovery{Tool: "builtin_plugin_load", Arguments: map[string]string{
+			"plugin_id": def.ID, "connection_id": requested.ID,
+		}}
+	}
+	return failure
 }
 
 // Discovery uses the chat binding or its sole usable connection, just like calls.

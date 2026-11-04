@@ -116,7 +116,7 @@ type ScheduledTask struct {
 	Schedule         TaskSchedule `json:"schedule"`
 	Enabled          bool         `json:"enabled"`
 	Deleted          bool         `json:"deleted,omitempty"`
-	Revision         int64        `json:"revision"`
+	Revision         int64        `json:"revision"` // Definition edits only; execution does not change it.
 	ScheduleRevision int64        `json:"scheduleRevision"`
 	NextAt           *time.Time   `json:"nextAt,omitempty"`
 	CreatedAt        time.Time    `json:"createdAt"`
@@ -148,6 +148,23 @@ type ScheduledTaskUpdate struct {
 	Schedule *TaskSchedule `json:"schedule,omitempty"`
 	Enabled  *bool         `json:"enabled,omitempty"`
 	Delete   bool          `json:"delete,omitempty"`
+}
+
+// ScheduleConflictError carries the definition seen inside the update transaction.
+// Callers must reconcile their edit with Current rather than blindly retrying it.
+type ScheduleConflictError struct {
+	ExpectedRevision int64
+	Current          ScheduledTask
+}
+
+func (e *ScheduleConflictError) Error() string { return ErrScheduleConflict.Error() }
+func (e *ScheduleConflictError) Unwrap() error { return ErrScheduleConflict }
+func (e *ScheduleConflictError) Details() map[string]any {
+	return map[string]any{
+		"error": ErrScheduleConflict.Error(), "executed": false,
+		"expectedRevision": e.ExpectedRevision, "currentRevision": e.Current.Revision,
+		"current": e.Current,
+	}
 }
 
 func PrepareScheduledTask(in ScheduledTaskCreate, now time.Time) (*ScheduledTask, error) {
@@ -186,7 +203,7 @@ func ApplyScheduledTaskUpdate(t *ScheduledTask, in ScheduledTaskUpdate, now time
 		return ErrNotFound
 	}
 	if t.Revision != in.Revision {
-		return ErrScheduleConflict
+		return &ScheduleConflictError{ExpectedRevision: in.Revision, Current: *t}
 	}
 	if in.Name != nil {
 		t.Name = strings.TrimSpace(*in.Name)
@@ -247,10 +264,11 @@ type ScheduledTaskRun struct {
 	Key                string       `json:"-"`
 }
 type ScheduledTaskAccept struct {
-	Revision   int64
-	RequestID  string // manual only
-	Now        time.Time
-	SkipReason string
+	Revision       int64
+	ExpectedNextAt *time.Time // Required for automatic acceptance; guards the exact due occurrence.
+	RequestID      string     // manual only
+	Now            time.Time
+	SkipReason     string
 }
 
 func PrepareScheduledTaskRun(t *ScheduledTask, in ScheduledTaskAccept) (*ScheduledTaskRun, error) {
@@ -262,7 +280,7 @@ func PrepareScheduledTaskRun(t *ScheduledTask, in ScheduledTaskAccept) (*Schedul
 	}
 	source, key, at := "manual", "manual:"+in.RequestID, in.Now
 	if in.RequestID == "" {
-		if !t.Enabled || t.NextAt == nil || t.NextAt.After(in.Now) {
+		if !t.Enabled || t.NextAt == nil || in.ExpectedNextAt == nil || !t.NextAt.Equal(*in.ExpectedNextAt) || t.NextAt.After(in.Now) {
 			return nil, ErrScheduleConflict
 		}
 		source = "scheduled"
@@ -284,8 +302,6 @@ func PrepareScheduledTaskRun(t *ScheduledTask, in ScheduledTaskAccept) (*Schedul
 	} else if source == "scheduled" {
 		t.NextAt = t.Schedule.Next(in.Now)
 	}
-	t.Revision++
-	t.UpdatedAt = in.Now
 	return r, nil
 }
 

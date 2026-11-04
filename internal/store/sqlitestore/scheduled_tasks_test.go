@@ -43,12 +43,26 @@ func TestScheduledTasksPersistenceAndAdmission(t *testing.T) {
 	if current.Name != task.Name {
 		t.Fatal("invalid update partially persisted")
 	}
-	run, err := st.AcceptScheduledTask(ctx, task.ID, store.ScheduledTaskAccept{Revision: task.Revision, Now: now.Add(time.Minute)})
+	run, err := st.AcceptScheduledTask(ctx, task.ID, store.ScheduledTaskAccept{Revision: task.Revision, ExpectedNextAt: task.NextAt, Now: now.Add(time.Minute)})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = st.AcceptScheduledTask(ctx, task.ID, store.ScheduledTaskAccept{Revision: task.Revision, Now: now.Add(time.Minute)}); !errors.Is(err, store.ErrScheduleConflict) {
+	if _, err = st.AcceptScheduledTask(ctx, task.ID, store.ScheduledTaskAccept{Revision: task.Revision, ExpectedNextAt: task.NextAt, Now: now.Add(time.Minute)}); !errors.Is(err, store.ErrScheduleConflict) {
 		t.Fatalf("double accept: %v", err)
+	}
+	current, err = st.GetScheduledTask(ctx, task.ID)
+	if err != nil || current.Revision != task.Revision || !current.UpdatedAt.Equal(task.UpdatedAt) {
+		t.Fatalf("execution changed persisted definition version: %+v %v", current, err)
+	}
+	name := "Edited after execution"
+	current, err = st.UpdateScheduledTask(ctx, task.ID, store.ScheduledTaskUpdate{Revision: task.Revision, Name: &name}, now.Add(2*time.Minute))
+	if err != nil {
+		t.Fatalf("execution invalidated edit revision: %v", err)
+	}
+	var conflict *store.ScheduleConflictError
+	_, err = st.UpdateScheduledTask(ctx, task.ID, store.ScheduledTaskUpdate{Revision: task.Revision, Delete: true}, now.Add(3*time.Minute))
+	if !errors.As(err, &conflict) || conflict.Current.Revision != current.Revision || conflict.Current.Name != name {
+		t.Fatalf("missing transactional conflict snapshot: %+v %v", conflict, err)
 	}
 	if err = st.Close(); err != nil {
 		t.Fatal(err)
@@ -137,7 +151,7 @@ func TestScheduledRunsVersion23Migration(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			run, err := st.AcceptScheduledTask(ctx, task.ID, store.ScheduledTaskAccept{Revision: task.Revision, Now: now, RequestID: "manual"})
+			run, err := st.AcceptScheduledTask(ctx, task.ID, store.ScheduledTaskAccept{Revision: task.Revision, ExpectedNextAt: task.NextAt, Now: now, RequestID: "manual"})
 			if err != nil {
 				t.Fatal(err)
 			}
