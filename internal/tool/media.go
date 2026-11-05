@@ -13,10 +13,12 @@ import (
 )
 
 const (
-	mediaSourceAttachment = "attachment"
-	mediaSourceFile       = "file"
-	mediaTypeImage        = "image"
-	mediaTypeAudio        = "audio"
+	mediaSourceAttachment   = "attachment"
+	mediaSourceFile         = "file"
+	mediaTypeImage          = "image"
+	mediaTypeAudio          = "audio"
+	MediaPurposeReference   = "reference"
+	MediaPurposeObservation = "observation"
 )
 
 type mediaReadArgs struct {
@@ -25,6 +27,7 @@ type mediaReadArgs struct {
 	URL           string `json:"url"`
 	Scope         string `json:"scope"`
 	Path          string `json:"path"`
+	Purpose       string `json:"purpose"`
 }
 
 func (r *BuiltinRunner) mediaRead(call Call) Result {
@@ -36,6 +39,9 @@ func (r *BuiltinRunner) mediaRead(call Call) Result {
 	var args mediaReadArgs
 	if err := decodeStructToolArgs(call.Args, &args); err != nil {
 		return toolJSONError(out, "invalid_arguments", err.Error())
+	}
+	if args.Purpose != "" && args.Purpose != MediaPurposeReference && args.Purpose != MediaPurposeObservation {
+		return toolJSONError(out, "invalid_arguments", "purpose must be reference or observation")
 	}
 	switch strings.TrimSpace(args.Source) {
 	case mediaSourceAttachment:
@@ -102,6 +108,9 @@ func (r *BuiltinRunner) mediaReadAttachment(out Result, sessionID string, args m
 	if !ok {
 		return unsupportedMediaResult(out, mimeType, mediaSourceAttachment)
 	}
+	if mediaType != mediaTypeImage && args.Purpose != "" {
+		return toolJSONError(out, "invalid_arguments", "purpose applies only to images")
+	}
 
 	key = canonicalMediaAttachmentKey(sessionID, key)
 	if key == "" {
@@ -119,7 +128,7 @@ func (r *BuiltinRunner) mediaReadAttachment(out Result, sessionID string, args m
 	if !info.ModTime().IsZero() {
 		item.CreatedAt = info.ModTime().UTC().Format(time.RFC3339)
 	}
-	return routedMediaResult(out, item, mediaType, map[string]any{"source": mediaSourceAttachment})
+	return routedMediaResult(out, item, mediaType, args.Purpose, map[string]any{"source": mediaSourceAttachment})
 }
 
 func (r *BuiltinRunner) mediaReadFile(out Result, call Call, args mediaReadArgs) Result {
@@ -154,6 +163,9 @@ func (r *BuiltinRunner) mediaReadFile(out Result, call Call, args mediaReadArgs)
 	if !ok {
 		return unsupportedMediaResult(out, mimeType, mediaSourceFile)
 	}
+	if mediaType != mediaTypeImage && args.Purpose != "" {
+		return toolJSONError(out, "invalid_arguments", "purpose applies only to images")
+	}
 	stored, err := attachment.NewService(r.homeDir).StorePath(call.SessionID, resolved.target)
 	if err != nil {
 		if errors.Is(err, attachment.ErrTooLarge) {
@@ -167,10 +179,16 @@ func (r *BuiltinRunner) mediaReadFile(out Result, call Call, args mediaReadArgs)
 		"source": mediaSourceFile,
 		"scope":  args.Scope,
 	})
-	return routedMediaResult(out, stored, mediaType, payload)
+	return routedMediaResult(out, stored, mediaType, args.Purpose, payload)
 }
 
-func routedMediaResult(out Result, item store.Attachment, mediaType string, payload map[string]any) Result {
+func routedMediaResult(out Result, item store.Attachment, mediaType, purpose string, payload map[string]any) Result {
+	if mediaType == mediaTypeImage {
+		if purpose == "" {
+			purpose = MediaPurposeReference
+		}
+		payload["purpose"] = purpose
+	}
 	payload["ok"] = true
 	payload["kind"] = "media_routed"
 	payload["mediaType"] = mediaType

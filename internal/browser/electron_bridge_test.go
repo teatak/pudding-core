@@ -339,18 +339,22 @@ func TestElectronBridgeServiceToolEndpoints(t *testing.T) {
 		case "/browser/tabs/list":
 			writeElectronBridgeTestJSON(w, electronBridgeTabsResponse{Tabs: []electronBridgeSnapshot{tab}})
 		case "/browser/tabs/observe":
-			if req["maxTextChars"] != float64(123) || req["maxElements"] != float64(4) {
+			if req["maxTextChars"] != float64(123) || req["maxElements"] != float64(4) || req["offset"] != float64(100) {
 				t.Fatalf("unexpected observe request: %+v", req)
 			}
+			next := 104
 			writeElectronBridgeTestJSON(w, electronBridgeObserveResponse{
-				Tab:        tab,
-				Title:      "Example",
-				URL:        "https://example.com",
-				ReadyState: "complete",
-				Viewport:   Viewport{Width: 800, Height: 600, DevicePixelRatio: 2, ScrollY: 120},
-				Text:       "hello",
-				TextChars:  5,
-				Elements:   []ObservedElement{{Index: 0, Tag: "a", Text: "link", Bounds: Bounds{X: 30, Y: 40, Width: 100, Height: 25}}},
+				Tab:               tab,
+				Title:             "Example",
+				URL:               "https://example.com",
+				ReadyState:        "complete",
+				Viewport:          Viewport{Width: 800, Height: 600, DevicePixelRatio: 2, ScrollY: 120},
+				Text:              "hello",
+				TextChars:         5,
+				Elements:          []ObservedElement{{Index: 0, Ref: "pudding-ref:test:1", Tag: "a", Text: "link", Bounds: Bounds{X: 30, Y: 40, Width: 100, Height: 25}}},
+				UnavailableFrames: []string{"https://frame.example.com"},
+				TotalElements:     125,
+				NextOffset:        &next,
 			})
 		case "/browser/tabs/screenshot":
 			if req["fullPage"] != nil {
@@ -402,7 +406,7 @@ func TestElectronBridgeServiceToolEndpoints(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, err := service.Observe(context.Background(), "sess_a", "tab_a", ObserveOptions{MaxTextChars: 123, MaxElements: 4}); err != nil || got.Text != "hello" || len(got.Elements) != 1 || got.Viewport.ScrollY != 120 || got.Viewport.DevicePixelRatio != 2 || got.Elements[0].Bounds.X != 30 {
+	if got, err := service.Observe(context.Background(), "sess_a", "tab_a", ObserveOptions{MaxTextChars: 123, MaxElements: 4, Offset: 100}); err != nil || got.Text != "hello" || len(got.UnavailableFrames) != 1 || got.UnavailableFrames[0] != "https://frame.example.com" || len(got.Elements) != 1 || got.Viewport.ScrollY != 120 || got.Viewport.DevicePixelRatio != 2 || got.Elements[0].Ref != "pudding-ref:test:1" || got.Elements[0].Bounds.X != 30 || got.TotalElements != 125 || got.NextOffset == nil || *got.NextOffset != 104 {
 		t.Fatalf("unexpected observe result: got=%+v err=%v", got, err)
 	}
 	if got, err := service.Screenshot(context.Background(), "sess_a", "tab_a"); err != nil || got.MIME != "image/png" || got.Width != 1 || got.CaptureBounds.Y != 0 {

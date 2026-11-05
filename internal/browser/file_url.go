@@ -65,37 +65,42 @@ func ProjectFileURLAuthorizer(scope ProjectFileScope) FileURLAuthorizer {
 	}
 }
 
-func fileURLAllowed(rawURL string, roots []string) bool {
-	parsed, err := url.Parse(strings.TrimSpace(rawURL))
-	if err != nil {
-		return false
+func normalizeURL(raw string) (string, error) {
+	authorized, err := normalizeAuthorizedURL(context.Background(), "", raw, nil)
+	return authorized.URL, err
+}
+
+func normalizeAuthorizedURL(ctx context.Context, sessionID, raw string, fileURLs FileURLAuthorizer) (AuthorizedURL, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return AuthorizedURL{}, errors.New("url is required")
 	}
-	switch parsed.Scheme {
-	case "http", "https":
-		return parsed.Host != ""
-	case "about":
-		return parsed.String() == "about:blank"
-	case "file":
-		// Continue with project root validation below.
-	default:
-		return false
+	if raw == "about:blank" {
+		return AuthorizedURL{URL: raw}, nil
 	}
-	if parsed.Host != "" && parsed.Host != "localhost" {
-		return false
-	}
-	rawPath := filepath.FromSlash(parsed.Path)
-	if runtime.GOOS == "windows" && len(rawPath) >= 3 && (rawPath[0] == '/' || rawPath[0] == '\\') && rawPath[2] == ':' {
-		rawPath = rawPath[1:]
-	}
-	target, err := filepath.EvalSymlinks(rawPath)
-	if err != nil {
-		return false
-	}
-	for _, root := range roots {
-		resolvedRoot, err := filepath.EvalSymlinks(root)
-		if err == nil && projectpath.Inside(target, resolvedRoot) {
-			return true
+	if !strings.Contains(raw, "://") {
+		scheme := "https"
+		if strings.HasPrefix(raw, "localhost") || strings.HasPrefix(raw, "127.") || strings.HasPrefix(raw, "[::1]") {
+			scheme = "http"
 		}
+		raw = scheme + "://" + raw
 	}
-	return false
+	u, err := url.Parse(raw)
+	if err != nil {
+		return AuthorizedURL{}, err
+	}
+	switch u.Scheme {
+	case "http", "https":
+		if u.Host == "" {
+			return AuthorizedURL{}, errors.New("url host is required")
+		}
+		return AuthorizedURL{URL: u.String()}, nil
+	case "file":
+		if fileURLs == nil || u.User != nil {
+			return AuthorizedURL{}, ErrFileURLNotAllowed
+		}
+		return fileURLs(ctx, sessionID, u)
+	default:
+		return AuthorizedURL{}, errors.New("only http, https and authorized file URLs are supported")
+	}
 }

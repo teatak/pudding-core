@@ -2,6 +2,7 @@ package contextbuilder
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -12,7 +13,66 @@ import (
 	"github.com/teatak/pudding-core/internal/provider/anthropic"
 	"github.com/teatak/pudding-core/internal/provider/google"
 	"github.com/teatak/pudding-core/internal/provider/openai"
+	"github.com/teatak/pudding-core/internal/tool"
 )
+
+func TestToolImageBudgetReachesProviderWire(t *testing.T) {
+	data := []byte("bounded-screenshot-wire-test")
+	var messages []provider.Message
+	for i := 0; i < 9; i++ {
+		messages = append(messages, provider.Message{Role: provider.RoleUser, Parts: []provider.Part{{Type: provider.PartImage, Name: tool.BrowserScreenshot, ImageKey: "saved-image", MIME: "image/png", Data: data}}})
+	}
+	// An explicit user upload is outside the automatic screenshot budget.
+	messages = append(messages, provider.Message{Role: provider.RoleUser, Parts: []provider.Part{{Type: provider.PartImage, ImageKey: "upload", MIME: "image/png", Data: data}}})
+	// Media reads without an explicit observation purpose are references too.
+	messages = append(messages, provider.Message{Role: provider.RoleUser, Parts: []provider.Part{{Type: provider.PartImage, Name: tool.MediaRead, ImageKey: "reference", MIME: "image/png", Data: data}}})
+	req := provider.Request{Model: "model", Messages: LimitToolImages(messages)}
+	for _, tc := range []struct {
+		name     string
+		response string
+		client   func(*http.Client) provider.Client
+	}{
+		{"chat", "data: [DONE]\n\n", func(h *http.Client) provider.Client {
+			return openai.New(openai.Config{BaseURL: "https://test.invalid", HTTPClient: h})
+		}},
+		{"responses", "data: {\"type\":\"response.completed\"}\n\n", func(h *http.Client) provider.Client {
+			return openai.NewResponses(openai.Config{BaseURL: "https://test.invalid", HTTPClient: h})
+		}},
+		{"anthropic", "data: {\"type\":\"message_stop\"}\n\n", func(h *http.Client) provider.Client {
+			return anthropic.New(anthropic.Config{BaseURL: "https://test.invalid", HTTPClient: h})
+		}},
+		{"google", "data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"ok\"}]},\"finishReason\":\"STOP\"}]}\n\n", func(h *http.Client) provider.Client {
+			return google.New(google.Config{BaseURL: "https://test.invalid", HTTPClient: h})
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var body []byte
+			h := &http.Client{Transport: estimateTransport(func(r *http.Request) (*http.Response, error) {
+				var err error
+				body, err = io.ReadAll(r.Body)
+				if err != nil {
+					return nil, err
+				}
+				return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(tc.response))}, nil
+			})}
+			stream, err := tc.client(h).Stream(context.Background(), req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for chunk := range stream {
+				if chunk.Err != nil {
+					t.Fatal(chunk.Err)
+				}
+			}
+			if got := strings.Count(string(body), base64.StdEncoding.EncodeToString(data)); got != 5 {
+				t.Fatalf("wire contains %d images, want 3 screenshots + 1 upload + 1 reference", got)
+			}
+			if !strings.Contains(string(body), tool.MediaRead) {
+				t.Fatal("readback instruction missing from wire")
+			}
+		})
+	}
+}
 
 type estimateTransport func(*http.Request) (*http.Response, error)
 

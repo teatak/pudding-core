@@ -3,12 +3,15 @@ package browser
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -41,6 +44,7 @@ type electronBridgeObserveRequest struct {
 	TabID        string `json:"tabID,omitempty"`
 	MaxTextChars int    `json:"maxTextChars,omitempty"`
 	MaxElements  int    `json:"maxElements,omitempty"`
+	Offset       int    `json:"offset,omitempty"`
 }
 
 type electronBridgeScreenshotRequest struct {
@@ -137,16 +141,19 @@ func ErrorRetryable(err error) bool {
 }
 
 type electronBridgeObserveResponse struct {
-	Tab              electronBridgeSnapshot `json:"tab"`
-	Title            string                 `json:"title"`
-	URL              string                 `json:"url"`
-	ReadyState       string                 `json:"readyState"`
-	Viewport         Viewport               `json:"viewport"`
-	Text             string                 `json:"text"`
-	TextChars        int                    `json:"textChars"`
-	Truncated        bool                   `json:"truncated"`
-	Elements         []ObservedElement      `json:"elements"`
-	ScrollContainers []ScrollContainer      `json:"scrollContainers"`
+	Tab               electronBridgeSnapshot `json:"tab"`
+	Title             string                 `json:"title"`
+	URL               string                 `json:"url"`
+	ReadyState        string                 `json:"readyState"`
+	Viewport          Viewport               `json:"viewport"`
+	Text              string                 `json:"text"`
+	TextChars         int                    `json:"textChars"`
+	Truncated         bool                   `json:"truncated"`
+	Elements          []ObservedElement      `json:"elements"`
+	TotalElements     int                    `json:"totalElements"`
+	NextOffset        *int                   `json:"nextOffset"`
+	UnavailableFrames []string               `json:"unavailableFrames,omitempty"`
+	ScrollContainers  []ScrollContainer      `json:"scrollContainers"`
 }
 
 type electronBridgeScreenshotResponse struct {
@@ -366,6 +373,7 @@ func (s *ElectronBridgeService) Observe(ctx context.Context, sessionID, tabID st
 		TabID:        tabID,
 		MaxTextChars: opts.MaxTextChars,
 		MaxElements:  opts.MaxElements,
+		Offset:       opts.Offset,
 	}, &out); err != nil {
 		return ObserveResult{}, err
 	}
@@ -610,16 +618,19 @@ func parseElectronBridgeTime(value string, fallback time.Time) time.Time {
 
 func (out electronBridgeObserveResponse) result() ObserveResult {
 	return ObserveResult{
-		Tab:              out.Tab.tab(),
-		Title:            out.Title,
-		URL:              out.URL,
-		ReadyState:       out.ReadyState,
-		Viewport:         out.Viewport,
-		Text:             out.Text,
-		TextChars:        out.TextChars,
-		Truncated:        out.Truncated,
-		Elements:         out.Elements,
-		ScrollContainers: out.ScrollContainers,
+		Tab:               out.Tab.tab(),
+		Title:             out.Title,
+		URL:               out.URL,
+		ReadyState:        out.ReadyState,
+		Viewport:          out.Viewport,
+		Text:              out.Text,
+		TextChars:         out.TextChars,
+		Truncated:         out.Truncated,
+		Elements:          out.Elements,
+		TotalElements:     out.TotalElements,
+		NextOffset:        out.NextOffset,
+		ScrollContainers:  out.ScrollContainers,
+		UnavailableFrames: out.UnavailableFrames,
 	}
 }
 
@@ -657,4 +668,21 @@ func (out electronBridgeActionResponse) result(fallbackAction string) ActionResu
 		result = map[string]any{}
 	}
 	return ActionResult{Tab: out.Tab.tab(), Action: action, Result: result}
+}
+
+func firstNonBlank(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func newID(prefix string) string {
+	var b [8]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return prefix + "_" + strconv.FormatInt(time.Now().UnixNano(), 36)
+	}
+	return prefix + "_" + hex.EncodeToString(b[:])
 }

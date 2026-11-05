@@ -3220,7 +3220,7 @@ func requestMessagesWithTurnParts(
 	if currentTurn := currentTurnProviderMessage(parts, continuations, sessionID, turnID, attachmentHome, cfg, canReadResult); currentTurn != nil {
 		out = append(out, provider.SplitMessage(*currentTurn)...)
 	}
-	return out
+	return contextbuilder.LimitToolImages(out)
 }
 
 func currentTurnProviderMessage(parts []store.ContentPart, continuations []provider.Continuation, sessionID, turnID, attachmentHome string, cfg provider.ModelConfig, canReadResult bool) *provider.Message {
@@ -3318,8 +3318,12 @@ func providerAttachmentParts(sessionID string, part store.ContentPart, attachmen
 		return nil
 	}
 	if imagePart, ok := providerImagePartFromAttachment(sessionID, attachmentHome, part, cfg); ok {
+		text := providerAttachmentFallbackText(part, "image")
+		if imagePart.Width > 0 && imagePart.Height > 0 {
+			text += fmt.Sprintf("\nModel image size: %dx%d pixels.", imagePart.Width, imagePart.Height)
+		}
 		return []provider.Part{
-			{Type: provider.PartText, Text: providerAttachmentFallbackText(part, "image")},
+			{Type: provider.PartText, Text: text},
 			imagePart,
 		}
 	}
@@ -3337,16 +3341,22 @@ func providerImagePartFromAttachment(sessionID, attachmentHome string, part stor
 	if !strings.HasPrefix(mime, "image/") || mime == "image/svg+xml" {
 		return provider.Part{}, false
 	}
-	modelImage, err := attachment.NewService(attachmentHome).ModelImageForProvider(attachmentSessionIDForPart(sessionID, part), part.AttachmentKey, mime)
+	service := attachment.NewService(attachmentHome)
+	load := service.ModelImageForProvider
+	if attachment.IsBrowserScreenshot(part.Name, part.Origin) {
+		load = service.ScreenshotForProvider
+	}
+	modelImage, err := load(attachmentSessionIDForPart(sessionID, part), part.AttachmentKey, mime)
 	if err != nil || len(modelImage.Data) == 0 {
 		return provider.Part{}, false
 	}
 	return provider.Part{
-		Type:   provider.PartImage,
-		MIME:   modelImage.MIME,
-		Data:   modelImage.Data,
-		Width:  modelImage.Width,
-		Height: modelImage.Height,
+		Type:     provider.PartImage,
+		MIME:     modelImage.MIME,
+		Data:     modelImage.Data,
+		Width:    modelImage.Width,
+		Height:   modelImage.Height,
+		ImageKey: part.AttachmentKey,
 	}, true
 }
 

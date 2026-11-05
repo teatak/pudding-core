@@ -223,3 +223,30 @@ func TestLoadOrCreateTokenTightensPermissions(t *testing.T) {
 		t.Fatalf("token permissions = %o, want 600", info.Mode().Perm())
 	}
 }
+
+func TestBrowserServiceRequiresDesktopBridge(t *testing.T) {
+	for _, tc := range []struct {
+		name, url, token       string
+		wantError, wantService bool
+	}{
+		{name: "absent"},
+		{name: "url only", url: "http://127.0.0.1:12345", wantError: true},
+		{name: "token only", token: "test", wantError: true},
+		{name: "configured", url: "http://127.0.0.1:12345", token: "test", wantService: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("PUDDING_ELECTRON_BROWSER_BRIDGE_URL", tc.url)
+			t.Setenv("PUDDING_ELECTRON_BROWSER_BRIDGE_TOKEN", tc.token)
+			service, err := newBrowserService(nil)
+			if (err != nil) != tc.wantError {
+				t.Fatalf("error = %v", err)
+			}
+			if (service != nil) != tc.wantService {
+				t.Fatalf("service = %T", service)
+			}
+			if service != nil {
+				t.Cleanup(func() { _ = service.Close() })
+			}
+		})
+	}
+}

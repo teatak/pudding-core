@@ -248,6 +248,9 @@ type Part struct {
 	Data    []byte          `json:"-"`
 	Width   int             `json:"-"`
 	Height  int             `json:"-"`
+	// ImageKey survives model-only omission so images can be reloaded on demand
+	// and repeated request projections retain the same pruning boundaries.
+	ImageKey string `json:"-"`
 }
 
 // On attachment text/media parts, CallID identifies the source tool result,
@@ -264,6 +267,7 @@ func AttributeToolAttachments(parts []Part, callID, name, createdAt string) []Pa
 	out := append([]Part(nil), parts...)
 	for i := range out {
 		out[i].CallID = callID
+		out[i].Name = name
 		if out[i].Type == PartText {
 			out[i].Text += "\nSource tool call: " + callID + "\nSource tool: " + name
 			if createdAt != "" {

@@ -154,6 +154,20 @@ func TestRetiredPlanUpdateIsNotAvailable(t *testing.T) {
 
 func TestMediaReadSchemaExposesFileSourceOnlyInCode(t *testing.T) {
 	defs := BuiltinDefinitions()
+	for _, mode := range []store.AgentMode{store.ModeChat, store.ModeWork, store.ModeCode} {
+		def := definitionByName(t, CoreDefinitionsForMode(mode, defs), MediaRead)
+		var schema struct {
+			Properties map[string]struct {
+				Enum []string `json:"enum"`
+			} `json:"properties"`
+		}
+		if err := json.Unmarshal(def.InputSchema, &schema); err != nil {
+			t.Fatal(err)
+		}
+		if got := schema.Properties["purpose"].Enum; len(got) != 2 || got[0] != MediaPurposeReference || got[1] != MediaPurposeObservation {
+			t.Fatalf("%s image purposes missing: %v", mode, got)
+		}
+	}
 	for _, mode := range []store.AgentMode{store.ModeChat, store.ModeWork} {
 		def := definitionByName(t, CoreDefinitionsForMode(mode, defs), MediaRead)
 		if strings.Contains(string(def.InputSchema), `"file"`) || strings.Contains(string(def.InputSchema), `"scope"`) {

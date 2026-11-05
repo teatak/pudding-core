@@ -136,14 +136,16 @@ func Start(opts Options) (*Daemon, error) {
 	hub := event.NewHub()
 	plugins := appsvc.NewService(dir, cfg).WithSessionConnections(st)
 	skills := skillsvc.NewService(dir)
-	browserService, err := newBrowserService(dir, st)
+	browserService, err := newBrowserService(st)
 	if err != nil {
 		_ = st.Close()
 		return nil, err
 	}
 	computerController, err := newComputerController()
 	if err != nil {
-		_ = browserService.Close()
+		if browserService != nil {
+			_ = browserService.Close()
+		}
 		_ = st.Close()
 		return nil, err
 	}
@@ -237,7 +239,7 @@ func Start(opts Options) (*Daemon, error) {
 	return d, nil
 }
 
-func newBrowserService(homeDir string, projectFiles browser.ProjectFileScope) (browser.Service, error) {
+func newBrowserService(projectFiles browser.ProjectFileScope) (browser.Service, error) {
 	fileURLs := browser.ProjectFileURLAuthorizer(projectFiles)
 	bridgeURL := strings.TrimSpace(os.Getenv("PUDDING_ELECTRON_BROWSER_BRIDGE_URL"))
 	bridgeToken := strings.TrimSpace(os.Getenv("PUDDING_ELECTRON_BROWSER_BRIDGE_TOKEN"))
@@ -253,8 +255,8 @@ func newBrowserService(homeDir string, projectFiles browser.ProjectFileScope) (b
 		slog.Info("browser service", "kind", "electron-bridge")
 		return service, nil
 	}
-	slog.Info("browser service", "kind", "chrome-manager")
-	return browser.NewManager(browser.Config{HomeDir: homeDir, Headless: true, FileURLAuthorizer: fileURLs}), nil
+	slog.Info("browser service", "kind", "unavailable")
+	return nil, nil
 }
 
 func newComputerController() (computer.Controller, error) {

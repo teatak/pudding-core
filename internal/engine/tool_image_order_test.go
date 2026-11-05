@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -14,7 +15,129 @@ import (
 	"github.com/teatak/pudding-core/internal/provider"
 	"github.com/teatak/pudding-core/internal/store"
 	"github.com/teatak/pudding-core/internal/store/sqlitestore"
+	"github.com/teatak/pudding-core/internal/tool"
 )
+
+func TestScreenshotBudgetAcrossHistoryCurrentTurnAndReadback(t *testing.T) {
+	ctx := context.Background()
+	home := t.TempDir()
+	db, err := sqlitestore.Open(filepath.Join(home, "history.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if err := db.CreateSession(ctx, &store.Session{ID: "s1", Provider: "mock", Model: "vision"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.BeginTurn(ctx, store.BeginTurnInput{SessionID: "s1", TurnID: "t1", UserMessageID: "u1", ClientMessageID: "u1", UserText: "inspect", Mode: store.ModeCode}); err != nil {
+		t.Fatal(err)
+	}
+	var parts []store.ContentPart
+	var first store.Attachment
+	service := attachment.NewService(home)
+	// Both legacy/default reads and explicit references must survive later
+	// screenshot batches, including after canonical history is reopened.
+	for _, purpose := range []string{"", tool.MediaPurposeReference} {
+		label := "reference-" + purpose
+		stored, err := service.StoreReader("s1", "design.png", "image/png", bytes.NewBufferString(label))
+		if err != nil {
+			t.Fatal(err)
+		}
+		args := map[string]string{"source": "attachment", "attachmentKey": stored.AttachmentKey}
+		if purpose != "" {
+			args["purpose"] = purpose
+		}
+		raw, _ := json.Marshal(args)
+		read := tool.NewBuiltinRunner(tool.WithHomeDir(home)).Call(ctx, tool.Call{SessionID: "s1", CallID: label, Name: tool.MediaRead, Mode: store.ModeCode, Args: raw})
+		if !read.Ok || len(read.ContextAttachments) != 1 {
+			t.Fatalf("reference read failed: %+v", read)
+		}
+		batch := []store.ContentPart{{Type: store.ContentPartToolUse, CallID: label, Name: tool.MediaRead, Args: raw}, {Type: store.ContentPartToolResult, CallID: label, Name: tool.MediaRead, Ok: true, Content: read.Content}, store.AttachmentPart(read.ContextAttachments[0])}
+		parts = append(parts, batch...)
+		if _, err := db.AppendTurnOutput(ctx, store.AppendTurnOutputInput{TurnID: "t1", Parts: batch}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for i := 0; i < 32; i++ {
+		stored, err := service.StoreReader("s1", "browser-screenshot.png", "image/png", bytes.NewBufferString(fmt.Sprintf("image-%d", i)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		stored.Origin = attachment.OriginTool
+		if i == 0 {
+			first = stored
+		}
+		id := fmt.Sprintf("capture-%d", i)
+		batch := []store.ContentPart{{Type: store.ContentPartToolUse, CallID: id, Name: tool.BrowserScreenshot, Args: json.RawMessage(`{}`)}, {Type: store.ContentPartToolResult, CallID: id, Name: tool.BrowserScreenshot, Ok: true, Content: `{"ok":true}`}, store.AttachmentPart(stored)}
+		parts = append(parts, batch...)
+		if _, err := db.AppendTurnOutput(ctx, store.AppendTurnOutputInput{TurnID: "t1", Parts: batch}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := db.FinishTurn(ctx, store.FinishTurnInput{TurnID: "t1", Status: store.TurnCompleted}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	db, err = sqlitestore.Open(filepath.Join(home, "history.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	cfg := provider.ModelConfig{Capabilities: &provider.ModelCapabilities{Image: true}}
+	builder := contextbuilder.New(db, nil, contextbuilder.WithAttachmentHome(home))
+	req, err := builder.BuildForProviderWithTools(ctx, "s1", "mock", "vision", string(store.ModeCode), []provider.ToolDef{{Name: tool.BrowserScreenshot}, {Name: tool.MediaRead}}, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	images := func(messages []provider.Message) []string {
+		var out []string
+		for _, m := range messages {
+			for _, p := range m.Parts {
+				if p.Type == provider.PartImage {
+					out = append(out, string(p.Data))
+				}
+			}
+		}
+		return out
+	}
+	current := requestMessagesWithTurnParts(nil, parts, nil, "s1", "t1", home, cfg, true)
+	if got, want := images(req.Messages), images(current); len(got) != 10 || !reflect.DeepEqual(got, want) || got[0] != "reference-" || got[1] != "reference-reference" || got[2] != "image-24" {
+		t.Fatalf("history/current budgets disagree: %v / %v", got, want)
+	}
+	// The first screenshot is now absent, but its original can be loaded by key.
+	args, _ := json.Marshal(map[string]string{"source": "attachment", "attachmentKey": first.AttachmentKey, "purpose": tool.MediaPurposeObservation})
+	read := tool.NewBuiltinRunner(tool.WithHomeDir(home)).Call(ctx, tool.Call{SessionID: "s1", CallID: "read-old", Name: tool.MediaRead, Mode: store.ModeCode, Args: args})
+	if !read.Ok || len(read.ContextAttachments) != 1 {
+		t.Fatalf("old screenshot cannot be reloaded: %+v", read)
+	}
+	reread := []store.ContentPart{{Type: store.ContentPartToolUse, CallID: read.CallID, Name: read.Name, Args: args}, {Type: store.ContentPartToolResult, CallID: read.CallID, Name: read.Name, Ok: true, Content: read.Content}, store.AttachmentPart(read.ContextAttachments[0])}
+	reloaded := requestMessagesWithTurnParts(req.Messages, reread, nil, "s1", "t2", home, cfg, true)
+	got := images(reloaded)
+	if len(got) != 5 || got[0] != "reference-" || got[1] != "reference-reference" || got[len(got)-1] != "image-0" {
+		t.Fatalf("readback did not become recent/bounded: %v", got)
+	}
+	// Rebuilding cannot revive the evicted images or alter saved attachments.
+	if !reflect.DeepEqual(reloaded, requestMessagesWithTurnParts(req.Messages, reread, nil, "s1", "t2", home, cfg, true)) {
+		t.Fatal("replay changed image projection")
+	}
+	canonical, err := db.ListMessages(ctx, "s1", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	attachments := 0
+	for _, m := range canonical {
+		for _, p := range m.Parts {
+			if p.Type == store.ContentPartAttachment {
+				attachments++
+			}
+		}
+	}
+	if attachments != 34 {
+		t.Fatalf("canonical attachments changed: %d", attachments)
+	}
+}
 
 func TestCurrentTurnImagesStayBeforeLaterActions(t *testing.T) {
 	home := t.TempDir()

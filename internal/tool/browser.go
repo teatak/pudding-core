@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"strings"
 
@@ -70,9 +71,13 @@ func (r *BuiltinRunner) browserObserve(ctx context.Context, call Call) Result {
 		TabID        string `json:"tabID"`
 		MaxTextChars int    `json:"maxTextChars"`
 		MaxElements  int    `json:"maxElements"`
+		Offset       int    `json:"offset"`
 	}
 	if err := decodeStructToolArgs(call.Args, &args); err != nil {
 		return toolJSONError(out, "invalid_arguments", err.Error())
+	}
+	if args.Offset < 0 {
+		return toolJSONError(out, "invalid_arguments", "offset must be non-negative")
 	}
 	tabID, err := r.browserResolveTabID(ctx, call.SessionID, args.TabID)
 	if err != nil {
@@ -81,6 +86,7 @@ func (r *BuiltinRunner) browserObserve(ctx context.Context, call Call) Result {
 	result, err := r.browser.Observe(ctx, call.SessionID, tabID, browser.ObserveOptions{
 		MaxTextChars: args.MaxTextChars,
 		MaxElements:  args.MaxElements,
+		Offset:       args.Offset,
 	})
 	if err != nil {
 		return browserToolError(out, err)
@@ -132,7 +138,7 @@ func (r *BuiltinRunner) browserScreenshot(ctx context.Context, call Call) Result
 		return toolJSONError(out, "attachment_store_failed", err.Error())
 	}
 	stored.Origin = attachment.OriginTool
-	modelImage, err := attachments.ModelImageForProvider(call.SessionID, stored.AttachmentKey, stored.MIME)
+	modelImage, err := attachments.ScreenshotForProvider(call.SessionID, stored.AttachmentKey, stored.MIME)
 	if err != nil {
 		return toolJSONError(out, "invalid_screenshot", err.Error())
 	}
@@ -164,6 +170,28 @@ func (r *BuiltinRunner) browserScreenshot(ctx context.Context, call Call) Result
 	out.SummaryKind = SummaryReturnedFields
 	out.SummaryCount = 20
 	return out
+}
+
+// Reproject old capture metadata alongside the resized model image. Keeping an
+// old modelWidth/modelHeight would otherwise send clicks to the wrong location.
+func modelBrowserScreenshotResult(content string) string {
+	var fields map[string]json.RawMessage
+	if json.Unmarshal([]byte(content), &fields) != nil {
+		return content
+	}
+	var width, height, modelWidth, modelHeight int
+	if json.Unmarshal(fields["width"], &width) != nil || json.Unmarshal(fields["height"], &height) != nil || width <= 0 || height <= 0 {
+		return content
+	}
+	w, h := attachment.ScreenshotDimensions(width, height)
+	_ = json.Unmarshal(fields["modelWidth"], &modelWidth)
+	_ = json.Unmarshal(fields["modelHeight"], &modelHeight)
+	if modelWidth == w && modelHeight == h {
+		return content
+	}
+	fields["modelWidth"] = resultJSON(w)
+	fields["modelHeight"] = resultJSON(h)
+	return jsonString(fields)
 }
 
 func (r *BuiltinRunner) browserClick(ctx context.Context, call Call) Result {

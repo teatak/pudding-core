@@ -308,6 +308,7 @@ func (b *Builder) buildMessagesWithCooling(ctx context.Context, sess *store.Sess
 		}
 	}
 	flushAssistant()
+	req.Messages = LimitToolImages(req.Messages)
 	return req, nil
 }
 
@@ -618,6 +619,9 @@ func (b *Builder) providerParts(
 			toolPath := b.attachmentToolPath(sessionID, part)
 			if imagePart, ok := b.imageProviderPart(sessionID, part, cfg); ok {
 				if text := attachmentProviderText(part, toolPath, "image"); text != "" {
+					if imagePart.Width > 0 && imagePart.Height > 0 {
+						text += fmt.Sprintf("\nModel image size: %dx%d pixels.", imagePart.Width, imagePart.Height)
+					}
 					out = append(out, provider.Part{Type: provider.PartText, Text: text})
 				}
 				out = append(out, imagePart)
@@ -706,16 +710,22 @@ func (b *Builder) imageProviderPart(sessionID string, part store.ContentPart, cf
 	if !strings.HasPrefix(mime, "image/") || mime == "image/svg+xml" {
 		return provider.Part{}, false
 	}
-	modelImage, err := attachment.NewService(b.attachmentHome).ModelImageForProvider(attachmentSessionID(sessionID, part), part.AttachmentKey, mime)
+	service := attachment.NewService(b.attachmentHome)
+	load := service.ModelImageForProvider
+	if attachment.IsBrowserScreenshot(part.Name, part.Origin) {
+		load = service.ScreenshotForProvider
+	}
+	modelImage, err := load(attachmentSessionID(sessionID, part), part.AttachmentKey, mime)
 	if err != nil || len(modelImage.Data) == 0 {
 		return provider.Part{}, false
 	}
 	return provider.Part{
-		Type:   provider.PartImage,
-		MIME:   modelImage.MIME,
-		Data:   modelImage.Data,
-		Width:  modelImage.Width,
-		Height: modelImage.Height,
+		Type:     provider.PartImage,
+		MIME:     modelImage.MIME,
+		Data:     modelImage.Data,
+		Width:    modelImage.Width,
+		Height:   modelImage.Height,
+		ImageKey: part.AttachmentKey,
 	}, true
 }
 

@@ -10,8 +10,9 @@ A local-first, multi-session agent daemon built with Go, SQLite, and loopback HT
 - Skills, plugins, MCP, attachments, resource libraries, Studio items, and usage tracking.
 - Audio and camera services in Go, plus protocols and session management for browser and computer-use tools.
 
-Visual browsing, native computer-use actions, and widget authoring tools require external client implementations.
-Headless browser capabilities require a local Chrome installation. Hardware features and native dependencies
+Browser automation, native computer-use actions, and widget authoring tools require external client implementations.
+Browser automation uses the Electron desktop bridge; without it, browser operations return unavailable.
+Core does not launch or attach to a standalone Chrome process. Hardware features and native dependencies
 remain subject to their supported platforms.
 
 ## Development

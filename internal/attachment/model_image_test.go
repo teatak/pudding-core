@@ -6,9 +6,65 @@ import (
 	"image/color"
 	"image/jpeg"
 	"image/png"
+	"math"
 	"os"
 	"testing"
 )
+
+func TestScreenshotModelCopyKeepsOriginalAndSeparateDetailedCache(t *testing.T) {
+	service := NewService(t.TempDir())
+	source := testPNG(t, 3032, 1852)
+	stored, err := service.StoreReader("s1", "browser-screenshot.png", "image/png", bytes.NewReader(source))
+	if err != nil {
+		t.Fatal(err)
+	}
+	path, _, err := service.Path("s1", stored.AttachmentKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	detailed, err := service.ModelImageForProvider("s1", stored.AttachmentKey, stored.MIME)
+	if err != nil {
+		t.Fatal(err)
+	}
+	compact, err := service.ScreenshotForProvider("s1", stored.AttachmentKey, stored.MIME)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if compact.Original || max(compact.Width, compact.Height) > ScreenshotMaxDimension || compact.Width*compact.Height > ScreenshotMaxPixels || compact.Width >= detailed.Width {
+		t.Fatalf("screenshot limits/detail separation failed: compact=%dx%d detailed=%dx%d", compact.Width, compact.Height, detailed.Width, detailed.Height)
+	}
+	if math.Abs(float64(compact.Width)/float64(compact.Height)-3032.0/1852) > .005 {
+		t.Fatal("aspect ratio changed")
+	}
+	cached, err := service.ScreenshotForProvider("s1", stored.AttachmentKey, stored.MIME)
+	if err != nil || !bytes.Equal(cached.Data, compact.Data) {
+		t.Fatal("screenshot cache differs")
+	}
+	original, err := os.ReadFile(path)
+	if err != nil || !bytes.Equal(original, source) {
+		t.Fatal("original changed")
+	}
+	if err := service.Delete("s1", stored.AttachmentKey); err != nil {
+		t.Fatal(err)
+	}
+	for _, base := range []string{modelImageCacheBase(path), screenshotCacheBase(path)} {
+		if _, err := os.Stat(base + ".png"); !os.IsNotExist(err) {
+			t.Fatalf("derivative survived deletion: %s", base)
+		}
+	}
+}
+
+func TestScreenshotDimensions(t *testing.T) {
+	for _, size := range [][2]int{{320, 180}, {3032, 1852}, {1852, 3032}, {2048, 2048}, {5000, 1}} {
+		w, h := ScreenshotDimensions(size[0], size[1])
+		if w > size[0] || h > size[1] || max(w, h) > ScreenshotMaxDimension || w*h > ScreenshotMaxPixels {
+			t.Fatalf("invalid dimensions: %v -> %dx%d", size, w, h)
+		}
+		if size[0] == 320 && (w != 320 || h != 180) {
+			t.Fatal("small image was resized")
+		}
+	}
+}
 
 func TestModelImageForProviderKeepsBoundedOriginal(t *testing.T) {
 	home := t.TempDir()

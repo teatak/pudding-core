@@ -15,6 +15,8 @@ import (
 
 const (
 	ModelImageMaxDimension  = 2048
+	ScreenshotMaxDimension  = 1536
+	ScreenshotMaxPixels     = 1200000
 	ModelImageMaxSourceArea = 64 * 1024 * 1024
 	modelImageMaxBytes      = 4 << 20
 	modelImageJPEGQuality   = 85
@@ -35,6 +37,22 @@ type ModelImage struct {
 // ModelImageForProvider returns the original image when it is already bounded,
 // otherwise it creates and caches a model-only derivative next to the blob.
 func (s *Service) ModelImageForProvider(sessionID, key, mimeType string) (ModelImage, error) {
+	return s.modelImageForProvider(sessionID, key, mimeType, false)
+}
+
+// ScreenshotForProvider bounds routine browser observations independently of
+// user images and explicit media reads. The original blob is never replaced.
+func (s *Service) ScreenshotForProvider(sessionID, key, mimeType string) (ModelImage, error) {
+	return s.modelImageForProvider(sessionID, key, mimeType, true)
+}
+
+// IsBrowserScreenshot recognizes the canonical attachment emitted by the
+// browser capture tool, including captures saved before model-only resizing.
+func IsBrowserScreenshot(name, origin string) bool {
+	return origin == OriginTool && name == "browser-screenshot.png"
+}
+
+func (s *Service) modelImageForProvider(sessionID, key, mimeType string, screenshot bool) (ModelImage, error) {
 	path, ok, err := s.Path(sessionID, key)
 	if err != nil {
 		return ModelImage{}, err
@@ -57,11 +75,18 @@ func (s *Service) ModelImageForProvider(sessionID, key, mimeType string) (ModelI
 	if int64(config.Width)*int64(config.Height) > ModelImageMaxSourceArea {
 		return ModelImage{}, ErrModelImageTooLarge
 	}
-	if config.Width <= ModelImageMaxDimension && config.Height <= ModelImageMaxDimension && len(data) <= modelImageMaxBytes {
+	targetWidth, targetHeight := modelImageDimensions(config.Width, config.Height)
+	if screenshot {
+		targetWidth, targetHeight = ScreenshotDimensions(config.Width, config.Height)
+	}
+	if targetWidth == config.Width && targetHeight == config.Height && len(data) <= modelImageMaxBytes {
 		return ModelImage{Data: data, MIME: resolvedImageMIME(mimeType, format), Width: config.Width, Height: config.Height, Original: true}, nil
 	}
 
 	cacheBase := modelImageCacheBase(path)
+	if screenshot {
+		cacheBase = screenshotCacheBase(path)
+	}
 	if cached, ok := readCachedModelImage(cacheBase); ok {
 		return cached, nil
 	}
@@ -69,7 +94,6 @@ func (s *Service) ModelImageForProvider(sessionID, key, mimeType string) (ModelI
 	if err != nil {
 		return ModelImage{Data: data, MIME: mimeType, Width: config.Width, Height: config.Height, Original: true}, nil
 	}
-	targetWidth, targetHeight := modelImageDimensions(config.Width, config.Height)
 	modelImage := decoded
 	if targetWidth != config.Width || targetHeight != config.Height {
 		modelImage = resizeModelImage(decoded, targetWidth, targetHeight)
@@ -85,6 +109,17 @@ func (s *Service) ModelImageForProvider(sessionID, key, mimeType string) (ModelI
 		return ModelImage{Data: encoded, MIME: outputMIME, Width: targetWidth, Height: targetHeight}, nil
 	}
 	return ModelImage{Data: encoded, MIME: outputMIME, Width: targetWidth, Height: targetHeight}, nil
+}
+
+// ScreenshotDimensions preserves aspect ratio and never upscales. Flooring
+// keeps both the long-edge and total-pixel limits strict after rounding.
+func ScreenshotDimensions(width, height int) (int, int) {
+	if width <= 0 || height <= 0 {
+		return 0, 0
+	}
+	scale := math.Min(1, float64(ScreenshotMaxDimension)/float64(max(width, height)))
+	scale = math.Min(scale, math.Sqrt(float64(ScreenshotMaxPixels)/(float64(width)*float64(height))))
+	return max(1, int(math.Floor(float64(width)*scale))), max(1, int(math.Floor(float64(height)*scale)))
 }
 
 func modelImageDimensions(width, height int) (int, int) {
@@ -200,6 +235,10 @@ func modelImageCacheBase(originalPath string) string {
 	return filepath.Join(filepath.Dir(originalPath), modelImageCacheDir, filepath.Base(originalPath)+"."+modelImageCacheVersion)
 }
 
+func screenshotCacheBase(originalPath string) string {
+	return filepath.Join(filepath.Dir(originalPath), modelImageCacheDir, filepath.Base(originalPath)+".screenshot-v1-1536-1200000")
+}
+
 func readCachedModelImage(base string) (ModelImage, bool) {
 	for _, candidate := range []struct {
 		extension string
@@ -250,11 +289,12 @@ func writeCachedModelImage(path string, data []byte) error {
 }
 
 func removeModelImageCache(originalPath string) error {
-	base := modelImageCacheBase(originalPath)
 	var firstErr error
-	for _, extension := range []string{".png", ".jpg"} {
-		if err := os.Remove(base + extension); err != nil && !errors.Is(err, os.ErrNotExist) && firstErr == nil {
-			firstErr = err
+	for _, base := range []string{modelImageCacheBase(originalPath), screenshotCacheBase(originalPath)} {
+		for _, extension := range []string{".png", ".jpg"} {
+			if err := os.Remove(base + extension); err != nil && !errors.Is(err, os.ErrNotExist) && firstErr == nil {
+				firstErr = err
+			}
 		}
 	}
 	return firstErr

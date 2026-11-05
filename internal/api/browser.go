@@ -32,6 +32,7 @@ type browserSyncReq struct {
 type browserObserveReq struct {
 	MaxTextChars int `json:"maxTextChars"`
 	MaxElements  int `json:"maxElements"`
+	Offset       int `json:"offset"`
 }
 
 type browserScreenshotReq struct {
@@ -840,9 +841,13 @@ func (s *Server) observeBrowserTab(c *cart.Context) error {
 	if err := decode(c, &req); err != nil && !errors.Is(err, io.EOF) {
 		return badRequest(c, "invalid json body")
 	}
+	if req.Offset < 0 {
+		return badRequest(c, "offset must be non-negative")
+	}
 	result, err := s.browser.Observe(c.Request.Context(), sessionID, tabID, browser.ObserveOptions{
 		MaxTextChars: req.MaxTextChars,
 		MaxElements:  req.MaxElements,
+		Offset:       req.Offset,
 	})
 	if err != nil {
 		return s.browserError(c, err)
@@ -1070,7 +1075,7 @@ func browserHistoryInputFromTab(tab browser.TabSnapshot) (store.BrowserHistoryIn
 
 func (s *Server) browserProcessMode(ctx context.Context, sessionID string) string {
 	if s.browser == nil {
-		return "headless"
+		return ""
 	}
 	return s.browser.ProcessMode(ctx, sessionID)
 }

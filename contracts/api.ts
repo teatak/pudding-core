@@ -1003,6 +1003,7 @@ export type BrowserTab = z.infer<typeof browserTab>;
 export const browserBounds = z.object({ x: z.number(), y: z.number(), width: z.number(), height: z.number() });
 
 export const observedBrowserElement = z.object({
+  ref: z.string().optional(),
   index: z.number(),
   tag: z.string(),
   text: z.string().optional(),
@@ -1025,7 +1026,10 @@ export const browserObservation = z.object({
   textChars: z.number(),
   truncated: z.boolean(),
   elements: z.array(observedBrowserElement),
-  scrollContainers: z.array(z.object({ selector: z.string(), bounds: browserBounds, scrollX: z.number(), scrollY: z.number(), maxScrollX: z.number(), maxScrollY: z.number() })),
+  unavailableFrames: z.array(z.string()).optional(),
+  totalElements: z.number().int().nonnegative(),
+  nextOffset: z.number().int().nonnegative().nullable(),
+  scrollContainers: z.array(z.object({ ref: z.string().optional(), selector: z.string(), bounds: browserBounds, scrollX: z.number(), scrollY: z.number(), maxScrollX: z.number(), maxScrollY: z.number() })),
 });
 export type BrowserObservation = z.infer<typeof browserObservation>;
 
@@ -1113,6 +1117,7 @@ export const browserSyncRequest = z.object({
 export const browserObserveRequest = z.object({
   maxTextChars: z.number().optional(),
   maxElements: z.number().optional(),
+  offset: z.number().int().nonnegative().optional(),
 });
 export const browserScreenshotRequest = z.object({}).strict();
 export const browserClickRequest = z.object({

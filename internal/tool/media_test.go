@@ -118,6 +118,48 @@ func TestBuiltinMediaReadRoutesProjectImageAndAudioFiles(t *testing.T) {
 	}
 }
 
+func TestBuiltinMediaReadImagePurpose(t *testing.T) {
+	home := t.TempDir()
+	service := attachment.NewService(home)
+	image, err := service.StoreReader("s1", "reference.png", "image/png", bytes.NewReader(testPNGBytes()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	audio, err := service.StoreReader("s1", "audio.wav", "audio/wav", bytes.NewReader(testWAVBytes()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner := NewBuiltinRunner(WithHomeDir(home))
+	for _, tc := range []struct {
+		purpose, key, want string
+		ok                 bool
+	}{
+		{"", image.AttachmentKey, MediaPurposeReference, true},
+		{MediaPurposeReference, image.AttachmentKey, MediaPurposeReference, true},
+		{MediaPurposeObservation, image.AttachmentKey, MediaPurposeObservation, true},
+		{"unknown", image.AttachmentKey, "", false},
+		{MediaPurposeReference, audio.AttachmentKey, "", false},
+		{"", audio.AttachmentKey, "", true},
+	} {
+		args, _ := json.Marshal(map[string]string{"source": "attachment", "attachmentKey": tc.key, "purpose": tc.purpose})
+		result := runner.Call(context.Background(), Call{SessionID: "s1", Name: MediaRead, Args: args})
+		if result.Ok != tc.ok {
+			t.Fatalf("purpose=%q ok=%v: %s", tc.purpose, result.Ok, result.Content)
+		}
+		if tc.ok {
+			payload := decodeToolResult(t, result)
+			if tc.want != "" && payload["purpose"] != tc.want {
+				t.Fatalf("wrong purpose: %v", payload)
+			}
+			if tc.want == "" && payload["purpose"] != nil {
+				t.Fatal("audio acquired image policy")
+			}
+		} else if len(result.ContextAttachments) != 0 {
+			t.Fatal("invalid purpose still routed media")
+		}
+	}
+}
+
 func TestBuiltinMediaReadRejectsCrossSessionAndFilesystemAttachmentKeys(t *testing.T) {
 	home := t.TempDir()
 	stored, err := attachment.NewService(home).StoreReader("sess_other", "photo.png", "image/png", bytes.NewReader(testPNGBytes()))

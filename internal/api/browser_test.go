@@ -31,6 +31,26 @@ func newBrowserTestServer(t *testing.T) (*httptest.Server, store.Store, *fakeBro
 	return srv, ms, browserSvc
 }
 
+func TestBrowserObservePagination(t *testing.T) {
+	srv, st, svc := newBrowserTestServer(t)
+	if err := st.CreateSession(context.Background(), &store.Session{ID: "sess_observe", Provider: "mock", Model: "mock"}); err != nil {
+		t.Fatal(err)
+	}
+	opened := req(t, http.MethodPost, srv.URL+"/sessions/sess_observe/browser/open", map[string]string{"url": "example.org"})
+	tab := decodeJSON[browser.TabSnapshot](t, opened)
+	endpoint := srv.URL + "/sessions/sess_observe/browser/tabs/" + tab.ID + "/observe"
+	resp := req(t, http.MethodPost, endpoint, map[string]int{"offset": 100, "maxElements": 25})
+	out := decodeJSON[browser.ObserveResult](t, resp)
+	if resp.StatusCode != http.StatusOK || svc.observeOptions.Offset != 100 || svc.observeOptions.MaxElements != 25 || out.TotalElements != 125 || out.NextOffset != nil {
+		t.Fatalf("observation pagination lost: status=%d options=%+v result=%+v", resp.StatusCode, svc.observeOptions, out)
+	}
+	resp = req(t, http.MethodPost, endpoint, map[string]int{"offset": -1})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest || svc.observeOptions.Offset != 100 {
+		t.Fatalf("invalid offset reached browser: status=%d options=%+v", resp.StatusCode, svc.observeOptions)
+	}
+}
+
 func TestBrowserScreenshotRejectsFullPage(t *testing.T) {
 	srv, st, _ := newBrowserTestServer(t)
 	if err := st.CreateSession(context.Background(), &store.Session{ID: "sess_capture", Provider: "mock", Model: "mock"}); err != nil {
@@ -1180,6 +1200,7 @@ func TestProjectChangesRevokeLiveBrowserFileAccess(t *testing.T) {
 }
 
 type fakeBrowserService struct {
+	observeOptions           browser.ObserveOptions
 	releaseError             error
 	recoverErrors            map[string]error
 	tabs                     map[string]browser.TabSnapshot
@@ -1396,8 +1417,9 @@ func (f *fakeBrowserService) Reload(_ context.Context, sessionID, tabID string) 
 	return f.GetTab(context.Background(), sessionID, tabID)
 }
 
-func (f *fakeBrowserService) Observe(context.Context, string, string, browser.ObserveOptions) (browser.ObserveResult, error) {
-	return browser.ObserveResult{}, nil
+func (f *fakeBrowserService) Observe(_ context.Context, _, _ string, options browser.ObserveOptions) (browser.ObserveResult, error) {
+	f.observeOptions = options
+	return browser.ObserveResult{TotalElements: 125}, nil
 }
 
 func (f *fakeBrowserService) Screenshot(context.Context, string, string) (browser.ScreenshotResult, error) {

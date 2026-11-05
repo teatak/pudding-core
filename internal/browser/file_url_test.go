@@ -53,8 +53,13 @@ func TestProjectFileURLAuthorizerAllowsOnlyRegularFilesInsideProject(t *testing.
 	if authorized.FileRoot != resolvedRoot {
 		t.Fatalf("file root = %q, want %q", authorized.FileRoot, resolvedRoot)
 	}
-	if !fileURLAllowed(authorized.URL, []string{authorized.FileRoot}) {
-		t.Fatalf("authorized URL was rejected: %s", authorized.URL)
+	resolvedFile, err := filepath.EvalSymlinks(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	expectedURL := (&url.URL{Scheme: "file", Path: "/" + strings.TrimPrefix(filepath.ToSlash(resolvedFile), "/"), Fragment: "intro"}).String()
+	if authorized.URL != expectedURL {
+		t.Fatalf("authorized URL = %s, want %s", authorized.URL, expectedURL)
 	}
 
 	outside := filepath.Join(t.TempDir(), "outside.html")
@@ -94,5 +99,31 @@ func TestProjectFileURLAuthorizerRejectsSymlinkEscape(t *testing.T) {
 func TestFileURLNotAllowedHasStableToolErrorCode(t *testing.T) {
 	if got := ErrorCode(ErrFileURLNotAllowed); got != "file_url_not_allowed" {
 		t.Fatalf("error code = %q", got)
+	}
+}
+
+func TestNormalizeURLDefaultsHTTPS(t *testing.T) {
+	got, err := normalizeURL("example.com/path")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "https://example.com/path" {
+		t.Fatalf("url = %q", got)
+	}
+}
+
+func TestNormalizeURLDefaultsLocalhostToHTTP(t *testing.T) {
+	got, err := normalizeURL("localhost:5173")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "http://localhost:5173" {
+		t.Fatalf("url = %q", got)
+	}
+}
+
+func TestNormalizeURLRejectsUnsupportedSchemes(t *testing.T) {
+	if _, err := normalizeURL("file:///tmp/demo.html"); err == nil {
+		t.Fatal("file URL should be rejected")
 	}
 }

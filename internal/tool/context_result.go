@@ -27,6 +27,9 @@ type ResultReference struct {
 // and UI results remain unchanged. Only shorten results when a reader is in the
 // request's tool set; skill instructions and explicit readback pages stay intact.
 func modelResultJSON(name string, ok bool, content, turnID, callID string, canRead bool) string {
+	if name == BrowserScreenshot && ok {
+		content = modelBrowserScreenshotResult(content)
+	}
 	if IsPluginLoad(name) || name == SkillRead {
 		return SkillReferenceOnly(name, ok, content)
 	}

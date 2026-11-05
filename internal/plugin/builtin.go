@@ -120,12 +120,13 @@ Use child conversations for bounded work that can make useful progress independe
 
 Use Pudding's built-in browser for webpages that require navigation or interaction. Use the currently loaded tools for follow-up tasks even when older conversation examples used shell-based Chrome.
 
-- For frontend visual verification, use these managed browser tools before launching headless Chrome through shell commands. Open an existing HTML/SVG file inside the authorized project with builtin_browser_open using its file:// URL, or open the localhost dev server URL. Code already includes Work; no mode downgrade is needed.
+- For frontend visual verification, use these managed browser tools; they require the Electron desktop bridge. Do not launch an unmanaged headless Chrome as a fallback. Open an existing HTML/SVG file inside the authorized project with builtin_browser_open using its file:// URL, or open the localhost dev server URL. Code already includes Work; no mode downgrade is needed.
 - Inspect layout and interactive elements with builtin_browser_observe, then capture the current viewport as an image attachment with builtin_browser_screenshot. Reuse the returned tabID; call builtin_browser_reload after editing the page. Opening a tab alone is not visual verification: inspect the returned image and relevant page state.
 - Screenshots capture the current viewport only. These tools do not provide deterministic animation time, multi-frame sampling, or arbitrary SVG geometry queries; do not infer animation continuity from a single frame.
 - Check browser status before assuming a tab exists.
-- Observe the page before clicking or typing.
-- Re-observe after navigation or a significant page change.
+- Observe the page before clicking or typing. Prefer the returned element ref as the selector argument. Re-observe after stale-reference or moved-target errors; never guess a replacement positional selector. Controls intersecting the viewport come first; offscreen controls remain available on later pages. If a target is missing, pass nextOffset as offset until it is found or nextOffset is null before falling back to screenshot coordinates.
+- Restart observation at offset=0 after scrolling, navigation, or a significant page change; offsets refer to the current page state.
+- Click success confirms input delivery only. Verify the expected dialog, URL, or page state afterward. If the hit element is an unrelated container, re-observe and correct the target; that alone is not evidence of a blocked link or missing permissions.
 - For public web search or page text, use Web Search & Fetch (plugin ID: web-search-fetch) when listed in Available Plugins. Load it with builtin_plugin_load only if needed; never use builtin_skill_read to load it. Use Browser when interactive page state or actions are required.
 `,
 			},

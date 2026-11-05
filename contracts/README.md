@@ -35,6 +35,12 @@ The Go daemon embeds it through this package; desktop generates `web/contracts/`
 `api.ts` and `events.ts` are the TypeScript/Zod client validation definitions for the REST and SSE protocol.
 Server structs and lifecycle semantics remain owned by core; verify both sides when changing a wire field.
 
+Browser observations add `offset` (default 0), `totalElements`, and nullable
+`nextOffset`. Controls intersecting the viewport precede offscreen controls, with
+DOM order preserved within each group. Follow `nextOffset` until null; restart
+from offset 0 after scrolling or page changes. Each page remains bounded to 100
+controls. This is an additive browser API/tool extension with no schema migration.
+
 Protocol 55 adds optional host-only `modelOutput` declarations and canonical
 `mcpResult` envelopes to tool-result content parts, plus `modelOutput` on widget
 notifications. Widget SDK 1.2.0 supports the declaration on `defineInterface`
@@ -470,3 +476,5 @@ Without `color`, SVG artwork keeps all original colors, gradients and details.
 plugins and widgets render external artwork in an image context, never as inline
 SVG DOM; failed loads show the existing fallback. Size and corner shape belong
 to the Desktop presentation, not the icon definition.
+
+Browser observations include optional `ref` per element, usable as the `selector` argument. Refs bind to the current document and node identity; stale refs must be refreshed with observe. `unavailableFrames` identifies embedded documents not included in DOM observation. Core browser automation requires the Electron bridge; standalone Chrome launch/attachment has been removed.

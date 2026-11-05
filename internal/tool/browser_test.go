@@ -17,6 +17,33 @@ import (
 	"github.com/teatak/pudding-core/internal/browser"
 )
 
+func TestBuiltinBrowserObservePagination(t *testing.T) {
+	next := 120
+	fake := &fakeToolBrowser{observation: browser.ObserveResult{
+		Elements:      []browser.ObservedElement{{Index: 100, Tag: "button", Selector: "#create"}},
+		TotalElements: 125, NextOffset: &next,
+	}}
+	runner := NewBuiltinRunner(WithBrowser(fake))
+	res := runner.Call(context.Background(), Call{SessionID: "sess_browser", Name: BrowserObserve, Args: json.RawMessage(`{"tabID":"tab_1","maxElements":20,"offset":100}`)})
+	if !res.Ok || fake.observeOptions.Offset != 100 || fake.observeOptions.MaxElements != 20 {
+		t.Fatalf("observation options lost: %+v result=%+v", fake.observeOptions, res)
+	}
+	observation := decodeToolResult(t, res)["observation"].(map[string]any)
+	if observation["totalElements"] != float64(125) || observation["nextOffset"] != float64(120) {
+		t.Fatalf("pagination lost: %+v", observation)
+	}
+	fake.observation.NextOffset = nil
+	res = runner.Call(context.Background(), Call{SessionID: "sess_browser", Name: BrowserObserve, Args: json.RawMessage(`{"tabID":"tab_1","offset":120}`)})
+	observation = decodeToolResult(t, res)["observation"].(map[string]any)
+	if next, exists := observation["nextOffset"]; !exists || next != nil {
+		t.Fatalf("last page must have explicit null nextOffset: %+v", observation)
+	}
+	res = runner.Call(context.Background(), Call{SessionID: "sess_browser", Name: BrowserObserve, Args: json.RawMessage(`{"tabID":"tab_1","offset":-1}`)})
+	if res.Ok || fake.observeOptions.Offset != 120 {
+		t.Fatalf("invalid offset reached browser: %+v result=%+v", fake.observeOptions, res)
+	}
+}
+
 func TestBuiltinBrowserScreenshotRejectsFullPage(t *testing.T) {
 	runner := NewBuiltinRunner(WithHomeDir(t.TempDir()), WithBrowser(&fakeToolBrowser{}))
 	res := runner.Call(context.Background(), Call{SessionID: "sess_browser", Name: BrowserScreenshot, Args: json.RawMessage(`{"tabID":"tab_1","fullPage":true}`)})
@@ -59,10 +86,11 @@ func TestBuiltinBrowserScreenshotRoutesAttachment(t *testing.T) {
 		t.Fatalf("browser screenshot should route a context attachment: %+v", res.ContextAttachments)
 	}
 	payload := decodeToolResult(t, res)
+	modelWidth, modelHeight := attachment.ScreenshotDimensions(2504, 1988)
 	if payload["attachmentKey"] == "" || payload["url"] == "" || payload["exportTool"] != AttachmentExport || payload["exportHint"] == "" {
 		t.Fatalf("missing attachment metadata: %+v", payload)
 	}
-	if payload["width"] != float64(2504) || payload["height"] != float64(1988) || payload["modelWidth"] != float64(2048) || payload["modelHeight"] != float64(1626) || payload["viewportWidth"] != float64(1252) || payload["viewportHeight"] != float64(994) || payload["deviceScaleFactor"] != float64(2) || payload["fullPage"] != false || payload["coordinateSpace"] != "viewport_css_pixels" || payload["coordinateHint"] == "" {
+	if payload["width"] != float64(2504) || payload["height"] != float64(1988) || payload["modelWidth"] != float64(modelWidth) || payload["modelHeight"] != float64(modelHeight) || payload["viewportWidth"] != float64(1252) || payload["viewportHeight"] != float64(994) || payload["deviceScaleFactor"] != float64(2) || payload["fullPage"] != false || payload["coordinateSpace"] != "viewport_css_pixels" || payload["coordinateHint"] == "" {
 		t.Fatalf("screenshot lost coordinate metadata: %+v", payload)
 	}
 	// A model-image point at its center maps to the current CSS viewport,
@@ -97,6 +125,25 @@ func TestBuiltinBrowserMissingService(t *testing.T) {
 	payload := decodeToolResult(t, res)
 	if payload["reason"] != "browser_unavailable" {
 		t.Fatalf("unexpected payload: %+v", payload)
+	}
+}
+
+func TestHistoricalScreenshotCoordinateProjection(t *testing.T) {
+	original := `{"ok":true,"width":3032,"height":1852,"modelWidth":2048,"modelHeight":1251,"captureBounds":{"x":20,"y":10,"width":1516,"height":926},"attachmentKey":"saved"}`
+	view := ModelResultContent(BrowserScreenshot, true, original, "t1", "c1", true)
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(view), &payload); err != nil {
+		t.Fatal(err)
+	}
+	w, h := attachment.ScreenshotDimensions(3032, 1852)
+	if payload["modelWidth"] != float64(w) || payload["modelHeight"] != float64(h) || payload["width"] != float64(3032) || payload["attachmentKey"] != "saved" {
+		t.Fatalf("wrong projection: %s", view)
+	}
+	if ModelResultContent(BrowserScreenshot, true, view, "t1", "c1", true) != view {
+		t.Fatal("projection is not stable")
+	}
+	if !strings.Contains(original, `"modelWidth":2048`) {
+		t.Fatal("canonical result changed")
 	}
 }
 
@@ -252,6 +299,8 @@ func TestBuiltinBrowserOpenWithoutTabIDReportsOpenFailure(t *testing.T) {
 }
 
 type fakeToolBrowser struct {
+	observation    browser.ObserveResult
+	observeOptions browser.ObserveOptions
 	screenshot     browser.ScreenshotResult
 	tabs           []browser.TabSnapshot
 	releasedTabIDs []string
@@ -335,9 +384,12 @@ func (f *fakeToolBrowser) Reload(_ context.Context, sessionID, tabID string) (br
 	return browser.TabSnapshot{ID: tabID, SessionID: sessionID}, nil
 }
 
-func (f *fakeToolBrowser) Observe(_ context.Context, sessionID, tabID string, _ browser.ObserveOptions) (browser.ObserveResult, error) {
-	tab := browser.TabSnapshot{ID: tabID, SessionID: sessionID}
-	return browser.ObserveResult{Tab: tab, Title: "Example", URL: "https://example.com", Text: "Example"}, nil
+func (f *fakeToolBrowser) Observe(_ context.Context, sessionID, tabID string, options browser.ObserveOptions) (browser.ObserveResult, error) {
+	f.observeOptions = options
+	out := f.observation
+	out.Tab = browser.TabSnapshot{ID: tabID, SessionID: sessionID}
+	out.Title, out.URL, out.Text = "Example", "https://example.com", "Example"
+	return out, nil
 }
 
 func (f *fakeToolBrowser) Screenshot(context.Context, string, string) (browser.ScreenshotResult, error) {

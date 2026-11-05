@@ -7,13 +7,122 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/teatak/pudding-core/internal/provider"
 	"github.com/teatak/pudding-core/internal/provider/openai"
 	"github.com/teatak/pudding-core/internal/store"
 	"github.com/teatak/pudding-core/internal/store/storetest"
+	"github.com/teatak/pudding-core/internal/tool"
 )
+
+func TestToolImageBudgetBatchesAndPreservesOtherContent(t *testing.T) {
+	messages := []provider.Message{{Role: provider.RoleUser, Text: "keep my request"}, {Role: provider.RoleUser, Parts: []provider.Part{{Type: provider.PartImage, ImageKey: "upload", Data: []byte("user image")}}}}
+	for i := 1; i <= 32; i++ {
+		key := fmt.Sprintf("shot-%d", i)
+		messages = append(messages, provider.Message{Role: provider.RoleUser, Parts: []provider.Part{{Type: provider.PartImage, Name: tool.BrowserScreenshot, CallID: key, ImageKey: key, MIME: "image/png", Data: []byte(key)}}})
+	}
+	for _, tc := range []struct{ count, keep int }{{8, 8}, {9, 3}, {10, 4}, {14, 8}, {15, 3}, {32, 8}} {
+		source := messages[:tc.count+2]
+		before := fmt.Sprintf("%#v", source)
+		got := LimitToolImages(source)
+		count := 0
+		for _, m := range got[2:] {
+			for _, p := range m.Parts {
+				if p.Type == provider.PartImage {
+					count++
+				} else if p.ImageKey != "" && (!strings.Contains(p.Text, p.ImageKey) || !strings.Contains(p.Text, tool.MediaRead) || len(p.Data) != 0) {
+					t.Fatalf("missing readback or leaked image: %+v", p)
+				}
+			}
+		}
+		if count != tc.keep || got[0].Text != "keep my request" || string(got[1].Parts[0].Data) != "user image" {
+			t.Fatalf("count=%d: kept %d, want %d", tc.count, count, tc.keep)
+		}
+		if !reflect.DeepEqual(got, LimitToolImages(got)) {
+			t.Fatal("projection is not idempotent")
+		}
+		if before != fmt.Sprintf("%#v", source) {
+			t.Fatal("source messages changed")
+		}
+	}
+	// The ninth image evicts six. Adding one image must not rewrite any prefix.
+	nine := LimitToolImages(messages[:11])
+	ten := LimitToolImages(append(append([]provider.Message(nil), nine...), messages[11]))
+	if !reflect.DeepEqual(nine, ten[:len(nine)]) {
+		t.Fatal("prefix changed between batch boundaries")
+	}
+}
+
+func TestToolImagePruningPreservesCallsButDropsBoundAnthropicThinking(t *testing.T) {
+	states := []provider.Continuation{
+		{Kind: provider.ContinuationAnthropic, Data: json.RawMessage(`[{"type":"thinking","thinking":"private","signature":"bound"},{"type":"redacted_thinking","data":"bound"},{"type":"tool_use","id":"click","name":"click","input":{}}]`)},
+		{Kind: provider.ContinuationGoogle, Data: json.RawMessage(`[{"functionCall":{"name":"click"},"thoughtSignature":"required"}]`)},
+	}
+	messages := []provider.Message{{Role: provider.RoleAssistant, Continuations: states}}
+	for i := 0; i < 9; i++ {
+		messages = append(messages, provider.Message{Role: provider.RoleUser, Parts: []provider.Part{{Type: provider.PartImage, Name: tool.BrowserScreenshot, ImageKey: fmt.Sprint(i), Data: []byte("image")}}})
+	}
+	messages = append(messages, provider.Message{Role: provider.RoleAssistant, Continuations: states, Parts: []provider.Part{{Type: provider.PartToolUse, CallID: "click", Name: "click"}}})
+	got := LimitToolImages(messages)
+	if !reflect.DeepEqual(got[0].Continuations, states) {
+		t.Fatal("state before omitted image changed")
+	}
+	last := got[len(got)-1]
+	if strings.Contains(string(last.Continuations[0].Data), "thinking") || !strings.Contains(string(last.Continuations[0].Data), "tool_use") {
+		t.Fatal("bound thinking/call handling failed")
+	}
+	if !reflect.DeepEqual(last.Continuations[1], states[1]) || !strings.Contains(string(states[0].Data), "thinking") {
+		t.Fatal("other provider or canonical state changed")
+	}
+}
+
+func TestScreenshotBudgetSeparatesReferencesAndTemporaryReads(t *testing.T) {
+	var messages []provider.Message
+	addRead := func(purpose, key string) {
+		// Deliberately reuse a call ID in later exchanges to check chronological
+		// attribution instead of assigning the last call's purpose to all images.
+		args := json.RawMessage(`{}`)
+		if purpose != "" {
+			args, _ = json.Marshal(map[string]string{"purpose": purpose})
+		}
+		messages = append(messages,
+			provider.Message{Role: provider.RoleAssistant, Parts: []provider.Part{{Type: provider.PartToolUse, Name: tool.MediaRead, CallID: "read", Args: args}}},
+			provider.Message{Role: provider.RoleUser, Parts: []provider.Part{{Type: provider.PartToolResult, Name: tool.MediaRead, CallID: "read", Content: `{"cold_only":true}`}}},
+			provider.Message{Role: provider.RoleUser, Parts: []provider.Part{{Type: provider.PartImage, Name: tool.MediaRead, CallID: "read", ImageKey: key, Data: []byte(key)}}},
+		)
+	}
+	addRead("", "legacy-reference")
+	addRead(tool.MediaPurposeReference, "explicit-reference")
+	addRead(tool.MediaPurposeObservation, "temporary-read")
+	for i := 0; i < 8; i++ {
+		key := fmt.Sprintf("shot-%d", i)
+		messages = append(messages, provider.Message{Role: provider.RoleUser, Parts: []provider.Part{{Type: provider.PartImage, Name: tool.BrowserScreenshot, ImageKey: key, Data: []byte(key)}}})
+	}
+	addRead(tool.MediaPurposeReference, "promoted-screenshot")
+	projected := LimitToolImages(messages)
+	var images []string
+	for _, m := range projected {
+		for _, p := range m.Parts {
+			if p.Type == provider.PartImage {
+				images = append(images, p.ImageKey)
+			}
+		}
+	}
+	want := []string{"legacy-reference", "explicit-reference", "shot-5", "shot-6", "shot-7", "promoted-screenshot"}
+	if !reflect.DeepEqual(images, want) {
+		t.Fatalf("image purposes lost: got %v want %v", images, want)
+	}
+	if !reflect.DeepEqual(projected, LimitToolImages(projected)) {
+		t.Fatal("reprojection changed references or screenshot boundary")
+	}
+	for _, p := range projected[8].Parts {
+		if p.ImageKey == "temporary-read" && (!strings.Contains(p.Text, `"purpose":"observation"`) || !strings.Contains(p.Text, "purpose=reference")) {
+			t.Fatal("omitted screenshot lacks readback purpose guidance")
+		}
+	}
+}
 
 // A widget can record a notification while its invocation is still running.
 // Both call and result exist, but chronological history puts a new user input
