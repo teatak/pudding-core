@@ -62,13 +62,16 @@ func TestCoreDefinitionsUseSmallStableCodeSurface(t *testing.T) {
 	if !reflect.DeepEqual(first, second) {
 		t.Fatal("core tool definitions are not stable")
 	}
-	for _, name := range []string{
+	expected := []string{
+		AssistantTaskDispatch, AssistantTaskList, AssistantTaskSend, AssistantRename, AssistantMemory, AssistantUserName,
+		ScheduledTask, TimeGetCurrent, HistorySearch, HistoryGetMessage, SkillRead, WeatherGet, SetTurnTopic,
 		RequestCapability, SetNextPrompt, CommandRun, CommandSession, MediaRead,
 		FileList, FileRead, AttachmentExport, TempWorkspace, FileStat, FileSearch, FileSlice,
 		FileWrite, FilePatch, FileDelete, FileMove, FileCopy,
 		GitStatus, GitDiff, GitLog, GitStage, GitUnstage, GitCommit,
 		CodeSymbols, CodeDefinition, CodeReferences, CodeDiagnostics, CodeRename,
-	} {
+	}
+	for _, name := range expected {
 		if !HasDefinition(first, name) {
 			t.Fatalf("Code Core missing %s", name)
 		}
@@ -80,8 +83,8 @@ func TestCoreDefinitionsUseSmallStableCodeSurface(t *testing.T) {
 	}
 	// Three assignment tools are available only in the fixed assistant; the
 	// engine removes them from ordinary and child sessions.
-	if len(first) > 40 {
-		t.Fatalf("Code Core tool count = %d, want <= 40", len(first))
+	if len(first) != len(expected) {
+		t.Fatalf("Code Core tool count = %d, want exactly %d approved tools", len(first), len(expected))
 	}
 }
 

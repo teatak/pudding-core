@@ -27,6 +27,7 @@ const (
 	HistoryGetMessage = "builtin_history_get_message"
 	SkillRead         = "builtin_skill_read"
 	SetNextPrompt     = "builtin_set_next_prompt"
+	SetTurnTopic      = "builtin_set_turn_topic"
 	CodeSymbols       = "builtin_code_symbols"
 	CodeDefinition    = "builtin_code_definition"
 	CodeReferences    = "builtin_code_references"
@@ -70,6 +71,7 @@ const (
 	BrowserReload     = "builtin_browser_reload"
 	BrowserClose      = "builtin_browser_close"
 	BrowserClick      = "builtin_browser_click"
+	BrowserSelect     = "builtin_browser_select"
 	BrowserType       = "builtin_browser_type"
 	BrowserScroll     = "builtin_browser_scroll"
 	ComputerListApps  = "builtin_computer_list_apps"
@@ -388,6 +390,7 @@ func builtinRunnerDefinitions() []provider.ToolDef {
 			Capability:  store.ModeChat,
 		},
 		NextPromptDefinition(),
+		TurnTopicDefinition(),
 		{
 			Name:        CodeSymbols,
 			Description: "Search semantic workspace symbols through the language server. Uses one shared tool contract for Go and TypeScript/JavaScript.",
@@ -647,14 +650,20 @@ func builtinRunnerDefinitions() []provider.ToolDef {
 		},
 		{
 			Name:        BrowserClick,
-			Description: "Click an element in a managed browser tab by CSS selector or viewport CSS pixel coordinates using focus-preserving CDP target activation. Prefer the element ref from observe as selector; references reject removed or repurposed nodes. CSS selectors must match exactly one element. Screenshot pixels may be scaled: use screenshot captureBounds and modelWidth/modelHeight to map image points to viewport coordinates. Success confirms input delivery; observe afterward to verify the intended effect.",
-			InputSchema: json.RawMessage(`{"type":"object","properties":{"tabID":{"type":"string","description":"Tab ID. Required when more than one tab exists."},"selector":{"type":"string","description":"Element ref from observe (preferred), or a unique CSS selector."},"x":{"type":"number","description":"Viewport X coordinate, used when selector is omitted."},"y":{"type":"number","description":"Viewport Y coordinate, used when selector is omitted."},"method":{"type":"string","enum":["auto","pointer"],"description":"Click implementation. Both values use focus-preserving target activation through CDP; auto is the default."}},"additionalProperties":false}`),
+			Description: "Click an element using focus-preserving CDP target activation. Prefer an observed element ref; screenshot coordinates are a last resort and require observationID from the same observe/screenshot. Stale coordinates fail after page or viewport changes; observe again instead of retrying the old coordinates. Prefer the element ref from observe as selector; references reject removed or repurposed nodes. CSS selectors must match exactly one element. Screenshot pixels may be scaled: use screenshot captureBounds and modelWidth/modelHeight to map image points to viewport coordinates. Success confirms input delivery; observe afterward to verify the intended effect.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"tabID":{"type":"string","description":"Tab ID. Required when more than one tab exists."},"selector":{"type":"string","description":"Element ref from observe (preferred), or a unique CSS selector."},"x":{"type":"number","description":"Viewport X coordinate, used when selector is omitted."},"y":{"type":"number","description":"Viewport Y coordinate, used when selector is omitted."},"observationID":{"type":"string","description":"Required with x/y: ID from the observation or screenshot used to derive those coordinates."},"method":{"type":"string","enum":["auto","pointer"],"description":"Click implementation. Both values use focus-preserving target activation through CDP; auto is the default."}},"additionalProperties":false}`),
 			Capability:  store.ModeWork,
 		},
 		{
 			Name:        BrowserType,
-			Description: "Type text into an input, textarea, or contenteditable element in a managed browser tab.",
-			InputSchema: json.RawMessage(`{"type":"object","properties":{"tabID":{"type":"string","description":"Tab ID. Required when more than one tab exists."},"selector":{"type":"string","description":"Element ref from observe (preferred), or a unique CSS selector for an editable element. If omitted, uses the active element focused by a prior click."},"text":{"type":"string","description":"Text to type."},"clear":{"type":"boolean","description":"Replace existing text before typing."}},"required":["text"],"additionalProperties":false}`),
+			Description: "Type into an input, textarea, or contenteditable using its observed ref. For setting a form value use clear=true and commit=true: dispatch input and change, blur, and read back the value. Date/time inputs require their canonical HTML value format (datetime-local: YYYY-MM-DDTHH:mm, no timezone). An empty text with clear=true clears the input. Custom combobox text is not a selected option: observe and click the option ref. Success verifies the local value, not submission or business outcome.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"tabID":{"type":"string","description":"Tab ID. Required when more than one tab exists."},"selector":{"type":"string","description":"Element ref from observe (preferred), or a unique CSS selector for an editable element. If omitted, uses the active element focused by a prior click."},"text":{"type":"string","description":"Text to type."},"clear":{"type":"boolean","description":"Replace existing text before typing."},"commit":{"type":"boolean","description":"Dispatch change and blur after input, then verify the value. Does not submit the form; default false."}},"required":["text"],"additionalProperties":false}`),
+			Capability:  store.ModeWork,
+		},
+		{
+			Name:        BrowserSelect,
+			Description: "Select one option in a native single-select using an observed element ref (preferred) or unique CSS selector. Supply exactly one of label (exact displayed text) or value. Dispatches input/change and verifies the selected label/value; ambiguous, absent or disabled options fail. For custom comboboxes, use observe to locate and click an option ref instead. Success confirms the local selection, not business outcome; verify the intended effect afterward.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"tabID":{"type":"string"},"selector":{"type":"string","minLength":1},"label":{"type":"string"},"value":{"type":"string"}},"required":["selector"],"oneOf":[{"required":["label"],"not":{"required":["value"]}},{"required":["value"],"not":{"required":["label"]}}],"additionalProperties":false}`),
 			Capability:  store.ModeWork,
 		},
 		{
@@ -744,6 +753,8 @@ func (r *BuiltinRunner) Call(ctx context.Context, call Call) (result Result) {
 		return r.skillRead(ctx, call)
 	case SetNextPrompt:
 		return nextPrompt(call)
+	case SetTurnTopic:
+		return turnTopic(call)
 	case CodeSymbols:
 		return r.codeSymbols(ctx, call)
 	case CodeDefinition:
@@ -832,6 +843,8 @@ func (r *BuiltinRunner) Call(ctx context.Context, call Call) (result Result) {
 		return r.browserClose(ctx, call)
 	case BrowserClick:
 		return r.browserClick(ctx, call)
+	case BrowserSelect:
+		return r.browserSelect(ctx, call)
 	case BrowserType:
 		return r.browserType(ctx, call)
 	case BrowserScroll:

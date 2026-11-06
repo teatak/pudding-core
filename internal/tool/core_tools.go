@@ -17,6 +17,7 @@ var chatCoreTools = map[string]bool{
 	AssistantMemory:       true,
 	AssistantUserName:     true,
 	SetNextPrompt:         true,
+	SetTurnTopic:          true,
 	ScheduledTask:         true,
 	TimeGetCurrent:        true,
 	HistorySearch:         true, HistoryGetMessage: true, SkillRead: true,

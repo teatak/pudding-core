@@ -20,10 +20,46 @@ import (
 // Exercise the wire serializers: a canonical-only assertion would miss native
 // continuations, which adapters prefer over visible parts when replaying history.
 func TestUIOnlyHistoryExcludedFromEveryProvider(t *testing.T) {
-	for _, name := range []string{tool.SetNextPrompt, "builtin_plan_update"} {
+	for _, name := range []string{tool.SetNextPrompt, tool.SetTurnTopic, "builtin_plan_update"} {
 		t.Run(name, func(t *testing.T) {
 			testUIOnlyHistoryExcludedFromEveryProvider(t, name)
 		})
+	}
+}
+
+func TestTurnTopicContextSurvivesCompaction(t *testing.T) {
+	ctx := context.Background()
+	st := storetest.New(t)
+	if err := st.CreateSession(ctx, &store.Session{ID: "topic-context", Title: "会话", Provider: "test", Model: "model"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.BeginTurn(ctx, store.BeginTurnInput{SessionID: "topic-context", TurnID: "marker-turn", UserMessageID: "topic-input", ClientMessageID: "topic-client", UserText: "检查界面"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.FinishTurn(ctx, store.FinishTurnInput{TurnID: "marker-turn", Status: store.TurnCompleted, AssistantParts: []store.ContentPart{
+		{Type: store.ContentPartText, Text: "已检查"},
+		{Type: store.ContentPartToolResult, Name: tool.SetTurnTopic, CallID: "topic", Ok: true, Content: `{"title":"界面布局"}`},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	// The effective history no longer contains the original topic tool record.
+	history := []*store.Message{
+		{Role: store.RoleSummary, Parts: store.TextPart("此前完成了界面检查")},
+		{Role: store.RoleUser, Parts: store.TextPart("继续")},
+	}
+	req, err := New(st, nil).BuildForProviderWithHistory(ctx, "topic-context", "test", "model", "chat", []provider.ToolDef{tool.TurnTopicDefinition()}, history, provider.ModelConfig{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(req.System, `"title":"界面布局"`) || !strings.Contains(req.System, `"turnID":"marker-turn"`) {
+		t.Fatalf("compaction lost the current topic metadata: %s", req.System)
+	}
+	for _, message := range req.Messages {
+		for _, part := range message.Parts {
+			if part.Name == tool.SetTurnTopic {
+				t.Fatal("topic tool replayed after compaction")
+			}
+		}
 	}
 }
 

@@ -311,42 +311,59 @@ func commandPipelineWarning(command string) *CommandVerificationWarning {
 	if err != nil {
 		return nil
 	}
-	found := false
-	syntax.Walk(analysis.file, func(node syntax.Node) bool {
-		if found {
-			return false
-		}
-		// Defining a function does not execute its body. Do not infer the
-		// behavior of a later call or an opaque script.
-		if _, ok := node.(*syntax.FuncDecl); ok {
-			return false
-		}
-		pipeline, ok := node.(*syntax.BinaryCmd)
-		if !ok || pipeline.Op != syntax.Pipe {
-			return true
-		}
-		// Only an upstream command loses its exit status to the next stage.
-		syntax.Walk(pipeline.X, func(node syntax.Node) bool {
+	code := ""
+	containsVerification := func(node syntax.Node) bool {
+		found := false
+		syntax.Walk(node, func(node syntax.Node) bool {
+			if found {
+				return false
+			}
 			if _, ok := node.(*syntax.FuncDecl); ok {
 				return false
 			}
 			if call, ok := node.(*syntax.CallExpr); ok {
 				argv, static := staticCallArgv(call)
-				if static && commandVerificationKind(unwrapCommand(argv)) != "" {
-					found = true
-				}
+				found = static && commandVerificationKind(unwrapCommand(argv)) != ""
 			}
 			return !found
 		})
-		return !found
+		return found
+	}
+	syntax.Walk(analysis.file, func(node syntax.Node) bool {
+		if code != "" {
+			return false
+		}
+		// Defining a function does not execute it. Opaque scripts stay opaque.
+		if _, ok := node.(*syntax.FuncDecl); ok {
+			return false
+		}
+		binary, ok := node.(*syntax.BinaryCmd)
+		if !ok {
+			return true
+		}
+		if binary.Op == syntax.Pipe && containsVerification(binary.X) {
+			code = "pipeline_exit_status"
+			return false
+		}
+		if binary.Op == syntax.OrStmt && !binary.Y.Negated && containsVerification(binary.X) {
+			if call, ok := binary.Y.Cmd.(*syntax.CallExpr); ok {
+				argv, static := staticCallArgv(call)
+				if static && ((len(argv) == 1 && (argv[0] == "true" || argv[0] == ":")) ||
+					(len(argv) == 2 && argv[0] == "exit" && argv[1] == "0")) {
+					code = "masked_exit_status"
+				}
+			}
+		}
+		return code == ""
 	})
-	if !found {
+	if code == "" {
 		return nil
 	}
-	return &CommandVerificationWarning{
-		Code:    "pipeline_exit_status",
-		Message: "This pipeline's shell exit code does not prove that upstream verification passed. Run the verification command directly, then use the result reader to inspect bounded output.",
+	message := "This pipeline's shell exit code does not prove that upstream verification passed. Run the verification command directly, then use the result reader to inspect bounded output."
+	if code == "masked_exit_status" {
+		message = "The success fallback can hide a failed verification. This shell exit code does not prove verification passed. Run the verification command directly and inspect its own exit code."
 	}
+	return &CommandVerificationWarning{Code: code, Message: message}
 }
 
 func joinShellCommand(argv []string) string {

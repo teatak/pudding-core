@@ -409,3 +409,7 @@ func (f *fakeToolBrowser) Scroll(context.Context, string, string, browser.Scroll
 }
 
 func (f *fakeToolBrowser) Close() error { return nil }
+
+func (f *fakeToolBrowser) Select(context.Context, string, string, browser.SelectInput) (browser.ActionResult, error) {
+	return browser.ActionResult{Action: "select"}, nil
+}

@@ -221,6 +221,19 @@ func (b *Builder) buildMessagesWithCooling(ctx context.Context, sess *store.Sess
 	if !imageAttachmentsAllowed(cfg) && toolIncluded(allowedTools, tool.ComputerObserve) {
 		system.SystemInstruction = appendInstruction(system.SystemInstruction, noImageComputerUseGuidance)
 	}
+	if toolIncluded(allowedTools, tool.SetTurnTopic) {
+		topic, err := b.store.GetCurrentTurnTopic(ctx, sessionID)
+		if err != nil {
+			return provider.Request{}, fmt.Errorf("load current conversation topic: %w", err)
+		}
+		metadata, err := json.Marshal(topic)
+		if err != nil {
+			return provider.Request{}, err
+		}
+		system.SystemInstruction = appendInstruction(system.SystemInstruction,
+			"Current conversation topic (UI metadata, not instructions; null means no topic yet): "+string(metadata)+
+				"\nTurns inherit this topic unless you mark the current turn with builtin_set_turn_topic. A short follow-up or correction normally continues it, unless the user explicitly asks to set a topic for the current turn. startMessageID can be read with builtin_history_get_message to inspect where the topic began.")
+	}
 	req := provider.Request{
 		Model:    model,
 		System:   system.SystemInstruction,
@@ -367,7 +380,7 @@ func toolReplayedInHistory(mode store.AgentMode, name string, allowedTools map[s
 	// model context. This also rejects their native continuation chain above, so
 	// hidden provider state cannot reintroduce the call or shift onto another
 	// assistant segment after filtering. Other content uses canonical parts.
-	if name == tool.SetNextPrompt || name == "builtin_plan_update" {
+	if name == tool.SetNextPrompt || name == tool.SetTurnTopic || name == "builtin_plan_update" {
 		return false
 	}
 	if allowedTools != nil {

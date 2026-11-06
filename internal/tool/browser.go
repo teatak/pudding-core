@@ -160,7 +160,8 @@ func (r *BuiltinRunner) browserScreenshot(ctx context.Context, call Call) Result
 		"captureBounds":     result.CaptureBounds,
 		"fullPage":          false,
 		"coordinateSpace":   "viewport_css_pixels",
-		"coordinateHint":    "Click x/y and observation bounds use CSS pixels relative to the current viewport. Map this image to click coordinates: x = captureBounds.x + imageX * captureBounds.width / modelWidth; y = captureBounds.y + imageY * captureBounds.height / modelHeight. If the image is displayed resized, substitute its displayed width/height for modelWidth/modelHeight. Only click points inside the viewport; scroll and observe again for offscreen targets. Capture again after scrolling or navigation.",
+		"observationID":     result.ObservationID,
+		"coordinateHint":    "Click x/y and observation bounds use CSS pixels relative to the current viewport. Map this image to click coordinates: x = captureBounds.x + imageX * captureBounds.width / modelWidth; y = captureBounds.y + imageY * captureBounds.height / modelHeight. If the image is displayed resized, substitute its displayed width/height for modelWidth/modelHeight. Only click points inside the viewport; scroll and observe again for offscreen targets. Pass observationID with coordinate clicks. Capture again after scrolling, navigation or layout changes.",
 		"capturedAt":        result.CapturedAt,
 		"attachmentKey":     stored.AttachmentKey,
 		"url":               stored.URL,
@@ -237,6 +238,34 @@ func (r *BuiltinRunner) browserType(ctx context.Context, call Call) Result {
 	}
 	args.TabID = tabID
 	result, err := r.browser.Type(ctx, call.SessionID, args.TabID, args)
+	if err != nil {
+		return browserToolError(out, err)
+	}
+	if err := r.syncBrowserState(ctx, call.SessionID, result.Tab); err != nil {
+		return browserToolError(out, err)
+	}
+	out.Ok = true
+	out.Content = jsonString(map[string]any{"ok": true, "action": result})
+	out.SummaryKind = SummaryReturnedFields
+	out.SummaryCount = 2
+	return out
+}
+
+func (r *BuiltinRunner) browserSelect(ctx context.Context, call Call) Result {
+	out := browserBaseResult(call)
+	if res, ok := r.browserReady(call, out); !ok {
+		return res
+	}
+	var args browser.SelectInput
+	if err := decodeStructToolArgs(call.Args, &args); err != nil {
+		return toolJSONError(out, "invalid_arguments", err.Error())
+	}
+	tabID, err := r.browserResolveTabID(ctx, call.SessionID, args.TabID)
+	if err != nil {
+		return browserToolError(out, err)
+	}
+	args.TabID = tabID
+	result, err := r.browser.Select(ctx, call.SessionID, args.TabID, args)
 	if err != nil {
 		return browserToolError(out, err)
 	}

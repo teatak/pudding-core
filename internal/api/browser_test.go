@@ -136,6 +136,34 @@ func TestBrowserTabsAreSessionScoped(t *testing.T) {
 	if resp.StatusCode != http.StatusOK || typed.Action != "type" || browserSvc.typeText != "Pudding" {
 		t.Fatalf("type status=%d result=%+v text=%q", resp.StatusCode, typed, browserSvc.typeText)
 	}
+	resp = req(t, http.MethodPost, srv.URL+"/sessions/sess_a/browser/tabs/"+tab.ID+"/type", map[string]any{"selector": "#name", "text": "", "clear": true, "commit": true})
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || browserSvc.typeText != "" || !browserSvc.typeCommit {
+		t.Fatalf("clear-and-commit status=%d text=%q commit=%v", resp.StatusCode, browserSvc.typeText, browserSvc.typeCommit)
+	}
+
+	selectURL := srv.URL + "/sessions/sess_a/browser/tabs/" + tab.ID + "/select"
+	for _, field := range []string{"label", "value"} {
+		// An empty value selects a real placeholder option, not a missing argument.
+		resp = req(t, http.MethodPost, selectURL, map[string]string{"selector": "#record", field: ""})
+		selected := decodeJSON[browser.ActionResult](t, resp)
+		input := browserSvc.selectInput
+		if resp.StatusCode != http.StatusOK || selected.Action != "select" || selected.Tab.ID != tab.ID || (field == "label" && (input.Label == nil || *input.Label != "")) || (field == "value" && (input.Value == nil || *input.Value != "")) {
+			t.Fatalf("select %s status=%d result=%+v input=%+v", field, resp.StatusCode, selected, input)
+		}
+	}
+	for _, input := range []map[string]string{{"selector": "#record"}, {"selector": "#record", "label": "Mail", "value": "MX"}, {"value": "MX"}} {
+		resp = req(t, http.MethodPost, selectURL, input)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Fatalf("invalid selection %v status=%d", input, resp.StatusCode)
+		}
+	}
+	resp = req(t, http.MethodPost, srv.URL+"/sessions/sess_b/browser/tabs/"+tab.ID+"/select", map[string]string{"selector": "#record", "value": "MX"})
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("cross-session select status=%d", resp.StatusCode)
+	}
 
 	resp = req(t, http.MethodPost, srv.URL+"/sessions/sess_a/browser/tabs/"+tab.ID+"/scroll", map[string]any{"deltaY": 400})
 	scrolled := decodeJSON[browser.ActionResult](t, resp)
@@ -1215,6 +1243,8 @@ type fakeBrowserService struct {
 	clickMethod              string
 	lastNavigation           string
 	typeText                 string
+	typeCommit               bool
+	selectInput              browser.SelectInput
 	scrollY                  float64
 	recoverCount             int
 	nextTab                  int
@@ -1442,6 +1472,7 @@ func (f *fakeBrowserService) Type(_ context.Context, sessionID, tabID string, in
 		return browser.ActionResult{}, err
 	}
 	f.typeText = in.Text
+	f.typeCommit = in.Commit
 	return browser.ActionResult{Tab: tab, Action: "type", Result: map[string]any{"textLength": len(in.Text)}}, nil
 }
 
@@ -1478,4 +1509,13 @@ func TestFailedBrowserClosePreservesStateAndSyncAdmission(t *testing.T) {
 	if response.StatusCode != http.StatusOK {
 		t.Fatalf("failed close blocked surviving tab: %d", response.StatusCode)
 	}
+}
+
+func (f *fakeBrowserService) Select(ctx context.Context, sessionID, tabID string, in browser.SelectInput) (browser.ActionResult, error) {
+	tab, err := f.GetTab(ctx, sessionID, tabID)
+	if err != nil {
+		return browser.ActionResult{}, err
+	}
+	f.selectInput = in
+	return browser.ActionResult{Tab: tab, Action: "select"}, nil
 }

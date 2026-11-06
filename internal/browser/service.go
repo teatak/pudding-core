@@ -31,6 +31,7 @@ type Service interface {
 	Observe(ctx context.Context, sessionID, tabID string, opts ObserveOptions) (ObserveResult, error)
 	Screenshot(ctx context.Context, sessionID, tabID string) (ScreenshotResult, error)
 	Click(ctx context.Context, sessionID, tabID string, in ClickInput) (ActionResult, error)
+	Select(ctx context.Context, sessionID, tabID string, in SelectInput) (ActionResult, error)
 	Type(ctx context.Context, sessionID, tabID string, in TypeInput) (ActionResult, error)
 	Scroll(ctx context.Context, sessionID, tabID string, in ScrollInput) (ActionResult, error)
 	Close() error
@@ -77,6 +78,8 @@ type ObserveOptions struct {
 }
 
 type ObserveResult struct {
+	ObservationID     string            `json:"observationID"`
+	CoordinateSpace   string            `json:"coordinateSpace"`
 	Tab               TabSnapshot       `json:"tab"`
 	Title             string            `json:"title"`
 	URL               string            `json:"url"`
@@ -118,21 +121,33 @@ type ScrollContainer struct {
 	MaxScrollY float64 `json:"maxScrollY"`
 }
 
+type SelectOption struct {
+	Label    string `json:"label"`
+	Value    string `json:"value"`
+	Selected bool   `json:"selected"`
+	Disabled bool   `json:"disabled"`
+}
+
 type ObservedElement struct {
-	Ref       string `json:"ref,omitempty"`
-	Index     int    `json:"index"`
-	Tag       string `json:"tag"`
-	Text      string `json:"text,omitempty"`
-	Href      string `json:"href,omitempty"`
-	Role      string `json:"role,omitempty"`
-	AriaLabel string `json:"ariaLabel,omitempty"`
-	Selector  string `json:"selector,omitempty"`
-	InputType string `json:"inputType,omitempty"`
-	Disabled  bool   `json:"disabled,omitempty"`
-	Bounds    Bounds `json:"bounds"`
+	Selected    *bool          `json:"selected,omitempty"`
+	Value       *string        `json:"value,omitempty"`
+	Options     []SelectOption `json:"options,omitempty"`
+	OptionCount *int           `json:"optionCount,omitempty"`
+	Ref         string         `json:"ref,omitempty"`
+	Index       int            `json:"index"`
+	Tag         string         `json:"tag"`
+	Text        string         `json:"text,omitempty"`
+	Href        string         `json:"href,omitempty"`
+	Role        string         `json:"role,omitempty"`
+	AriaLabel   string         `json:"ariaLabel,omitempty"`
+	Selector    string         `json:"selector,omitempty"`
+	InputType   string         `json:"inputType,omitempty"`
+	Disabled    bool           `json:"disabled,omitempty"`
+	Bounds      Bounds         `json:"bounds"`
 }
 
 type ScreenshotResult struct {
+	ObservationID     string      `json:"observationID"`
 	Tab               TabSnapshot `json:"tab"`
 	MIME              string      `json:"mime"`
 	DataBase64        string      `json:"dataBase64"`
@@ -147,18 +162,27 @@ type ScreenshotResult struct {
 }
 
 type ClickInput struct {
-	TabID    string   `json:"tabID,omitempty"`
-	Selector string   `json:"selector,omitempty"`
-	X        *float64 `json:"x,omitempty"`
-	Y        *float64 `json:"y,omitempty"`
-	Method   string   `json:"method,omitempty"`
+	ObservationID string   `json:"observationID,omitempty"`
+	TabID         string   `json:"tabID,omitempty"`
+	Selector      string   `json:"selector,omitempty"`
+	X             *float64 `json:"x,omitempty"`
+	Y             *float64 `json:"y,omitempty"`
+	Method        string   `json:"method,omitempty"`
 }
 
 type TypeInput struct {
+	Commit   bool   `json:"commit,omitempty"`
 	TabID    string `json:"tabID,omitempty"`
 	Selector string `json:"selector,omitempty"`
 	Text     string `json:"text"`
 	Clear    bool   `json:"clear,omitempty"`
+}
+
+type SelectInput struct {
+	TabID    string  `json:"tabID,omitempty"`
+	Selector string  `json:"selector"`
+	Label    *string `json:"label,omitempty"`
+	Value    *string `json:"value,omitempty"`
 }
 
 type ScrollInput struct {

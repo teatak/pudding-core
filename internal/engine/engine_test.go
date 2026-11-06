@@ -5271,3 +5271,7 @@ func TestSessionsAreIsolated(t *testing.T) {
 		t.Fatalf("want 2+2 messages, got %d+%d", len(msgsA), len(msgsB))
 	}
 }
+
+func (f *engineTestBrowser) Select(context.Context, string, string, browser.SelectInput) (browser.ActionResult, error) {
+	return browser.ActionResult{Action: "select"}, nil
+}

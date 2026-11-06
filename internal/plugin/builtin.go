@@ -31,6 +31,7 @@ const (
 	toolBrowserReload     = "builtin_browser_reload"
 	toolBrowserClose      = "builtin_browser_close"
 	toolBrowserClick      = "builtin_browser_click"
+	toolBrowserSelect     = "builtin_browser_select"
 	toolBrowserType       = "builtin_browser_type"
 	toolBrowserScroll     = "builtin_browser_scroll"
 	toolSkillValidate     = "builtin_skill_validate"
@@ -101,6 +102,7 @@ Use child conversations for bounded work that can make useful progress independe
 				{Name: toolBrowserClose},
 				{Name: toolBrowserClick},
 				{Name: toolBrowserType},
+				{Name: toolBrowserSelect},
 				{Name: toolBrowserScroll},
 			},
 			Skills: []SkillRef{{
@@ -125,7 +127,9 @@ Use Pudding's built-in browser for webpages that require navigation or interacti
 - Screenshots capture the current viewport only. These tools do not provide deterministic animation time, multi-frame sampling, or arbitrary SVG geometry queries; do not infer animation continuity from a single frame.
 - Check browser status before assuming a tab exists.
 - Observe the page before clicking or typing. Prefer the returned element ref as the selector argument. Re-observe after stale-reference or moved-target errors; never guess a replacement positional selector. Controls intersecting the viewport come first; offscreen controls remain available on later pages. If a target is missing, pass nextOffset as offset until it is found or nextOffset is null before falling back to screenshot coordinates.
-- Restart observation at offset=0 after scrolling, navigation, or a significant page change; offsets refer to the current page state.
+- Restart observation at offset=0 after scrolling, navigation, or a significant page change; offsets refer to the current page state. Coordinates use viewport CSS pixels and require observationID from that observation or screenshot. An observation_stale error means the old coordinates must not be reused. Prefer element refs over screenshot coordinates.
+- For native dropdowns use builtin_browser_select with the observed ref and exactly one label or value. For custom comboboxes, open the list, observe, click the matching option ref, then verify the selected option.
+- For form values use builtin_browser_type with clear=true and commit=true to replace the value and dispatch change/blur. Use canonical date/time values (datetime-local: YYYY-MM-DDTHH:mm); committing a field does not submit the form.
 - Click success confirms input delivery only. Verify the expected dialog, URL, or page state afterward. If the hit element is an unrelated container, re-observe and correct the target; that alone is not evidence of a blocked link or missing permissions.
 - For public web search or page text, use Web Search & Fetch (plugin ID: web-search-fetch) when listed in Available Plugins. Load it with builtin_plugin_load only if needed; never use builtin_skill_read to load it. Use Browser when interactive page state or actions are required.
 `,

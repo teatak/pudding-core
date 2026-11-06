@@ -25,6 +25,7 @@ var builtinPluginTools = map[string]string{
 	BrowserClose:      plugin.BuiltinBrowserID,
 	BrowserClick:      plugin.BuiltinBrowserID,
 	BrowserType:       plugin.BuiltinBrowserID,
+	BrowserSelect:     plugin.BuiltinBrowserID,
 	BrowserScroll:     plugin.BuiltinBrowserID,
 	SkillValidate:     plugin.BuiltinSkillAuthoringID,
 	PluginSave:        plugin.BuiltinPluginAuthoringID,

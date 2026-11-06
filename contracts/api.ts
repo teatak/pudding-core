@@ -723,6 +723,17 @@ export const conversationTurn = z.object({
 });
 export type ConversationTurn = z.infer<typeof conversationTurn>;
 
+export const turnOutlineEntry = z.object({
+  id: z.string(),
+  retryOfTurnID: z.string().optional(),
+  createdAt: z.string(),
+  prompt: z.string(),
+  answer: z.string(),
+  topicTitle: z.string().optional(), // Starts a topic at this turn; subsequent turns inherit it.
+});
+export type TurnOutlineEntry = z.infer<typeof turnOutlineEntry>;
+export const turnOutlineResponse = z.object({ turns: z.array(turnOutlineEntry) });
+
 export const turnFileChangeActionRequest = z.object({
   expectedRevision: z.number().int().positive(),
 });
@@ -1013,10 +1024,16 @@ export const observedBrowserElement = z.object({
   selector: z.string().optional(),
   inputType: z.string().optional(),
   disabled: z.boolean().optional(),
+  selected: z.boolean().optional(),
+  value: z.string().optional(),
+  optionCount: z.number().int().nonnegative().optional(),
+  options: z.array(z.object({label:z.string(), value:z.string(), selected:z.boolean(), disabled:z.boolean()})).optional(),
   bounds: browserBounds,
 });
 
 export const browserObservation = z.object({
+  observationID: z.string(),
+  coordinateSpace: z.literal("viewport_css_pixels"),
   tab: browserTab,
   title: z.string(),
   url: z.string(),
@@ -1034,6 +1051,7 @@ export const browserObservation = z.object({
 export type BrowserObservation = z.infer<typeof browserObservation>;
 
 export const browserScreenshot = z.object({
+  observationID: z.string(),
   tab: browserTab,
   mime: z.string(),
   dataBase64: z.string(),
@@ -1121,6 +1139,7 @@ export const browserObserveRequest = z.object({
 });
 export const browserScreenshotRequest = z.object({}).strict();
 export const browserClickRequest = z.object({
+  observationID: z.string().optional(),
   selector: z.string().optional(),
   x: z.number().optional(),
   y: z.number().optional(),
@@ -1128,9 +1147,15 @@ export const browserClickRequest = z.object({
 });
 export const browserTypeRequest = z.object({
   selector: z.string().optional(),
-  text: z.string().min(1),
+  text: z.string(),
   clear: z.boolean().optional(),
-});
+  commit: z.boolean().optional(),
+}).refine(input => input.text.length > 0 || input.clear === true, "text or clear is required");
+export const browserSelectRequest = z.object({
+  selector: z.string().min(1),
+  label: z.string().optional(),
+  value: z.string().optional(),
+}).refine(input => (input.label === undefined) !== (input.value === undefined), "exactly one of label or value is required");
 export const browserScrollRequest = z.object({
   selector: z.string().optional(),
   deltaX: z.number().optional(),

@@ -19,12 +19,12 @@ import (
 	"time"
 
 	"github.com/teatak/cart/v3"
-	"github.com/teatak/pudding-core/internal/credentialstore"
 	"github.com/teatak/pudding-core/internal/attachment"
 	"github.com/teatak/pudding-core/internal/audio/runtimeassets"
 	"github.com/teatak/pudding-core/internal/audio/voice"
 	"github.com/teatak/pudding-core/internal/browser"
 	"github.com/teatak/pudding-core/internal/config"
+	"github.com/teatak/pudding-core/internal/credentialstore"
 	"github.com/teatak/pudding-core/internal/desktopcamera"
 	"github.com/teatak/pudding-core/internal/engine"
 	"github.com/teatak/pudding-core/internal/event"
@@ -265,6 +265,7 @@ func (s *Server) Handler(token string, static http.Handler) http.Handler {
 	app.Route("/sessions/:id/events").GET(s.sessionEvents)
 	app.Route("/sessions/:id/usage").GET(s.getSessionUsage)
 	app.Route("/sessions/:id/turns").GET(s.listTurns)
+	app.Route("/sessions/:id/turn-outline").GET(s.listTurnOutline)
 	app.Route("/sessions/:id/turns/:turnID").GET(s.getTurn)
 	app.Route("/sessions/:id/turns/:turnID/file-changes/:changeID").GET(s.getTurnFileChange)
 	app.Route("/sessions/:id/turns/:turnID/file-changes/undo").POST(s.undoTurnFileChanges)
@@ -298,6 +299,7 @@ func (s *Server) Handler(token string, static http.Handler) http.Handler {
 	app.Route("/sessions/:id/browser/tabs/:tabID/screenshot").POST(s.screenshotBrowserTab)
 	app.Route("/sessions/:id/browser/tabs/:tabID/click").POST(s.clickBrowserTab)
 	app.Route("/sessions/:id/browser/tabs/:tabID/type").POST(s.typeBrowserTab)
+	app.Route("/sessions/:id/browser/tabs/:tabID/select").POST(s.selectBrowserTab)
 	app.Route("/sessions/:id/browser/tabs/:tabID/scroll").POST(s.scrollBrowserTab)
 	app.Route("/sessions/:id/browser/tabs/:tabID/release").POST(s.releaseBrowserTab)
 	app.Route("/sessions/:id/queued-inputs").GET(s.listQueuedInputs)
@@ -1440,6 +1442,16 @@ func (s *Server) getTurn(c *cart.Context) error {
 		return s.fail(c, err)
 	}
 	c.JSON(http.StatusOK, turn)
+	return nil
+}
+
+func (s *Server) listTurnOutline(c *cart.Context) error {
+	id, _ := c.Param("id")
+	turns, err := s.store.ListTurnOutline(c.Request.Context(), id)
+	if err != nil {
+		return s.fail(c, err)
+	}
+	c.JSON(http.StatusOK, map[string]any{"turns": turns})
 	return nil
 }
 

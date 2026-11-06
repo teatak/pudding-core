@@ -53,15 +53,17 @@ type electronBridgeScreenshotRequest struct {
 }
 
 type electronBridgeClickRequest struct {
-	SessionID string   `json:"sessionID"`
-	TabID     string   `json:"tabID,omitempty"`
-	Selector  string   `json:"selector,omitempty"`
-	X         *float64 `json:"x,omitempty"`
-	Y         *float64 `json:"y,omitempty"`
-	Method    string   `json:"method,omitempty"`
+	ObservationID string   `json:"observationID,omitempty"`
+	SessionID     string   `json:"sessionID"`
+	TabID         string   `json:"tabID,omitempty"`
+	Selector      string   `json:"selector,omitempty"`
+	X             *float64 `json:"x,omitempty"`
+	Y             *float64 `json:"y,omitempty"`
+	Method        string   `json:"method,omitempty"`
 }
 
 type electronBridgeTypeRequest struct {
+	Commit    bool   `json:"commit,omitempty"`
 	SessionID string `json:"sessionID"`
 	TabID     string `json:"tabID,omitempty"`
 	Selector  string `json:"selector,omitempty"`
@@ -141,6 +143,8 @@ func ErrorRetryable(err error) bool {
 }
 
 type electronBridgeObserveResponse struct {
+	ObservationID     string                 `json:"observationID"`
+	CoordinateSpace   string                 `json:"coordinateSpace"`
 	Tab               electronBridgeSnapshot `json:"tab"`
 	Title             string                 `json:"title"`
 	URL               string                 `json:"url"`
@@ -157,6 +161,7 @@ type electronBridgeObserveResponse struct {
 }
 
 type electronBridgeScreenshotResponse struct {
+	ObservationID     string                 `json:"observationID"`
 	Tab               electronBridgeSnapshot `json:"tab"`
 	MIME              string                 `json:"mime"`
 	DataBase64        string                 `json:"dataBase64"`
@@ -405,12 +410,13 @@ func (s *ElectronBridgeService) Click(ctx context.Context, sessionID, tabID stri
 	}
 	var out electronBridgeActionResponse
 	if err := s.post(ctx, "/browser/tabs/click", electronBridgeClickRequest{
-		SessionID: sessionID,
-		TabID:     tabID,
-		Selector:  in.Selector,
-		X:         in.X,
-		Y:         in.Y,
-		Method:    in.Method,
+		ObservationID: in.ObservationID,
+		SessionID:     sessionID,
+		TabID:         tabID,
+		Selector:      in.Selector,
+		X:             in.X,
+		Y:             in.Y,
+		Method:        in.Method,
 	}, &out); err != nil {
 		return ActionResult{}, err
 	}
@@ -421,7 +427,7 @@ func (s *ElectronBridgeService) Type(ctx context.Context, sessionID, tabID strin
 	if tabID == "" {
 		tabID = in.TabID
 	}
-	if in.Text == "" {
+	if in.Text == "" && !in.Clear {
 		return ActionResult{}, errors.New("text is required")
 	}
 	tabID, err := s.resolveTabID(ctx, sessionID, tabID, false)
@@ -430,6 +436,7 @@ func (s *ElectronBridgeService) Type(ctx context.Context, sessionID, tabID strin
 	}
 	var out electronBridgeActionResponse
 	if err := s.post(ctx, "/browser/tabs/type", electronBridgeTypeRequest{
+		Commit:    in.Commit,
 		SessionID: sessionID,
 		TabID:     tabID,
 		Selector:  in.Selector,
@@ -439,6 +446,29 @@ func (s *ElectronBridgeService) Type(ctx context.Context, sessionID, tabID strin
 		return ActionResult{}, err
 	}
 	return out.result("type"), nil
+}
+
+func (s *ElectronBridgeService) Select(ctx context.Context, sessionID, tabID string, in SelectInput) (ActionResult, error) {
+	if strings.TrimSpace(in.Selector) == "" || (in.Label == nil) == (in.Value == nil) {
+		return ActionResult{}, errors.New("selector and exactly one of label or value are required")
+	}
+	if tabID == "" {
+		tabID = in.TabID
+	}
+	tabID, err := s.resolveTabID(ctx, sessionID, tabID, false)
+	if err != nil {
+		return ActionResult{}, err
+	}
+	in.TabID = tabID
+	var out electronBridgeActionResponse
+	request := struct {
+		SessionID string `json:"sessionID"`
+		SelectInput
+	}{sessionID, in}
+	if err := s.post(ctx, "/browser/tabs/select", request, &out); err != nil {
+		return ActionResult{}, err
+	}
+	return out.result("select"), nil
 }
 
 func (s *ElectronBridgeService) Scroll(ctx context.Context, sessionID, tabID string, in ScrollInput) (ActionResult, error) {
@@ -618,6 +648,8 @@ func parseElectronBridgeTime(value string, fallback time.Time) time.Time {
 
 func (out electronBridgeObserveResponse) result() ObserveResult {
 	return ObserveResult{
+		ObservationID:     out.ObservationID,
+		CoordinateSpace:   out.CoordinateSpace,
 		Tab:               out.Tab.tab(),
 		Title:             out.Title,
 		URL:               out.URL,
@@ -644,6 +676,7 @@ func (out electronBridgeScreenshotResponse) result() ScreenshotResult {
 		mime = "image/png"
 	}
 	return ScreenshotResult{
+		ObservationID:     out.ObservationID,
 		Tab:               out.Tab.tab(),
 		MIME:              mime,
 		DataBase64:        out.DataBase64,

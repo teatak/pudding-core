@@ -459,3 +459,48 @@ func writeElectronBridgeTestJSON(w http.ResponseWriter, value any) {
 		panic(err)
 	}
 }
+
+func TestElectronBridgeFormActionsPreserveInputsAndObservation(t *testing.T) {
+	var bodies []map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		bodies = append(bodies, body)
+		writeElectronBridgeTestJSON(w, electronBridgeActionResponse{Result: map[string]any{"delivered": true, "effect": "unverified"}})
+	}))
+	defer server.Close()
+	service, err := NewElectronBridgeService(ElectronBridgeConfig{URL: server.URL, Token: "token"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	value := ""
+	if _, err := service.Select(ctx, "session", "tab", SelectInput{Selector: "pudding-ref:select", Value: &value}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.Type(ctx, "session", "tab", TypeInput{Selector: "pudding-ref:input", Text: "", Clear: true, Commit: true}); err != nil {
+		t.Fatal(err)
+	}
+	x, y := 10.0, 20.0
+	if _, err := service.Click(ctx, "session", "tab", ClickInput{X: &x, Y: &y, ObservationID: "capture"}); err != nil {
+		t.Fatal(err)
+	}
+	if len(bodies) != 3 || bodies[0]["value"] != "" || bodies[0]["label"] != nil || bodies[0]["sessionID"] != "session" || bodies[0]["tabID"] != "tab" || bodies[1]["commit"] != true || bodies[1]["clear"] != true || bodies[2]["observationID"] != "capture" {
+		t.Fatalf("lost action fields: %+v", bodies)
+	}
+	for _, in := range []SelectInput{{Selector: "#s"}, {Selector: "#s", Value: &value, Label: &value}, {Value: &value}} {
+		if _, err := service.Select(ctx, "session", "tab", in); err == nil {
+			t.Errorf("accepted invalid selection: %+v", in)
+		}
+	}
+	if len(bodies) != 3 {
+		t.Fatal("invalid selection reached the bridge")
+	}
+	observed := (electronBridgeObserveResponse{ObservationID: "observed", CoordinateSpace: "viewport_css_pixels"}).result()
+	shot := (electronBridgeScreenshotResponse{ObservationID: "captured"}).result()
+	if observed.ObservationID != "observed" || observed.CoordinateSpace != "viewport_css_pixels" || shot.ObservationID != "captured" {
+		t.Fatal("lost observation metadata")
+	}
+}

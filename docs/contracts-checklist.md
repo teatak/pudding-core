@@ -82,6 +82,7 @@ web 契约 `providerProfile.protocol` 与设置表单下拉;不在枚举内的 p
 | `POST /sessions/{id}/approvals/{approvalID}/deny` | `{reason?}` | 202 `{status}` | 404 |
 | `GET /sessions/{id}/events` | SSE | event stream | 404 |
 | `GET /sessions/{id}/turns` | `before?`, `limit?` | `{turns: [], hasMore}` | 404 |
+| `GET /sessions/{id}/turn-outline` | — | `{turns: [{id,retryOfTurnID?,createdAt,prompt,answer,topicTitle?}]}`，按创建时间与插入顺序升序；提问与回答各最多 512 字符；topicTitle 是当前轮主题打点，省略则继承此前主题，不含工具载荷 | 404 |
 | `GET /sessions/{id}/turns/{turnID}/file-changes/{changeID}` | — | TurnFileChange;按需返回旧/新正文 | 404 |
 | `GET /sessions/{id}/messages` | — | `{messages: []}` | 404 |
 | `GET /sessions/{id}/processes` | — | `{processes: [{processID,turnID?,callID?,status,running,cwd,argv?,script?,shell?,exitCode?,startedAt,finishedAt?,reason?,error?}]}` | 404 |
@@ -130,6 +131,8 @@ messages（包括工具结果、已交付的提问回答和中断输出）继续
 | `builtin_plugin_save` | `code` | `{operation:create|update,plugin_id,version,files[]}` | 完整文本包经隔离校验后替换已安装插件；失败保留旧版本；不接受凭据 |
 | `builtin_command_run` | `code` | `{scope:"project", command:string, cwd?, env?, timeout_ms?, background?, tty?}` | 前台返回 `{ok, command, shell, cwd, exitCode, stdout, stderr, ...}`;`background:true` 返回 `{ok, processID, status, running, command, tty, ...}` |
 | `builtin_command_session` | `code` | `{action:"poll"|"write"|"stop", process_id, offset?, max_bytes?, wait_ms?, data?}` | poll 返回有界输出与 offset;write 返回 `bytesWritten`;stop 返回终态 |
+| `builtin_browser_select` | `browser` 插件 | `{tabID?,selector,label?\|value?}`；label/value 必须且只能选一个，允许空选项值 | 原生单选下拉按精确标签/值选择，返回读回的值；歧义、禁用和不支持的控件明确报错 |
+| `builtin_set_turn_topic` | `chat` | `{title}` | 当前轮主题打点；后续未设置新主题的轮次继承；当前主题上下文含 `startMessageID` 和 `startedAt` 供历史查询 |
 | `builtin_git_status` | `code` | `{scope:"project", cwd?}` | `{ok, cwd, repoRoot, head, branch, upstream, detached, ahead, behind, clean, files, fileCount, stagedCount, unstagedCount, untrackedCount, conflictedCount}` |
 | `builtin_git_diff` | `code` | `{scope:"project", cwd?, staged?}` | `{ok, cwd, repoRoot, staged, diff, truncated, files, fileCount, additions, deletions}` |
 | `builtin_git_log` | `code` | `{scope:"project", cwd?, limit?}` | `{ok, cwd, repoRoot, commits, count}` |
@@ -142,6 +145,16 @@ messages（包括工具结果、已交付的提问回答和中断输出）继续
 executable。cwd 必须位于当前 Project/turn grant 授权目录中;前台默认 timeout 为 60 秒,
 最大 10 分钟;stdout/stderr 各保留最多 64 KiB 头尾内容。后台命令没有运行时上限,
 通过 `builtin_command_session` 读取、输入或停止;`tty:true` 仅用于需要终端的交互命令。
+
+识别出的验证命令位于管道上游或接 `|| true`、`|| :`、`|| exit 0` 时，
+返回 `verificationWarning`（`pipeline_exit_status` / `masked_exit_status`），不改写
+真实 shell 退出码，也不将退出码 0 推断为验证成功。
+
+浏览器截图/观察返回 `observationID`，坐标以 viewport CSS pixels 为准；坐标点击必须
+携带该 ID，检测到滚动、视口或文档变化后拒绝旧坐标。优先使用观察得到的元素 ref。
+`builtin_browser_type` 的 `commit:true` 触发 change/blur，空文本配合 `clear:true`
+可清空输入。输入和下拉选择均读回确认；`delivered:true,effect:"unverified"` 只说明
+操作交付，不代表业务成功。完整浏览器契约见 [contracts/README.md](../contracts/README.md)。
 命令审批由 Project 的 `ask | auto | full` 决定。`auto` 用 shell AST 拆分静态命令段并
 逐段应用负面风险规则:未知命令名不会仅因未知而审批;删除、Git 外部写入、发布、凭证、
 显式网络工具、提权/系统操作、越界路径、wrapper 和动态 shell 结构仍请求

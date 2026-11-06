@@ -67,21 +67,29 @@ func TestNextPromptDoesNotRequireAnotherModelRequest(t *testing.T) {
 		return provider.Chunk{Tool: &provider.ToolCallChunk{CallID: id, Name: name, ArgsDelta: args, Index: index}}
 	}
 	tip := call("tip", tool.SetNextPrompt, `{"text":"帮我补上测试"}`, 0)
+	topic := call("topic", tool.SetTurnTopic, `{"title":"表单校验"}`, 1)
 	timeCall := call("time", tool.TimeGetCurrent, `{}`, 1)
 	for _, tc := range []struct {
-		name      string
-		responses [][]provider.Chunk
-		calls     int
-		tipResult bool
+		name       string
+		responses  [][]provider.Chunk
+		calls      int
+		tipResult  bool
+		topicTitle string
 	}{
-		{"optional omission", [][]provider.Chunk{{text, stop}}, 1, false},
-		{"answer and suggestion", [][]provider.Chunk{{text, tip, toolStop}}, 1, true},
-		{"invalid suggestion is not retried", [][]provider.Chunk{{text, call("tip", tool.SetNextPrompt, `{"text":" "}`, 0), toolStop}}, 1, true},
-		{"suggestion alone needs an answer", [][]provider.Chunk{{tip, toolStop}}, 2, true},
-		{"reasoning is not a final answer", [][]provider.Chunk{{thought, tip, toolStop}}, 2, true},
-		{"whitespace is not a final answer", [][]provider.Chunk{{{Part: provider.PartText, Delta: " \n"}, tip, toolStop}}, 2, true},
-		{"mixed task tools continue", [][]provider.Chunk{{text, tip, timeCall, toolStop}}, 2, true},
-		{"earlier answer cannot terminate a later call", [][]provider.Chunk{{text, timeCall, toolStop}, {tip, toolStop}}, 3, true},
+		{"optional omission", [][]provider.Chunk{{text, stop}}, 1, false, ""},
+		{"answer and suggestion", [][]provider.Chunk{{text, tip, toolStop}}, 1, true, ""},
+		{"invalid suggestion is not retried", [][]provider.Chunk{{text, call("tip", tool.SetNextPrompt, `{"text":" "}`, 0), toolStop}}, 1, true, ""},
+		{"suggestion alone needs an answer", [][]provider.Chunk{{tip, toolStop}}, 2, true, ""},
+		{"reasoning is not a final answer", [][]provider.Chunk{{thought, tip, toolStop}}, 2, true, ""},
+		{"whitespace is not a final answer", [][]provider.Chunk{{{Part: provider.PartText, Delta: " \n"}, tip, toolStop}}, 2, true, ""},
+		{"mixed task tools continue", [][]provider.Chunk{{text, tip, timeCall, toolStop}}, 2, true, ""},
+		{"earlier answer cannot terminate a later call", [][]provider.Chunk{{text, timeCall, toolStop}, {tip, toolStop}}, 3, true, ""},
+		{"answer and topic", [][]provider.Chunk{{text, topic, toolStop}}, 1, false, "表单校验"},
+		{"both metadata tools", [][]provider.Chunk{{text, tip, topic, toolStop}}, 1, true, "表单校验"},
+		{"both metadata tools reversed", [][]provider.Chunk{{text, topic, tip, toolStop}}, 1, true, "表单校验"},
+		{"topic alone needs an answer", [][]provider.Chunk{{topic, toolStop}}, 2, false, "表单校验"},
+		{"topic with task tools continues", [][]provider.Chunk{{text, topic, call("time", tool.TimeGetCurrent, `{}`, 2), toolStop}}, 2, false, "表单校验"},
+		{"invalid topic is not retried", [][]provider.Chunk{{text, call("topic", tool.SetTurnTopic, `{"title":" "}`, 1), toolStop}}, 1, false, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := context.Background()
@@ -108,6 +116,17 @@ func TestNextPromptDoesNotRequireAnotherModelRequest(t *testing.T) {
 			}
 			if turn.Status != store.TurnCompleted {
 				t.Fatalf("status = %s, error = %s", turn.Status, turn.Error)
+			}
+			topic, err := ms.GetCurrentTurnTopic(ctx, sid)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tc.topicTitle == "" {
+				if topic != nil {
+					t.Fatalf("unexpected topic: %+v", topic)
+				}
+			} else if topic == nil || topic.Title != tc.topicTitle || topic.TurnID != submitted.TurnID {
+				t.Fatalf("topic marker not persisted on current turn: %+v", topic)
 			}
 			requests := client.snapshot()
 			if len(requests) != tc.calls {
@@ -148,6 +167,9 @@ func TestNextPromptDoesNotRequireAnotherModelRequest(t *testing.T) {
 			if !tool.HasDefinition(requests[len(requests)-1].Tools, tool.SetNextPrompt) {
 				t.Fatal("history filtering disabled new suggestions")
 			}
+			if tc.topicTitle != "" && !strings.Contains(requests[len(requests)-1].System, tc.topicTitle) {
+				t.Fatal("follow-up lost the inherited topic")
+			}
 			uses, results := 0, 0
 			nativeState := false
 			for _, msg := range requests[len(requests)-1].Messages {
@@ -155,7 +177,7 @@ func TestNextPromptDoesNotRequireAnotherModelRequest(t *testing.T) {
 					nativeState = true
 				}
 				for _, part := range msg.Parts {
-					if part.Name != tool.SetNextPrompt {
+					if part.Name != tool.SetNextPrompt && part.Name != tool.SetTurnTopic {
 						continue
 					}
 					if part.Type == provider.PartToolUse {
@@ -169,7 +191,7 @@ func TestNextPromptDoesNotRequireAnotherModelRequest(t *testing.T) {
 			if uses != 0 || results != 0 {
 				t.Fatalf("suggestion leaked into model history: uses=%d results=%d", uses, results)
 			}
-			if tc.tipResult && nativeState {
+			if (tc.tipResult || tc.topicTitle != "") && nativeState {
 				t.Fatal("filtered suggestion retained native continuation")
 			}
 		})
@@ -183,7 +205,8 @@ func TestNextPromptRespectsSteeringAndCancellation(t *testing.T) {
 			ms := storetest.New(t)
 			client := &nextPromptClient{responses: [][]provider.Chunk{{
 				{Part: provider.PartText, Delta: "任务已完成。"},
-				{Tool: &provider.ToolCallChunk{CallID: "tip", Name: tool.SetNextPrompt, ArgsDelta: `{"text":"帮我补上测试"}`}},
+				{Tool: &provider.ToolCallChunk{CallID: "topic", Name: tool.SetTurnTopic, ArgsDelta: `{"title":"表单校验"}`, Index: 0}},
+				{Tool: &provider.ToolCallChunk{CallID: "tip", Name: tool.SetNextPrompt, ArgsDelta: `{"text":"帮我补上测试"}`, Index: 1}},
 				{Done: true, Finish: provider.FinishToolCalls},
 			}}}
 			runner := &nextPromptHookRunner{BuiltinRunner: tool.NewBuiltinRunner()}

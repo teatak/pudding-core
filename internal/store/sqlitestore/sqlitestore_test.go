@@ -1258,6 +1258,182 @@ func TestListTurnsPageUsesStableOrder(t *testing.T) {
 	}
 }
 
+func TestTurnOutlineIsBoundedOrderedAndSessionScoped(t *testing.T) {
+	st, _ := openTestStore(t)
+	ctx := context.Background()
+	createTestSession(t, st, "sess_1")
+	createTestSession(t, st, "sess_empty")
+	for i := 1; i <= 4; i++ {
+		appendCompletedTestTurn(t, st, "sess_1", i)
+	}
+	// Equal timestamps still follow insertion order, including a retry chain.
+	if _, err := st.db.Exec(`UPDATE turns SET created_at=1000 WHERE session_id='sess_1'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.db.Exec(`UPDATE turns SET retry_of_turn_id='turn_3' WHERE id='turn_4'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.db.Exec(`UPDATE messages SET text=? WHERE turn_id='turn_1' AND role='user'`, strings.Repeat("中", 600)); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := st.ListTurnOutline(ctx, "sess_1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 4 {
+		t.Fatalf("entries: %+v", entries)
+	}
+	for i, entry := range entries {
+		if entry.ID != fmt.Sprintf("turn_%d", i+1) {
+			t.Fatalf("order: %+v", entries)
+		}
+		if entry.CreatedAt.UnixMilli() != 1000 {
+			t.Fatalf("time: %v", entry.CreatedAt)
+		}
+	}
+	if len([]rune(entries[0].Prompt)) != 512 || entries[0].Answer != "assistant 1" {
+		t.Fatalf("excerpt: %+v", entries[0])
+	}
+	if entries[3].RetryOfTurnID != "turn_3" {
+		t.Fatalf("retry: %+v", entries[3])
+	}
+	empty, err := st.ListTurnOutline(ctx, "sess_empty")
+	if err != nil || empty == nil || len(empty) != 0 {
+		t.Fatalf("empty: %+v, %v", empty, err)
+	}
+	if _, err := st.ListTurnOutline(ctx, "missing"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("missing: %v", err)
+	}
+}
+
+func TestTurnTopicMarkersPersistAndInheritWithoutRewritingEarlierTurns(t *testing.T) {
+	st, path := openTestStore(t)
+	ctx := context.Background()
+	createTestSession(t, st, "topics")
+	createTestSession(t, st, "other")
+	for i := 1; i <= 5; i++ {
+		id := fmt.Sprintf("topic_turn_%d", i)
+		beginTestTurn(t, st, "topics", id, "message_"+id, "client_"+id)
+		parts := store.TextPart("回答")
+		if i == 2 || i == 4 || i == 5 {
+			title := "主题 A"
+			if i == 5 {
+				title = "主题 B"
+			}
+			content, _ := json.Marshal(map[string]string{"title": title})
+			parts = append(parts, store.ContentPart{Type: store.ContentPartToolResult, CallID: id, Name: "builtin_set_turn_topic", Ok: i != 4, Content: string(content)})
+		}
+		if _, err := st.FinishTurn(ctx, store.FinishTurnInput{TurnID: id, Status: store.TurnCompleted, AssistantParts: parts}); err != nil {
+			t.Fatal(err)
+		}
+		// Timestamp ties retain insertion order, including the latest marker.
+		if _, err := st.db.Exec(`UPDATE turns SET created_at=1000 WHERE id=?`, id); err != nil {
+			t.Fatal(err)
+		}
+		topic, err := st.GetCurrentTurnTopic(ctx, "topics")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if i == 1 {
+			if topic != nil {
+				t.Fatalf("unmarked history has a topic: %+v", topic)
+			}
+		} else {
+			wantID, wantTitle := "topic_turn_2", "主题 A"
+			if i == 5 {
+				wantID, wantTitle = id, "主题 B"
+			}
+			if topic == nil || topic.TurnID != wantID || topic.Title != wantTitle {
+				t.Fatalf("turn %d: %+v", i, topic)
+			}
+		}
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	entries, err := reopened.ListTurnOutline(ctx, "topics")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, entry := range entries {
+		want := ""
+		if i == 1 {
+			want = "主题 A"
+		}
+		if i == 4 {
+			want = "主题 B"
+		}
+		if entry.TopicTitle != want {
+			t.Fatalf("marker rewritten or invalid marker exposed: %+v", entries)
+		}
+	}
+	topic, err := reopened.GetCurrentTurnTopic(ctx, "topics")
+	if err != nil || topic == nil || topic.Title != "主题 B" {
+		t.Fatalf("restart lost marker: %+v %v", topic, err)
+	}
+	if topic.StartMessageID != "message_topic_turn_5" || topic.StartedAt.UnixMilli() != 1000 {
+		t.Fatalf("topic source metadata: %+v", topic)
+	}
+	source, err := reopened.GetMessage(ctx, "topics", topic.StartMessageID)
+	if err != nil || source.TurnID != topic.TurnID || source.Role != store.RoleUser {
+		t.Fatalf("topic source is not readable: %+v %v", source, err)
+	}
+	other, err := reopened.GetCurrentTurnTopic(ctx, "other")
+	if err != nil || other != nil {
+		t.Fatalf("topic leaked between sessions: %+v %v", other, err)
+	}
+}
+
+func TestTurnOutlineAnswerExcludesToolCallsAndThoughts(t *testing.T) {
+	st, _ := openTestStore(t)
+	ctx := context.Background()
+	createTestSession(t, st, "outline_answers")
+	metadata := []store.ContentPart{
+		{Type: store.ContentPartToolUse, CallID: "topic", Name: "builtin_set_turn_topic", Args: json.RawMessage(`{"title":"主题"}`)},
+		{Type: store.ContentPartToolUse, CallID: "next", Name: "builtin_set_next_prompt", Args: json.RawMessage(`{"text":"继续"}`)},
+		{Type: store.ContentPartToolResult, CallID: "topic", Name: "builtin_set_turn_topic", Ok: true, Content: `{"title":"主题"}`},
+		{Type: store.ContentPartToolResult, CallID: "next", Name: "builtin_set_next_prompt", Ok: true, Content: `{"text":"继续"}`},
+	}
+	cases := []struct {
+		name   string
+		parts  []store.ContentPart
+		answer string
+	}{
+		{"answer_then_metadata", append(store.TextPart("回答正文"), metadata...), "回答正文"},
+		{"answer_then_tool_and_thought", []store.ContentPart{
+			{Type: store.ContentPartText, Text: "较早的正文"},
+			{Type: store.ContentPartText, Text: strings.Repeat("中", 600)},
+			{Type: store.ContentPartToolUse, CallID: "read", Name: "builtin_read_file", Args: json.RawMessage(`{"path":"README.md"}`)},
+			{Type: store.ContentPartThought, Text: "内部思考"},
+		}, strings.Repeat("中", 512)},
+		{"metadata_only", metadata, ""},
+		{"thought_only", []store.ContentPart{{Type: store.ContentPartThought, Text: "内部思考"}}, ""},
+	}
+	for _, tc := range cases {
+		beginTestTurn(t, st, "outline_answers", tc.name, "user_"+tc.name, "input_"+tc.name)
+		if _, err := st.FinishTurn(ctx, store.FinishTurnInput{TurnID: tc.name, Status: store.TurnCompleted, AssistantParts: tc.parts}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	entries, err := st.ListTurnOutline(ctx, "outline_answers")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != len(cases) {
+		t.Fatalf("outline entries: %d, want %d", len(entries), len(cases))
+	}
+	for i, entry := range entries {
+		if entry.ID != cases[i].name || entry.Answer != cases[i].answer {
+			t.Errorf("%s: answer = %q, want %q", entry.ID, entry.Answer, cases[i].answer)
+		}
+	}
+}
+
 func TestFinishTurnPersistsHistoricalFileChanges(t *testing.T) {
 	st, _ := openTestStore(t)
 	createTestSession(t, st, "sess_changes")

@@ -70,6 +70,13 @@ func TestVerificationPipelineWarningUsesShellStructure(t *testing.T) {
 		{"env TEST=1 go test ./... | cat", true},
 		{"go test ./... | > log", true},
 		{"go test ./...", false},
+		{"go test ./... || true", true},
+		{"npm test || :", true},
+		{"cd web && npm test || exit 0", true},
+		{"go test ./... || exit 1", false},
+		{"go test ./... || notify_failure", false},
+		{"command -v tool || true", false},
+		{`printf 'go test || true'`, false},
 		{"cat data | go test ./...", false},
 		{`printf 'go test | tail'`, false},
 		{"printf log | tail", false},
@@ -82,6 +89,12 @@ func TestVerificationPipelineWarningUsesShellStructure(t *testing.T) {
 		want := tc.warn && runtime.GOOS != "windows"
 		if got := fields["verificationWarning"] != nil; got != want {
 			t.Errorf("%q: warning=%v, want %v", tc.command, got, want)
+		}
+		if want && strings.Contains(tc.command, "||") {
+			warning := fields["verificationWarning"].(map[string]any)
+			if warning["code"] != "masked_exit_status" {
+				t.Errorf("%q: wrong warning %v", tc.command, warning)
+			}
 		}
 	}
 }

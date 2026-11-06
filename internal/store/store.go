@@ -1822,6 +1822,23 @@ type TurnPage struct {
 	HasMore bool
 }
 
+// TurnOutline contains bounded display excerpts, without message/tool payloads.
+type TurnOutline struct {
+	ID            string    `json:"id"`
+	RetryOfTurnID string    `json:"retryOfTurnID,omitempty"`
+	CreatedAt     time.Time `json:"createdAt"`
+	Prompt        string    `json:"prompt"`
+	Answer        string    `json:"answer"`
+	TopicTitle    string    `json:"topicTitle,omitempty"` // Marker on this turn, not the inherited title.
+}
+
+type TurnTopic struct {
+	TurnID         string    `json:"turnID"`
+	Title          string    `json:"title"`
+	StartMessageID string    `json:"startMessageID"`
+	StartedAt      time.Time `json:"startedAt"`
+}
+
 type TurnStatus string
 
 const (
@@ -2468,6 +2485,9 @@ type Store interface {
 	// ListTurnsPage 按 turn 创建时间升序返回一页完整 turn。beforeTurnID 为空时
 	// 返回最近 limit 个 turn;非空时返回该 turn 之前的 limit 个 turn。
 	ListTurnsPage(ctx context.Context, sessionID string, beforeTurnID string, limit int) (*TurnPage, error)
+	ListTurnOutline(ctx context.Context, sessionID string) ([]*TurnOutline, error)
+	// GetCurrentTurnTopic returns the latest persisted topic marker, or nil if none exists.
+	GetCurrentTurnTopic(ctx context.Context, sessionID string) (*TurnTopic, error)
 	// GetConversationTurn 返回单个完整 turn,用于 lifecycle 终态后精确对账。
 	GetConversationTurn(ctx context.Context, sessionID string, turnID string) (*ConversationTurn, error)
 	// GetTurnFileChange returns one historical file diff and always verifies the

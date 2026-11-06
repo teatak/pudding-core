@@ -927,10 +927,37 @@ func (s *Server) typeBrowserTab(c *cart.Context) error {
 	if err := decode(c, &req); err != nil {
 		return badRequest(c, "invalid json body")
 	}
-	if req.Text == "" {
+	if req.Text == "" && !req.Clear {
 		return badRequest(c, "text is required")
 	}
 	result, err := s.browser.Type(c.Request.Context(), sessionID, tabID, req)
+	if err != nil {
+		return s.browserError(c, err)
+	}
+	if err := s.syncBrowserState(c.Request.Context(), sessionID, result.Tab); err != nil {
+		return browserStoreError(c, s, err)
+	}
+	c.JSON(http.StatusOK, browserActionResp(result))
+	return nil
+}
+
+func (s *Server) selectBrowserTab(c *cart.Context) error {
+	sessionID, ok := s.browserSession(c)
+	if !ok {
+		return nil
+	}
+	tabID, _ := c.Param("tabID")
+	if !s.browserTabAllowed(sessionID, tabID) {
+		return s.browserError(c, browser.ErrTabNotFound)
+	}
+	var req browser.SelectInput
+	if err := decode(c, &req); err != nil {
+		return badRequest(c, "invalid json body")
+	}
+	if strings.TrimSpace(req.Selector) == "" || (req.Label == nil) == (req.Value == nil) {
+		return badRequest(c, "selector and exactly one of label or value are required")
+	}
+	result, err := s.browser.Select(c.Request.Context(), sessionID, tabID, req)
 	if err != nil {
 		return s.browserError(c, err)
 	}

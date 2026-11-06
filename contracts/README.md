@@ -35,11 +35,44 @@ The Go daemon embeds it through this package; desktop generates `web/contracts/`
 `api.ts` and `events.ts` are the TypeScript/Zod client validation definitions for the REST and SSE protocol.
 Server structs and lifecycle semantics remain owned by core; verify both sides when changing a wire field.
 
+`GET /sessions/{id}/turn-outline` returns chronological turn IDs, retry parents,
+timestamps and bounded prompt/answer excerpts (512 characters each). It does not
+return message parts, tool results or file diffs. Clients fold retry attempts into
+the original input's navigation position and load full turns only for reading.
+
+The optional `topicTitle` marks the start of a topic at that turn. It is projected
+from successful canonical `builtin_set_turn_topic` results; absence means inherit
+the latest marker, without backfilling earlier turns. No marker means unclassified
+history. Titles are bounded to 80 characters. The current topic is supplied as
+model-context metadata even after compaction. Calls/results stay in canonical
+history but are omitted from model-history replay and transcript tool rows.
+`builtin_set_turn_topic` and `builtin_set_next_prompt` may both follow the answer
+in one response; the engine saves both and ends without another model request.
+The complete answer is preserved. Explicit user requests override the optional
+metadata-call default; topic markers still apply only to the current turn.
+Current-topic context includes `startMessageID` and `startedAt` for history lookup.
+Next-prompt suggestions remain unsent drafts, including after Tab acceptance.
+No database migration is needed. Long topics use multiple groups of at most ten
+turns; a new marker restarts grouping and may leave a shorter preceding group.
+
 Browser observations add `offset` (default 0), `totalElements`, and nullable
 `nextOffset`. Controls intersecting the viewport precede offscreen controls, with
 DOM order preserved within each group. Follow `nextOffset` until null; restart
 from offset 0 after scrolling or page changes. Each page remains bounded to 100
 controls. This is an additive browser API/tool extension with no schema migration.
+
+Browser observations and viewport screenshots provide `observationID`; observations
+also declare `coordinateSpace: "viewport_css_pixels"`. Coordinate clicks must pass
+the matching ID and are rejected after detected document, viewport or scroll changes.
+Prefer element refs, which are checked against node identity independently.
+`POST /sessions/{id}/browser/tabs/{tabID}/select` and `builtin_browser_select` accept
+`selector` plus exactly one of `label` or `value` (including an empty option value)
+for native single-select controls. Observe exposes bounded native options and ARIA
+combobox/listbox/option controls; custom options are activated by their observed ref.
+Type accepts `commit:true` to dispatch change and blur, and `text:"",clear:true`
+to clear a field. Type/select read back the field and reject mismatches. Action
+results distinguish `delivered:true` from `effect:"unverified"`; verify business
+outcomes through a subsequent observation. Core and Desktop must be updated together.
 
 Protocol 55 adds optional host-only `modelOutput` declarations and canonical
 `mcpResult` envelopes to tool-result content parts, plus `modelOutput` on widget

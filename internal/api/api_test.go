@@ -48,6 +48,54 @@ import (
 
 const testToken = "test-token"
 
+func TestTurnOutlineEndpoint(t *testing.T) {
+	srv, st := newTestServer(t)
+	ctx := context.Background()
+	if err := st.CreateSession(ctx, &store.Session{ID: "outline", Title: "Outline", Provider: "mock", Model: "mock"}); err != nil {
+		t.Fatal(err)
+	}
+	resp := req(t, http.MethodGet, srv.URL+"/sessions/outline/turn-outline", nil)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status: %d", resp.StatusCode)
+	}
+	var result struct {
+		Turns []store.TurnOutline `json:"turns"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Turns == nil || len(result.Turns) != 0 {
+		t.Fatalf("empty outline: %+v", result)
+	}
+	if _, err := st.BeginTurn(ctx, store.BeginTurnInput{SessionID: "outline", TurnID: "topic", UserMessageID: "topic-user", ClientMessageID: "topic-input", UserText: "新话题"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.FinishTurn(ctx, store.FinishTurnInput{TurnID: "topic", Status: store.TurnCompleted, AssistantParts: []store.ContentPart{
+		{Type: store.ContentPartText, Text: "回答"},
+		{Type: store.ContentPartToolUse, CallID: "marker", Name: "builtin_set_turn_topic", Args: json.RawMessage(`{"title":"主题标题"}`)},
+		{Type: store.ContentPartToolResult, CallID: "marker", Name: "builtin_set_turn_topic", Ok: true, Content: `{"title":"主题标题"}`},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	populated := req(t, http.MethodGet, srv.URL+"/sessions/outline/turn-outline", nil)
+	defer populated.Body.Close()
+	if populated.StatusCode != http.StatusOK {
+		t.Fatalf("populated status: %d", populated.StatusCode)
+	}
+	if err := json.NewDecoder(populated.Body).Decode(&result); err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Turns) != 1 || result.Turns[0].TopicTitle != "主题标题" || result.Turns[0].Answer != "回答" {
+		t.Fatalf("topic projection: %+v", result)
+	}
+	missing := req(t, http.MethodGet, srv.URL+"/sessions/missing/turn-outline", nil)
+	defer missing.Body.Close()
+	if missing.StatusCode != http.StatusNotFound {
+		t.Fatalf("missing status: %d", missing.StatusCode)
+	}
+}
+
 func newTestServer(t *testing.T) (*httptest.Server, store.Store) {
 	srv, st, _ := newTestServerWithHome(t)
 	return srv, st

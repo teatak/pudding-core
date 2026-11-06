@@ -1502,11 +1502,11 @@ func (e *Engine) streamTurn(ctx context.Context, sessionID, turnID string, resol
 			continuations = append(continuations, *continuation)
 		}
 		providerState := storeProviderState(resolved, continuation)
-		// A UI suggestion is an optional terminal side effect. Persist its result
+		// UI suggestions and topic markers are terminal side effects. Persist their results
 		// for the next user request, but do not spend a model request acknowledging it.
 		// Reasoning, whitespace, or text from an earlier provider call is not an answer.
 		if finish == provider.FinishToolCalls && parts.providerText &&
-			tool.HasDefinition(baseReq.Tools, tool.SetNextPrompt) && onlyNextPromptCalls(parts.PendingToolCalls()) {
+			onlyTurnMetadataCalls(parts.PendingToolCalls(), baseReq.Tools) {
 			if err := e.commitTurnPartsWithProviderState(turnID, parts, providerState); err != nil {
 				return store.TurnFailed, fmt.Sprintf("append output: %v", err), currentMode
 			}
