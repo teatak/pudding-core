@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 
+	"github.com/teatak/pudding-core/internal/event"
 	"github.com/teatak/pudding-core/internal/store"
 	"github.com/teatak/pudding-core/internal/tool"
 )
@@ -80,9 +81,12 @@ func (e *Engine) CommandApprovals(sessionID string) CommandApprovalStatus {
 			result.ReuseMissReasons[reason] = count
 		}
 	}
-	if state := e.sessionProjectAccess[sessionID]; state != nil {
-		result.ProjectDirs = append(result.ProjectDirs, state.dirs...)
+	for _, grant := range e.turnProjectAccess {
+		if grant.SessionID == sessionID {
+			result.ProjectDirs = append(result.ProjectDirs, grant.RootDirs...)
+		}
 	}
+	result.ProjectDirs = store.NormalizeProjectDirs(result.ProjectDirs)
 	if state := e.commandGrants[sessionID]; state != nil {
 		result.GrantCount, result.ReusedCount = len(state.grants), state.reused
 		for reason, count := range state.reasons {
@@ -96,7 +100,10 @@ func (e *Engine) CommandApprovals(sessionID string) CommandApprovalStatus {
 // Revocation affects future dispatches only, not already-running processes.
 func (e *Engine) RevokeCommandApprovals(sessionID string) {
 	e.mu.Lock()
-	defer e.mu.Unlock()
+	defer func() {
+		e.mu.Unlock()
+		e.hub.Publish(event.Event{Kind: event.SessionDirectoriesChanged, SessionID: sessionID})
+	}()
 	if e.commandDiagnosticsEnabled {
 		e.commandReuseDiagnosticLocked(sessionID).lastReset = "authorization_revoked"
 	}

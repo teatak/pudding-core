@@ -82,7 +82,7 @@ type projectGitBranchesView struct {
 }
 
 func (s *Server) getProjectGitStatus(c *cart.Context) error {
-	_, roots, ok := s.sessionProject(c)
+	_, roots, ok := s.sessionWorkspace(c)
 	if !ok {
 		return nil
 	}
@@ -335,7 +335,7 @@ func (s *Server) mutateProjectGitRoot(
 }
 
 func (s *Server) projectGitRoot(c *cart.Context, rootID string) (projectRootView, bool) {
-	_, roots, ok := s.sessionProject(c)
+	_, roots, ok := s.sessionWorkspace(c)
 	if !ok {
 		return projectRootView{}, false
 	}
@@ -376,7 +376,7 @@ func projectGitStatusResponse(rootID string, status projectgit.Status) projectGi
 }
 
 func (s *Server) getProjectGitDiff(c *cart.Context) error {
-	_, roots, ok := s.sessionProject(c)
+	_, roots, ok := s.sessionWorkspace(c)
 	if !ok {
 		return nil
 	}

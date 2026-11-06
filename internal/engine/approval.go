@@ -249,12 +249,16 @@ func (e *Engine) completePendingApproval(ctx context.Context, session *store.Ses
 		if scope == ApprovalScopeSession {
 			mode, lease := p.req.TargetMode, store.ModeLeaseSession
 			running := current.Running
-			current, err = e.store.UpdateSession(ctx, sessionID, store.SessionUpdate{ActiveMode: &mode, ModeLease: &lease})
+			savedDirs, readErr := e.store.GetSessionDirectories(ctx, sessionID)
+			if readErr != nil {
+				return readErr
+			}
+			savedDirs = store.NormalizeProjectDirs(append(savedDirs, dirs...))
+			current, err = e.store.UpdateSession(ctx, sessionID, store.SessionUpdate{ActiveMode: &mode, ModeLease: &lease, DirectoryGrants: &savedDirs})
 			if err != nil {
 				return err
 			}
 			current.Running = running
-			p.projectAccess.dirs = store.NormalizeProjectDirs(append(p.projectAccess.dirs, dirs...))
 		} else if len(dirs) > 0 {
 			grant := e.turnProjectAccess[p.req.TurnID]
 			grant.SessionID, grant.ProjectID = sessionID, p.projectAccess.projectID

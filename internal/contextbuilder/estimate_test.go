@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -20,13 +21,13 @@ func TestToolImageBudgetReachesProviderWire(t *testing.T) {
 	data := []byte("bounded-screenshot-wire-test")
 	var messages []provider.Message
 	for i := 0; i < 9; i++ {
-		messages = append(messages, provider.Message{Role: provider.RoleUser, Parts: []provider.Part{{Type: provider.PartImage, Name: tool.BrowserScreenshot, ImageKey: "saved-image", MIME: "image/png", Data: data}}})
+		messages = append(messages, provider.Message{Role: provider.RoleUser, Parts: []provider.Part{{Type: provider.PartImage, Name: tool.BrowserScreenshot, CallID: fmt.Sprint(i), ImageKey: "saved-image", MIME: "image/png", Data: data}}})
 	}
 	// An explicit user upload is outside the automatic screenshot budget.
 	messages = append(messages, provider.Message{Role: provider.RoleUser, Parts: []provider.Part{{Type: provider.PartImage, ImageKey: "upload", MIME: "image/png", Data: data}}})
 	// Media reads without an explicit observation purpose are references too.
 	messages = append(messages, provider.Message{Role: provider.RoleUser, Parts: []provider.Part{{Type: provider.PartImage, Name: tool.MediaRead, ImageKey: "reference", MIME: "image/png", Data: data}}})
-	req := provider.Request{Model: "model", Messages: LimitToolImages(messages)}
+	req := provider.Request{Model: "model", Messages: cleanImagesForRewrite(t, messages)}
 	for _, tc := range []struct {
 		name     string
 		response string

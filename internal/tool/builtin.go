@@ -663,7 +663,7 @@ func builtinRunnerDefinitions() []provider.ToolDef {
 		{
 			Name:        BrowserSelect,
 			Description: "Select one option in a native single-select using an observed element ref (preferred) or unique CSS selector. Supply exactly one of label (exact displayed text) or value. Dispatches input/change and verifies the selected label/value; ambiguous, absent or disabled options fail. For custom comboboxes, use observe to locate and click an option ref instead. Success confirms the local selection, not business outcome; verify the intended effect afterward.",
-			InputSchema: json.RawMessage(`{"type":"object","properties":{"tabID":{"type":"string"},"selector":{"type":"string","minLength":1},"label":{"type":"string"},"value":{"type":"string"}},"required":["selector"],"oneOf":[{"required":["label"],"not":{"required":["value"]}},{"required":["value"],"not":{"required":["label"]}}],"additionalProperties":false}`),
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"tabID":{"type":"string"},"selector":{"type":"string","minLength":1},"label":{"type":"string"},"value":{"type":"string"}},"required":["selector"],"additionalProperties":false}`),
 			Capability:  store.ModeWork,
 		},
 		{

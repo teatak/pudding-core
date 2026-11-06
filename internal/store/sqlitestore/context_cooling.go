@@ -16,7 +16,7 @@ const contextCoolingSchema = `CREATE TABLE IF NOT EXISTS session_context_cooling
 
 func (s *Store) ContextCooling(ctx context.Context, sessionID string) (store.ContextCooling, error) {
 	var state store.ContextCooling
-	err := s.db.QueryRowContext(ctx, `SELECT through_turn_id,summary_message_id FROM session_context_cooling WHERE session_id=?`, sessionID).Scan(&state.ThroughTurnID, &state.SummaryMessageID)
+	err := s.db.QueryRowContext(ctx, `SELECT through_turn_id,summary_message_id,image_through_id FROM session_context_cooling WHERE session_id=?`, sessionID).Scan(&state.ThroughTurnID, &state.SummaryMessageID, &state.ImageThroughID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return state, nil
 	}
@@ -44,14 +44,14 @@ func (s *Store) AdvanceContextCooling(ctx context.Context, in store.AdvanceConte
 			return store.ErrHistoryChanged
 		}
 		var current store.ContextCooling
-		err = tx.QueryRowContext(ctx, `SELECT through_turn_id,summary_message_id FROM session_context_cooling WHERE session_id=?`, in.SessionID).Scan(&current.ThroughTurnID, &current.SummaryMessageID)
+		err = tx.QueryRowContext(ctx, `SELECT through_turn_id,summary_message_id,image_through_id FROM session_context_cooling WHERE session_id=?`, in.SessionID).Scan(&current.ThroughTurnID, &current.SummaryMessageID, &current.ImageThroughID)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return err
 		}
 		if current != in.Expected {
 			return store.ErrHistoryChanged
 		}
-		_, err = tx.ExecContext(ctx, `INSERT INTO session_context_cooling(session_id,through_turn_id,summary_message_id) VALUES(?,?,?) ON CONFLICT(session_id) DO UPDATE SET through_turn_id=excluded.through_turn_id,summary_message_id=excluded.summary_message_id`, in.SessionID, in.Next.ThroughTurnID, in.Next.SummaryMessageID)
+		_, err = tx.ExecContext(ctx, `INSERT INTO session_context_cooling(session_id,through_turn_id,summary_message_id,image_through_id) VALUES(?,?,?,?) ON CONFLICT(session_id) DO UPDATE SET through_turn_id=excluded.through_turn_id,summary_message_id=excluded.summary_message_id,image_through_id=excluded.image_through_id`, in.SessionID, in.Next.ThroughTurnID, in.Next.SummaryMessageID, in.Next.ImageThroughID)
 		return err
 	})
 }

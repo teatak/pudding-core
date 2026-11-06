@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/teatak/pudding-core/internal/sessionworkspace"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"testing"
@@ -20,7 +22,7 @@ import (
 	"github.com/teatak/pudding-core/internal/tool"
 )
 
-func TestTemporaryDirectoryApprovalReuseIsolationAndRevocation(t *testing.T) {
+func TestPersistentDirectoryApprovalReuseIsolationAndRevocation(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	ms := storetest.New(t)
@@ -78,6 +80,18 @@ func TestTemporaryDirectoryApprovalReuseIsolationAndRevocation(t *testing.T) {
 	}
 	eng.RevokeCommandApprovals("one")
 	dirs, _ = eng.projectRootDirsForToolCall(ctx, "one", "next", store.ModeCode)
+	if !strings.Contains(strings.Join(dirs, "\n"), extra) {
+		t.Fatal("command revocation removed persisted directory consent")
+	}
+	restarted := New(ms, event.NewHub(), registry.Static(mock.New()), ms)
+	dirs, _ = restarted.projectRootDirsForToolCall(ctx, "one", "next", store.ModeCode)
+	if !strings.Contains(strings.Join(dirs, "\n"), extra) {
+		t.Fatal("restart lost session directory consent")
+	}
+	if _, err := eng.SetSessionDirectories(ctx, "one", nil); err != nil {
+		t.Fatal(err)
+	}
+	dirs, _ = eng.projectRootDirsForToolCall(ctx, "one", "next", store.ModeCode)
 	if strings.Contains(strings.Join(dirs, "\n"), extra) {
 		t.Fatal("revoked lease survived")
 	}
@@ -93,7 +107,9 @@ func TestTemporaryDirectoryApprovalReuseIsolationAndRevocation(t *testing.T) {
 		}
 	}
 pending:
-	eng.RevokeCommandApprovals("one")
+	if _, err := eng.SetSessionDirectories(ctx, "one", nil); err != nil {
+		t.Fatal(err)
+	}
 	if err := eng.ApproveApproval(ctx, "one", ev.ApprovalID, ApprovalScopeSession, nil); err == nil {
 		t.Fatal("revoked pending grant accepted")
 	}
@@ -224,7 +240,7 @@ func TestCommandDirectoryAndRiskUseOneApproval(t *testing.T) {
 	}
 }
 
-func TestTemporaryDirectoriesRefreshInProviderContext(t *testing.T) {
+func TestDirectoryAccessRefreshesInProviderContext(t *testing.T) {
 	for _, scope := range []ApprovalScope{ApprovalScopeTurn, ApprovalScopeSession} {
 		t.Run(string(scope), func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -258,6 +274,9 @@ func TestTemporaryDirectoriesRefreshInProviderContext(t *testing.T) {
 				case 2:
 					return smokeTextStream("approved"), nil
 				case 3:
+					if _, err := eng.SetSessionDirectories(ctx, "s", nil); err != nil {
+						return nil, err
+					}
 					eng.RevokeCommandApprovals("s")
 					return smokeToolStream("time", tool.TimeGetCurrent, `{}`), nil
 				default:
@@ -408,5 +427,54 @@ func TestCombinedDirectoryGrantInvalidation(t *testing.T) {
 				t.Fatalf("unapproved dispatch: %d", len(calls.calls))
 			}
 		})
+	}
+}
+
+func TestTurnDirectoryWorkspaceExpiresWithoutPersisting(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	st := storetest.New(t)
+	if err := st.CreateSession(ctx, &store.Session{ID: "s", Provider: "mock", Model: "mock", ActiveMode: store.ModeCode}); err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	root, _ = filepath.EvalSymlinks(root)
+	hub := event.NewHub()
+	eng := New(st, hub, registry.Static(mock.New()), st, WithAttachmentHome(t.TempDir()))
+	events, unsubscribe := hub.Subscribe("s")
+	defer unsubscribe()
+	raw, _ := json.Marshal(map[string]any{"targetMode": "code", "reason": "inspect", "projectDirs": []string{root}})
+	done := make(chan tool.Result, 1)
+	go func() {
+		result, _, _ := eng.requestCapabilityApproval(ctx, "s", "turn", tool.Call{Name: tool.RequestCapability, CallID: "cap", Args: raw}, store.ModeCode)
+		done <- result
+	}()
+	var ev event.Event
+	select {
+	case ev = <-events:
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+	if err := eng.ApproveApproval(ctx, "s", ev.ApprovalID, ApprovalScopeTurn, nil); err != nil {
+		t.Fatal(err)
+	}
+	if result := <-done; !result.Ok {
+		t.Fatal(result)
+	}
+	workspace, err := eng.SessionWorkspace(ctx, "s", "", sessionworkspace.ScratchExisting)
+	if err != nil || len(workspace.RootDirs) != 2 || workspace.RootDirs[0] != root || !reflect.DeepEqual(workspace.RootSources[root], []string{"turn"}) || !reflect.DeepEqual(workspace.RootSources[workspace.ScratchRoot], []string{"scratch"}) {
+		t.Fatalf("API workspace missing turn directory: %+v %v", workspace, err)
+	}
+	toolRoots, err := eng.projectRootDirsForToolCall(ctx, "s", "turn", store.ModeCode)
+	if err != nil || !reflect.DeepEqual(toolRoots, workspace.RootDirs) {
+		t.Fatalf("tools and file panel disagree: %v %v", toolRoots, err)
+	}
+	if dirs, err := st.GetSessionDirectories(ctx, "s"); err != nil || len(dirs) != 0 {
+		t.Fatalf("turn grant persisted: %v %v", dirs, err)
+	}
+	eng.clearRunning("s", "turn")
+	workspace, err = eng.SessionWorkspace(ctx, "s", "", sessionworkspace.ScratchExisting)
+	if err != nil || len(workspace.RootDirs) != 1 || workspace.RootDirs[0] != workspace.ScratchRoot || !reflect.DeepEqual(workspace.RootSources[workspace.ScratchRoot], []string{"scratch"}) {
+		t.Fatalf("expired turn directory remained visible: %+v %v", workspace, err)
 	}
 }

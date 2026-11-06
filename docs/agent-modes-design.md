@@ -11,7 +11,7 @@ Pudding 使用三档内部能力模式:
 chat < work < code
 ```
 
-模式表达 agent 当前可使用的能力,Project 表达本地目录、审批设置和会话归属。
+模式表达 agent 当前可使用的能力；Project 表达共享目录、审批设置和会话归属。会话也可独立保存目录授权。
 两者不再复用同一个名称:
 
 - `ModeChat = "chat"`
@@ -86,11 +86,12 @@ work | code
 - Chat 可请求 Work 或 Code。
 - Work 可请求 Code。
 - 模型不能请求降级。
-- Code 可再次请求 Code,但只用于追加 Project 目录授权。
+- Code 可再次请求 Code，用于追加会话或本轮目录授权。
 - Work 不接受 `projectDirs`。
-- Code 不强制绑定 Project。没有持久 Project 或当前 turn grant 时,项目工具使用
-  session 隔离的 Pudding 临时工作区;只有访问已有本地目录时才需要追加授权。
-- turn scope 只影响当前 turn;session scope 更新 `Session.activeMode`。
+- Code 不强制绑定 Project。没有项目目录、会话目录或当前 turn grant 时，项目工具使用
+  session 隔离的 Pudding 临时工作区；访问已有本地目录时才需要追加授权。
+- turn scope 只影响当前 turn；session scope 原子更新 `Session.activeMode` 和会话目录授权。
+  会话目录重启后仍有效，直到显式撤销或删除会话；切换项目或降低模式不会删除目录配置。
 
 普通新会话默认 Chat。由 Project 创建的会话默认 Code。Project 绑定不因切换到
 Chat 或 Work 而删除。临时工作区不创建 Project,不出现在侧边栏,删除 session 时

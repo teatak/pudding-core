@@ -3,6 +3,7 @@ package sessionworkspace
 import (
 	"context"
 	"path/filepath"
+	"reflect"
 	"testing"
 
 	"github.com/teatak/pudding-core/internal/home"
@@ -59,5 +60,38 @@ func TestResolveDoesNotCreateScratchWhileInspecting(t *testing.T) {
 		t.Fatal("scratch path should be derivable")
 	} else if _, exists, err := home.ExistingCodeScratch(homeDir, sessionID); err != nil || exists {
 		t.Fatalf("inspection created scratch %q: exists=%t err=%v", path, exists, err)
+	}
+}
+
+func TestResolveIncludesSessionDirectoriesWithSources(t *testing.T) {
+	ctx := context.Background()
+	st := storetest.New(t)
+	root, extra := t.TempDir(), t.TempDir()
+	if err := st.CreateProject(ctx, &store.Project{ID: "p", RootDirs: []string{root}}); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"unbound", "bound"} {
+		session := &store.Session{ID: id, Provider: "mock", Model: "mock"}
+		if id == "bound" {
+			session.ProjectID = "p"
+		}
+		if err := st.CreateSession(ctx, session); err != nil {
+			t.Fatal(err)
+		}
+		dirs := []string{root, extra, root}
+		if _, err := st.UpdateSession(ctx, id, store.SessionUpdate{DirectoryGrants: &dirs}); err != nil {
+			t.Fatal(err)
+		}
+		workspace, err := Resolve(ctx, st, t.TempDir(), id, ScratchEnsure)
+		if err != nil || len(workspace.RootDirs) != 2 || workspace.Temporary || workspace.ScratchRoot != "" {
+			t.Fatalf("persistent workspace: %+v %v", workspace, err)
+		}
+		want := []string{"session"}
+		if id == "bound" {
+			want = []string{"project", "session"}
+		}
+		if !reflect.DeepEqual(workspace.RootSources[root], want) {
+			t.Fatalf("root sources: %v", workspace.RootSources)
+		}
 	}
 }

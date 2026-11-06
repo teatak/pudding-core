@@ -51,6 +51,7 @@ func migrateStudioV47(tx *sql.Tx) error {
 	delete(contract.tables, "assistant_sessions")
 	delete(contract.tables, "session_plugin_connections")
 	delete(contract.tables, "project_requests")
+	delete(contract.tables, "session_directory_grants")
 	return validateSchemaWithRetiredColumns(tx, contract)
 }
 

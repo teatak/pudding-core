@@ -19,7 +19,7 @@ import (
 const (
 	baselineSchemaVersion      = 1
 	currentSchemaLayoutVersion = 8
-	currentSchemaVersion       = 59
+	currentSchemaVersion       = 61
 )
 
 var (
@@ -35,6 +35,10 @@ type schemaMigration func(*sql.Tx) error
 // Unpublished Studio migrations 27–29 are consolidated into destination 30.
 // Unpublished Studio migrations 33–46 are consolidated into destination 47.
 var schemaMigrations = map[int]schemaMigration{
+	61: migrateSessionDirectoriesV61,
+	60: func(tx *sql.Tx) error {
+		return addTableColumnIfMissing(tx, "session_context_cooling", "image_through_id", `TEXT NOT NULL DEFAULT ''`)
+	},
 	59: migrateAssistantTaskOriginV59,
 	58: migrateAssistantTasksV58,
 	57: migrateAssistantAppearanceHistoryV57,
@@ -997,6 +1001,7 @@ var currentSchemaContract = func() schemaContract {
 		"scheduled_tasks":            {"id", "session_id", "name", "prompt", "schedule", "enabled", "deleted", "revision", "schedule_revision", "next_at", "created_at", "updated_at", "request_id", "request_hash"},
 		"scheduled_task_runs":        {"id", "task_id", "session_id", "name", "prompt", "definition_revision", "source", "scheduled_for", "accepted_at", "client_message_id", "handoff", "reason", "skipped_through", "trigger_key", "schedule"},
 		"computer_app_grants":        {"session_id", "app_id", "created_at"},
+		"session_directory_grants":   {"session_id", "root_dirs"},
 		"library_favorites":          {"id", "kind", "source_session_id", "saved_item_id", "url", "title", "created_at"},
 		"library_recent_opens":       {"id", "kind", "source_session_id", "studio_mount_id", "root_path", "path", "opened_at"},
 	})

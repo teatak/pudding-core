@@ -106,23 +106,43 @@ func (e *Engine) compact(ctx context.Context, in CompactInput, resolved *resolve
 			return nil, err
 		}
 	}
-	project := func(messages []*store.Message) (int, error) {
-		req, err := e.builder.BuildForProviderWithHistory(ctx, sessionID, resolved.providerName, resolved.model, string(mode), defs, messages, resolved.config)
+	imageThroughID := ""
+	project := func(messages []*store.Message, cleanupImages bool) (int, error) {
+		var projection []store.ContextCooling
+		if cleanupImages {
+			previous, err := e.store.ContextCooling(ctx, sessionID)
+			if err != nil {
+				return 0, err
+			}
+			imageThroughID = previous.ImageThroughID
+			projection = []store.ContextCooling{{SummaryMessageID: contextbuilder.ImageEpoch(messages), ImageThroughID: imageThroughID}}
+		}
+		req, err := e.builder.BuildForProviderWithHistory(ctx, sessionID, resolved.providerName, resolved.model, string(mode), defs, messages, resolved.config, projection...)
 		if err != nil {
 			return 0, err
 		}
 		req.Config, req.Tools = resolved.config, defs
-		if err := e.appendTemporaryProjectAccess(ctx, sessionID, runningTurnID, mode, &req); err != nil {
+		if err := e.appendDirectoryAccess(ctx, sessionID, runningTurnID, mode, &req); err != nil {
 			return 0, err
 		}
 		req, err = e.builder.ResolveSkillReferences(ctx, sessionID, string(mode), req)
 		if err != nil {
 			return 0, err
 		}
+		if cleanupImages {
+			through, err := contextbuilder.ToolImageCandidate(req.Messages, contextbuilder.DefaultToolImageBudget(resolved.config.ContextWindow), true)
+			if err != nil {
+				return 0, err
+			}
+			if through != "" {
+				imageThroughID = through
+				req.Messages = contextbuilder.ApplyToolImageWatermark(req.Messages, through)
+			}
+		}
 		estimate, err := contextbuilder.EstimateRequest(req, resolved.protocol)
 		return estimate.Total(), err
 	}
-	before, err := project(all)
+	before, err := project(all, false)
 	if err != nil {
 		return nil, err
 	}
@@ -151,7 +171,7 @@ func (e *Engine) compact(ctx context.Context, in CompactInput, resolved *resolve
 	for keep := e.compactTailInputTurns(ctx); keep >= 0; keep-- {
 		cold, tail = compactPartition(effective, keep, runningTurnID)
 		proposed.Metadata = store.CompactMessageMetadataWithCounts(messageIDs(cold), messageIDs(tail), messageInputTurnCount(cold), messageInputTurnCount(tail))
-		overhead, err := project(candidate)
+		overhead, err := project(candidate, true)
 		if err != nil {
 			return nil, err
 		}
@@ -181,7 +201,7 @@ func (e *Engine) compact(ctx context.Context, in CompactInput, resolved *resolve
 		return nil, err
 	}
 	proposed.Text, proposed.Parts = summary, store.TextPart(summary)
-	after, err := project(candidate)
+	after, err := project(candidate, true)
 	if err != nil {
 		return nil, err
 	}
@@ -204,6 +224,7 @@ func (e *Engine) compact(ctx context.Context, in CompactInput, resolved *resolve
 		clientMessageID = "compact:" + turnID
 	}
 	res, err := e.store.AppendCompactSummary(ctx, store.AppendCompactSummaryInput{
+		ImageThroughID:        imageThroughID,
 		ExpectedLastMessageID: all[len(all)-1].ID,
 		RunningTurnID:         runningTurnID,
 		SessionID:             sessionID, TurnID: turnID, MessageID: summaryID,

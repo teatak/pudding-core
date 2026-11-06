@@ -3,32 +3,33 @@ package contextbuilder
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/teatak/pudding-core/internal/provider"
+	"github.com/teatak/pudding-core/internal/store"
 	"github.com/teatak/pudding-core/internal/tool"
 )
 
-const (
-	ToolImageLimit = 8
-	ToolImageKeep  = 3
-)
+// These are engineering budgets, not provider billing formulas or API limits.
+// A cleanup leaves half the budget free instead of sliding on every capture.
+type ToolImageBudget struct{ MaxTokens, MaxBytes int }
 
-// LimitToolImages projects a bounded visual working set without changing saved
-// history. Browser captures and media reads marked observation share the budget;
-// references and user uploads do not. Omitted parts keep their
-// identity, making projection idempotent across builder + current-turn replay.
-// Remove six at a time: 8 -> 3 on the next image, then grow back to 8. Stable
-// batch boundaries avoid changing the cached prefix on every screenshot.
-func LimitToolImages(messages []provider.Message) []provider.Message {
-	type position struct{ message, part int }
-	var observations []position
+func DefaultToolImageBudget(window int) ToolImageBudget {
+	tokens := 32768
+	if window > 0 {
+		tokens = min(tokens, max(1, window/10))
+	}
+	return ToolImageBudget{MaxTokens: tokens, MaxBytes: 16 << 20}
+}
+
+type imagePosition struct{ message, part int }
+
+func observationPositions(messages []provider.Message) []imagePosition {
+	var positions []imagePosition
 	readIsObservation := make(map[string]bool)
 	for i, message := range messages {
 		for j, part := range message.Parts {
 			if part.Type == provider.PartToolUse && part.Name == tool.MediaRead {
-				// Purpose is a canonical tool argument: text cooling cannot erase
-				// it. Legacy calls without purpose are references, not disposable
-				// screenshots. Resolve in order even if a later turn reuses an ID.
 				var args struct {
 					Purpose string `json:"purpose"`
 				}
@@ -36,40 +37,138 @@ func LimitToolImages(messages []provider.Message) []provider.Message {
 				readIsObservation[part.CallID] = args.Purpose == tool.MediaPurposeObservation
 			}
 			if part.ImageKey != "" && (part.Name == tool.BrowserScreenshot || (part.Name == tool.MediaRead && readIsObservation[part.CallID])) {
-				observations = append(observations, position{i, j})
+				positions = append(positions, imagePosition{i, j})
 			}
 		}
 	}
-	if len(observations) <= ToolImageLimit {
+	return positions
+}
+
+func ToolImageID(p provider.Part) string {
+	id, _ := json.Marshal([3]string{p.ImageTurnID, p.CallID, p.ImageKey})
+	return string(id)
+}
+
+// ToolImageCandidate only plans a new boundary. Callers commit it after the
+// complete projected request passes the normal context checks.
+// coalesce cleans to three recent observations at an existing prefix rewrite.
+func ToolImageCandidate(messages []provider.Message, budget ToolImageBudget, coalesce bool) (string, error) {
+	var active []provider.Part
+	tokens, size := 0, 0
+	for _, pos := range observationPositions(messages) {
+		p := messages[pos.message].Parts[pos.part]
+		if p.Type != provider.PartImage {
+			continue
+		}
+		active = append(active, p)
+		tokens += provider.EstimateImageTokens(p.Width, p.Height)
+		size += (len(p.Data) + 2) / 3 * 4
+	}
+	over := tokens > budget.MaxTokens || size > budget.MaxBytes
+	if !over && (!coalesce || len(active) <= 3) {
+		return "", nil
+	}
+	omit := 0
+	for omit < len(active)-1 {
+		targetReached := !over || (tokens <= budget.MaxTokens/2 && size <= budget.MaxBytes/2)
+		if targetReached && (!coalesce || len(active)-omit <= 3) {
+			break
+		}
+		p := active[omit]
+		tokens -= provider.EstimateImageTokens(p.Width, p.Height)
+		size -= (len(p.Data) + 2) / 3 * 4
+		omit++
+	}
+	if tokens > budget.MaxTokens || size > budget.MaxBytes {
+		return "", fmt.Errorf("latest screenshot exceeds image budget: %d estimated tokens, %d encoded bytes", tokens, size)
+	}
+	if omit == 0 {
+		return "", nil
+	}
+	return ToolImageID(active[omit-1]), nil
+}
+
+func imageTargets(messages []provider.Message, through string) map[string]bool {
+	targets := map[string]bool{}
+	if through == "" {
+		return targets
+	}
+	for _, pos := range observationPositions(messages) {
+		id := ToolImageID(messages[pos.message].Parts[pos.part])
+		targets[id] = true
+		if id == through {
+			return targets
+		}
+	}
+	return nil // Boundary belongs to a different effective history.
+}
+
+func ApplyToolImageWatermark(messages []provider.Message, through string) []provider.Message {
+	return omitToolImages(messages, imageTargets(messages, through))
+}
+
+func ImageEpoch(messages []*store.Message) string {
+	epoch := ""
+	for _, m := range EffectiveMessages(messages) {
+		if m.Role == store.RoleSummary {
+			epoch = m.ID
+		}
+	}
+	return epoch
+}
+
+// Resolve the boundary before mode/tool filtering, so a temporarily unavailable
+// tool cannot revive older images when its boundary image is absent on the wire.
+func applySavedToolImages(messages []provider.Message, canonical []*store.Message, state store.ContextCooling) []provider.Message {
+	if state.ImageThroughID == "" || ImageEpoch(canonical) != state.SummaryMessageID {
 		return messages
 	}
-	batch := ToolImageLimit - ToolImageKeep + 1
-	omit := (len(observations) - ToolImageKeep) / batch * batch
+	var history []provider.Message
+	var callID, name, turnID string
+	for _, m := range canonical {
+		if m.TurnID != turnID {
+			callID, name, turnID = "", "", m.TurnID
+		}
+		var parts []provider.Part
+		for _, p := range m.Parts {
+			switch p.Type {
+			case store.ContentPartToolUse:
+				parts = append(parts, provider.Part{Type: provider.PartToolUse, Name: tool.CurrentToolName(p.Name), CallID: p.CallID, Args: p.Args})
+			case store.ContentPartToolResult:
+				callID, name = p.CallID, tool.CurrentToolName(p.Name)
+			case store.ContentPartAttachment:
+				if p.Origin == "tool" && strings.HasPrefix(p.MIME, "image/") {
+					parts = append(parts, provider.Part{Type: provider.PartImage, Name: name, CallID: callID, ImageKey: p.AttachmentKey, ImageTurnID: m.TurnID})
+				}
+			}
+		}
+		history = append(history, provider.Message{Parts: parts})
+	}
+	return omitToolImages(messages, imageTargets(history, state.ImageThroughID))
+}
+
+func omitToolImages(messages []provider.Message, targets map[string]bool) []provider.Message {
+	if len(targets) == 0 {
+		return messages
+	}
 	out := append([]provider.Message(nil), messages...)
-	next := 0
 	prefixChanged := false
 	for i, message := range out {
 		parts := append([]provider.Part(nil), message.Parts...)
 		for j, part := range parts {
-			if next >= omit || observations[next] != (position{i, j}) {
+			if part.ImageKey == "" || !targets[ToolImageID(part)] {
 				continue
 			}
-			next++
 			prefixChanged = true
 			args, _ := json.Marshal(map[string]string{"source": "attachment", "attachmentKey": part.ImageKey, "purpose": tool.MediaPurposeObservation})
-			parts[j] = provider.Part{
-				Type: provider.PartText, CallID: part.CallID, Name: part.Name, ImageKey: part.ImageKey,
-				Text: fmt.Sprintf("[Earlier screenshot omitted from model context; original preserved. To inspect it again, call %s with %s. Use purpose=reference instead if this image is needed for ongoing comparison. This is a historical image, not the current screen.]", tool.MediaRead, args),
-			}
+			parts[j] = provider.Part{Type: provider.PartText, CallID: part.CallID, Name: part.Name, ImageKey: part.ImageKey, ImageTurnID: part.ImageTurnID,
+				Text: fmt.Sprintf("[Earlier screenshot omitted from model context; original preserved. To inspect it again, call %s with %s. Use purpose=reference instead if this image is needed for ongoing comparison. This is a historical image, not the current screen.]", tool.MediaRead, args)}
 		}
 		out[i].Parts = parts
 		if len(parts) > 0 {
 			out[i].Text = textFromProviderParts(parts)
 		}
 		if prefixChanged {
-			// Anthropic thinking may be bound to the unchanged input prefix.
-			// Drop only those blocks after an omission, preserving tool calls,
-			// text and the other providers' required continuation state.
 			out[i].Continuations = withoutBoundThinking(message.Continuations)
 		}
 	}

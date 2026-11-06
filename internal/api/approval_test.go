@@ -99,9 +99,13 @@ func TestApproveApprovalReturnsSessionWithoutPersistingDirectories(t *testing.T)
 	if err != nil || len(projects) != 0 {
 		t.Fatalf("temporary approval created project: %v %v", projects, err)
 	}
+	dirs, err := ms.GetSessionDirectories(ctx, sessionID)
+	if err != nil || len(dirs) != 1 {
+		t.Fatalf("missing persisted consent: %v %v", dirs, err)
+	}
 	status := eng.CommandApprovals(sessionID)
-	if len(status.ProjectDirs) != 1 {
-		t.Fatalf("missing session directory grant: %+v", status)
+	if len(status.ProjectDirs) != 0 {
+		t.Fatalf("persistent directories reported as temporary: %+v", status)
 	}
 }
 

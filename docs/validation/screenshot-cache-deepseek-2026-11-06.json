@@ -1,0 +1,775 @@
+{
+  "model": "deepseek-flash",
+  "protocol": "openai-responses",
+  "scope": "Actual screenshot resizing and LimitToolImages; isolated per-arm cache prefixes; interleaved order reversed by step/repeat; no retries; reasoning none; max output 32; fixed OK answer. Synthetic text with existing screenshot pixels. Excludes browser actions, task accuracy and image loading time. Token-weighted hit rate; official price estimates are not gateway invoices.",
+  "dimensions": [
+    [
+      1401,
+      856
+    ],
+    [
+      1401,
+      856
+    ],
+    [
+      1401,
+      856
+    ],
+    [
+      1401,
+      856
+    ],
+    [
+      1401,
+      856
+    ],
+    [
+      1401,
+      856
+    ],
+    [
+      1401,
+      856
+    ],
+    [
+      1401,
+      856
+    ],
+    [
+      1401,
+      856
+    ],
+    [
+      1401,
+      856
+    ],
+    [
+      1401,
+      856
+    ],
+    [
+      1401,
+      856
+    ],
+    [
+      1401,
+      856
+    ],
+    [
+      1401,
+      856
+    ],
+    [
+      1401,
+      856
+    ],
+    [
+      1401,
+      856
+    ],
+    [
+      1401,
+      856
+    ],
+    [
+      1401,
+      856
+    ]
+  ],
+  "results": [
+    {
+      "workload": "text_tail",
+      "repeat": 1,
+      "policy": "unlimited",
+      "step": 1,
+      "images": 1,
+      "started": "2026-11-06T04:00:05.657109Z",
+      "ttft_ms": 1547,
+      "duration_ms": 1595,
+      "usage": {
+        "InputUncachedTokens": 7576,
+        "InputCachedTokens": 0,
+        "CacheCreationTokens": 0,
+        "OutputContentTokens": 1,
+        "OutputReasoningTokens": 0
+      },
+      "answer": "OK"
+    },
+    {
+      "workload": "text_tail",
+      "repeat": 1,
+      "policy": "8_to_3",
+      "step": 1,
+      "images": 1,
+      "started": "2026-11-06T04:00:07.255384Z",
+      "ttft_ms": 1345,
+      "duration_ms": 1395,
+      "usage": {
+        "InputUncachedTokens": 7575,
+        "InputCachedTokens": 0,
+        "CacheCreationTokens": 0,
+        "OutputContentTokens": 1,
+        "OutputReasoningTokens": 0
+      },
+      "answer": "OK"
+    },
+    {
+      "workload": "text_tail",
+      "repeat": 1,
+      "policy": "8_to_3",
+      "step": 2,
+      "images": 2,
+      "started": "2026-11-06T04:00:08.651585Z",
+      "ttft_ms": 1709,
+      "duration_ms": 1808,
+      "usage": {
+        "InputUncachedTokens": 5453,
+        "InputCachedTokens": 7552,
+        "CacheCreationTokens": 0,
+        "OutputContentTokens": 1,
+        "OutputReasoningTokens": 0
+      },
+      "answer": "OK"
+    },
+    {
+      "workload": "text_tail",
+      "repeat": 1,
+      "policy": "unlimited",
+      "step": 2,
+      "images": 2,
+      "started": "2026-11-06T04:00:10.462047Z",
+      "ttft_ms": 1208,
+      "duration_ms": 1347,
+      "usage": {
+        "InputUncachedTokens": 5454,
+        "InputCachedTokens": 7552,
+        "CacheCreationTokens": 0,
+        "OutputContentTokens": 1,
+        "OutputReasoningTokens": 0
+      },
+      "answer": "OK"
+    },
+    {
+      "workload": "text_tail",
+      "repeat": 1,
+      "policy": "unlimited",
+      "step": 3,
+      "images": 3,
+      "started": "2026-11-06T04:00:11.810959Z",
+      "ttft_ms": 1454,
+      "duration_ms": 1531,
+      "usage": {
+        "InputUncachedTokens": 5508,
+        "InputCachedTokens": 12928,
+        "CacheCreationTokens": 0,
+        "OutputContentTokens": 1,
+        "OutputReasoningTokens": 0
+      },
+      "answer": "OK"
+    },
+    {
+      "workload": "text_tail",
+      "repeat": 1,
+      "policy": "8_to_3",
+      "step": 3,
+      "images": 3,
+      "started": "2026-11-06T04:00:13.3426Z",
+      "ttft_ms": 1745,
+      "duration_ms": 1802,
+      "usage": {
+        "InputUncachedTokens": 5507,
+        "InputCachedTokens": 12928,
+        "CacheCreationTokens": 0,
+        "OutputContentTokens": 1,
+        "OutputReasoningTokens": 0
+      },
+      "answer": "OK"
+    },
+    {
+      "workload": "text_tail",
+      "repeat": 1,
+      "policy": "8_to_3",
+      "step": 4,
+      "images": 4,
+      "started": "2026-11-06T04:00:15.148403Z",
+      "ttft_ms": 1554,
+      "duration_ms": 1659,
+      "usage": {
+        "InputUncachedTokens": 5433,
+        "InputCachedTokens": 18432,
+        "CacheCreationTokens": 0,
+        "OutputContentTokens": 1,
+        "OutputReasoningTokens": 0
+      },
+      "answer": "OK"
+    },
+    {
+      "workload": "text_tail",
+      "repeat": 1,
+      "policy": "unlimited",
+      "step": 4,
+      "images": 4,
+      "started": "2026-11-06T04:00:16.809812Z",
+      "ttft_ms": 1445,
+      "duration_ms": 1615,
+      "usage": {
+        "InputUncachedTokens": 5434,
+        "InputCachedTokens": 18432,
+        "CacheCreationTokens": 0,
+        "OutputContentTokens": 1,
+        "OutputReasoningTokens": 0
+      },
+      "answer": "OK"
+    },
+    {
+      "workload": "text_tail",
+      "repeat": 1,
+      "policy": "unlimited",
+      "step": 5,
+      "images": 5,
+      "started": "2026-11-06T04:00:18.427412Z",
+      "ttft_ms": 1583,
+      "duration_ms": 1654,
+      "usage": {
+        "InputUncachedTokens": 5488,
+        "InputCachedTokens": 23808,
+        "CacheCreationTokens": 0,
+        "OutputContentTokens": 1,
+        "OutputReasoningTokens": 0
+      },
+      "answer": "OK"
+    },
+    {
+      "workload": "text_tail",
+      "repeat": 1,
+      "policy": "8_to_3",
+      "step": 5,
+      "images": 5,
+      "started": "2026-11-06T04:00:20.082467Z",
+      "ttft_ms": 1855,
+      "duration_ms": 1958,
+      "usage": {
+        "InputUncachedTokens": 5487,
+        "InputCachedTokens": 23808,
+        "CacheCreationTokens": 0,
+        "OutputContentTokens": 1,
+        "OutputReasoningTokens": 0
+      },
+      "answer": "OK"
+    },
+    {
+      "workload": "text_tail",
+      "repeat": 1,
+      "policy": "8_to_3",
+      "step": 6,
+      "images": 6,
+      "started": "2026-11-06T04:00:22.043311Z",
+      "ttft_ms": 1572,
+      "duration_ms": 1663,
+      "usage": {
+        "InputUncachedTokens": 5541,
+        "InputCachedTokens": 29184,
+        "CacheCreationTokens": 0,
+        "OutputContentTokens": 1,
+        "OutputReasoningTokens": 0
+      },
+      "answer": "OK"
+    },
+    {
+      "workload": "text_tail",
+      "repeat": 1,
+      "policy": "unlimited",
+      "step": 6,
+      "images": 6,
+      "started": "2026-11-06T04:00:23.707406Z",
+      "ttft_ms": 1356,
+      "duration_ms": 1461,
+      "usage": {
+        "InputUncachedTokens": 5542,
+        "InputCachedTokens": 29184,
+        "CacheCreationTokens": 0,
+        "OutputContentTokens": 1,
+        "OutputReasoningTokens": 0
+      },
+      "answer": "OK"
+    },
+    {
+      "workload": "text_tail",
+      "repeat": 1,
+      "policy": "unlimited",
+      "step": 7,
+      "images": 7,
+      "started": "2026-11-06T04:00:25.169636Z",
+      "ttft_ms": 1562,
+      "duration_ms": 1621,
+      "usage": {
+        "InputUncachedTokens": 5468,
+        "InputCachedTokens": 34688,
+        "CacheCreationTokens": 0,
+        "OutputContentTokens": 1,
+        "OutputReasoningTokens": 0
+      },
+      "answer": "OK"
+    },
+    {
+      "workload": "text_tail",
+      "repeat": 1,
+      "policy": "8_to_3",
+      "step": 7,
+      "images": 7,
+      "started": "2026-11-06T04:00:26.79242Z",
+      "ttft_ms": 2021,
+      "duration_ms": 2103,
+      "usage": {
+        "InputUncachedTokens": 5467,
+        "InputCachedTokens": 34688,
+        "CacheCreationTokens": 0,
+        "OutputContentTokens": 1,
+        "OutputReasoningTokens": 0
+      },
+      "answer": "OK"
+    },
+    {
+      "workload": "text_tail",
+      "repeat": 1,
+      "policy": "8_to_3",
+      "step": 8,
+      "images": 8,
+      "started": "2026-11-06T04:00:28.897062Z",
+      "ttft_ms": 1649,
+      "duration_ms": 1709,
+      "usage": {
+        "InputUncachedTokens": 5521,
+        "InputCachedTokens": 40064,
+        "CacheCreationTokens": 0,
+        "OutputContentTokens": 1,
+        "OutputReasoningTokens": 0
+      },
+      "answer": "OK"
+    },
+    {
+      "workload": "text_tail",
+      "repeat": 1,
+      "policy": "unlimited",
+      "step": 8,
+      "images": 8,
+      "started": "2026-11-06T04:00:30.607867Z",
+      "ttft_ms": 1918,
+      "duration_ms": 2032,
+      "usage": {
+        "InputUncachedTokens": 5522,
+        "InputCachedTokens": 40064,
+        "CacheCreationTokens": 0,
+        "OutputContentTokens": 1,
+        "OutputReasoningTokens": 0
+      },
+      "answer": "OK"
+    },
+    {
+      "workload": "text_tail",
+      "repeat": 1,
+      "policy": "unlimited",
+      "step": 9,
+      "images": 9,
+      "started": "2026-11-06T04:00:32.642663Z",
+      "ttft_ms": 1623,
+      "duration_ms": 1682,
+      "usage": {
+        "InputUncachedTokens": 5448,
+        "InputCachedTokens": 45568,
+        "CacheCreationTokens": 0,
+        "OutputContentTokens": 1,
+        "OutputReasoningTokens": 0
+      },
+      "answer": "OK"
+    },
+    {
+      "workload": "text_tail",
+      "repeat": 1,
+      "policy": "8_to_3",
+      "step": 9,
+      "images": 3,
+      "started": "2026-11-06T04:00:34.325835Z",
+      "ttft_ms": 1509,
+      "duration_ms": 1559,
+      "usage": {
+        "InputUncachedTokens": 45081,
+        "InputCachedTokens": 1920,
+        "CacheCreationTokens": 0,
+        "OutputContentTokens": 1,
+        "OutputReasoningTokens": 0
+      },
+      "answer": "OK"
+    },
+    {
+      "workload": "text_tail",
+      "repeat": 1,
+      "policy": "8_to_3",
+      "step": 10,
+      "images": 4,
+      "started": "2026-11-06T04:00:35.885676Z",
+      "ttft_ms": 1457,
+      "duration_ms": 1607,
+      "usage": {
+        "InputUncachedTokens": 5455,
+        "InputCachedTokens": 46976,
+        "CacheCreationTokens": 0,
+        "OutputContentTokens": 1,
+        "OutputReasoningTokens": 0
+      },
+      "answer": "OK"
+    },
+    {
+      "workload": "text_tail",
+      "repeat": 1,
+      "policy": "unlimited",
+      "step": 10,
+      "images": 10,
+      "started": "2026-11-06T04:00:37.493776Z",
+      "ttft_ms": 1860,
+      "duration_ms": 1947,
+      "usage": {
+        "InputUncachedTokens": 5502,
+        "InputCachedTokens": 50944,
+        "CacheCreationTokens": 0,
+        "OutputContentTokens": 1,
+        "OutputReasoningTokens": 0
+      },
+      "answer": "OK"
+    },
+    {
+      "workload": "text_tail",
+      "repeat": 1,
+      "policy": "unlimited",
+      "step": 11,
+      "images": 11,
+      "started": "2026-11-06T04:00:39.442293Z",
+      "ttft_ms": 2203,
+      "duration_ms": 2369,
+      "usage": {
+        "InputUncachedTokens": 5556,
+        "InputCachedTokens": 56320,
+        "CacheCreationTokens": 0,
+        "OutputContentTokens": 1,
+        "OutputReasoningTokens": 0
+      },
+      "answer": "OK"
+    },
+    {
+      "workload": "text_tail",
+      "repeat": 1,
+      "policy": "8_to_3",
+      "step": 11,
+      "images": 5,
+      "started": "2026-11-06T04:00:41.813242Z",
+      "ttft_ms": 1565,
+      "duration_ms": 1631,
+      "usage": {
+        "InputUncachedTokens": 5509,
+        "InputCachedTokens": 52352,
+        "CacheCreationTokens": 0,
+        "OutputContentTokens": 1,
+        "OutputReasoningTokens": 0
+      },
+      "answer": "OK"
+    },
+    {
+      "workload": "text_tail",
+      "repeat": 1,
+      "policy": "8_to_3",
+      "step": 12,
+      "images": 6,
+      "started": "2026-11-06T04:00:43.445239Z",
+      "ttft_ms": 1767,
+      "duration_ms": 1771,
+      "usage": {
+        "InputUncachedTokens": 5435,
+        "InputCachedTokens": 57856,
+        "CacheCreationTokens": 0,
+        "OutputContentTokens": 1,
+        "OutputReasoningTokens": 0
+      },
+      "answer": "OK"
+    },
+    {
+      "workload": "text_tail",
+      "repeat": 1,
+      "policy": "unlimited",
+      "step": 12,
+      "images": 12,
+      "started": "2026-11-06T04:00:45.217672Z",
+      "ttft_ms": 3508,
+      "duration_ms": 3557,
+      "usage": {
+        "InputUncachedTokens": 5482,
+        "InputCachedTokens": 61824,
+        "CacheCreationTokens": 0,
+        "OutputContentTokens": 1,
+        "OutputReasoningTokens": 0
+      },
+      "answer": "OK"
+    },
+    {
+      "workload": "text_tail",
+      "repeat": 1,
+      "policy": "unlimited",
+      "step": 13,
+      "images": 13,
+      "started": "2026-11-06T04:00:48.776446Z",
+      "ttft_ms": 2615,
+      "duration_ms": 2691,
+      "usage": {
+        "InputUncachedTokens": 5536,
+        "InputCachedTokens": 67200,
+        "CacheCreationTokens": 0,
+        "OutputContentTokens": 1,
+        "OutputReasoningTokens": 0
+      },
+      "answer": "OK"
+    },
+    {
+      "workload": "text_tail",
+      "repeat": 1,
+      "policy": "8_to_3",
+      "step": 13,
+      "images": 7,
+      "started": "2026-11-06T04:00:51.469762Z",
+      "ttft_ms": 1556,
+      "duration_ms": 1639,
+      "usage": {
+        "InputUncachedTokens": 5489,
+        "InputCachedTokens": 63232,
+        "CacheCreationTokens": 0,
+        "OutputContentTokens": 1,
+        "OutputReasoningTokens": 0
+      },
+      "answer": "OK"
+    },
+    {
+      "workload": "text_tail",
+      "repeat": 1,
+      "policy": "8_to_3",
+      "step": 14,
+      "images": 8,
+      "started": "2026-11-06T04:00:53.112756Z",
+      "ttft_ms": 1800,
+      "duration_ms": 1802,
+      "usage": {
+        "InputUncachedTokens": 5543,
+        "InputCachedTokens": 68608,
+        "CacheCreationTokens": 0,
+        "OutputContentTokens": 1,
+        "OutputReasoningTokens": 0
+      },
+      "answer": "OK"
+    },
+    {
+      "workload": "text_tail",
+      "repeat": 1,
+      "policy": "unlimited",
+      "step": 14,
+      "images": 14,
+      "started": "2026-11-06T04:00:54.916084Z",
+      "ttft_ms": 2093,
+      "duration_ms": 2142,
+      "usage": {
+        "InputUncachedTokens": 5462,
+        "InputCachedTokens": 72704,
+        "CacheCreationTokens": 0,
+        "OutputContentTokens": 1,
+        "OutputReasoningTokens": 0
+      },
+      "answer": "OK"
+    },
+    {
+      "workload": "text_tail",
+      "repeat": 1,
+      "policy": "unlimited",
+      "step": 15,
+      "images": 15,
+      "started": "2026-11-06T04:00:57.060605Z",
+      "ttft_ms": 2586,
+      "duration_ms": 2756,
+      "usage": {
+        "InputUncachedTokens": 5516,
+        "InputCachedTokens": 78080,
+        "CacheCreationTokens": 0,
+        "OutputContentTokens": 1,
+        "OutputReasoningTokens": 0
+      },
+      "answer": "OK"
+    },
+    {
+      "workload": "text_tail",
+      "repeat": 1,
+      "policy": "8_to_3",
+      "step": 15,
+      "images": 3,
+      "started": "2026-11-06T04:00:59.818914Z",
+      "ttft_ms": 1714,
+      "duration_ms": 1772,
+      "usage": {
+        "InputUncachedTokens": 45103,
+        "InputCachedTokens": 30464,
+        "CacheCreationTokens": 0,
+        "OutputContentTokens": 1,
+        "OutputReasoningTokens": 0
+      },
+      "answer": "OK"
+    },
+    {
+      "workload": "text_tail",
+      "repeat": 1,
+      "policy": "8_to_3",
+      "step": 16,
+      "images": 4,
+      "started": "2026-11-06T04:01:01.592089Z",
+      "ttft_ms": 1724,
+      "duration_ms": 1862,
+      "usage": {
+        "InputUncachedTokens": 5477,
+        "InputCachedTokens": 75520,
+        "CacheCreationTokens": 0,
+        "OutputContentTokens": 1,
+        "OutputReasoningTokens": 0
+      },
+      "answer": "OK"
+    },
+    {
+      "workload": "text_tail",
+      "repeat": 1,
+      "policy": "unlimited",
+      "step": 16,
+      "images": 16,
+      "started": "2026-11-06T04:01:03.457227Z",
+      "ttft_ms": 2268,
+      "duration_ms": 2466,
+      "usage": {
+        "InputUncachedTokens": 5442,
+        "InputCachedTokens": 83584,
+        "CacheCreationTokens": 0,
+        "OutputContentTokens": 1,
+        "OutputReasoningTokens": 0
+      },
+      "answer": "OK"
+    },
+    {
+      "workload": "text_tail",
+      "repeat": 1,
+      "policy": "unlimited",
+      "step": 17,
+      "images": 17,
+      "started": "2026-11-06T04:01:05.924876Z",
+      "ttft_ms": 2297,
+      "duration_ms": 2404,
+      "usage": {
+        "InputUncachedTokens": 5496,
+        "InputCachedTokens": 88960,
+        "CacheCreationTokens": 0,
+        "OutputContentTokens": 1,
+        "OutputReasoningTokens": 0
+      },
+      "answer": "OK"
+    },
+    {
+      "workload": "text_tail",
+      "repeat": 1,
+      "policy": "8_to_3",
+      "step": 17,
+      "images": 5,
+      "started": "2026-11-06T04:01:08.332732Z",
+      "ttft_ms": 1383,
+      "duration_ms": 1428,
+      "usage": {
+        "InputUncachedTokens": 5531,
+        "InputCachedTokens": 80896,
+        "CacheCreationTokens": 0,
+        "OutputContentTokens": 1,
+        "OutputReasoningTokens": 0
+      },
+      "answer": "OK"
+    },
+    {
+      "workload": "text_tail",
+      "repeat": 1,
+      "policy": "8_to_3",
+      "step": 18,
+      "images": 6,
+      "started": "2026-11-06T04:01:09.763553Z",
+      "ttft_ms": 1401,
+      "duration_ms": 1453,
+      "usage": {
+        "InputUncachedTokens": 5457,
+        "InputCachedTokens": 86400,
+        "CacheCreationTokens": 0,
+        "OutputContentTokens": 1,
+        "OutputReasoningTokens": 0
+      },
+      "answer": "OK"
+    },
+    {
+      "workload": "text_tail",
+      "repeat": 1,
+      "policy": "unlimited",
+      "step": 18,
+      "images": 18,
+      "started": "2026-11-06T04:01:11.217962Z",
+      "ttft_ms": 2568,
+      "duration_ms": 2609,
+      "usage": {
+        "InputUncachedTokens": 5550,
+        "InputCachedTokens": 94336,
+        "CacheCreationTokens": 0,
+        "OutputContentTokens": 1,
+        "OutputReasoningTokens": 0
+      },
+      "answer": "OK"
+    }
+  ],
+  "pricing": {
+    "source": "https://api-docs.deepseek.com/quick_start/pricing/",
+    "currency": "USD",
+    "unit": "per million tokens",
+    "offpeak": {
+      "cached_input": 0.003,
+      "uncached_input": 0.15,
+      "output": 0.6
+    },
+    "peak_multiplier": 2,
+    "scope": "All main calls at 04:00–04:02 UTC on 2026-11-06, off-peak. Estimates from measured token usage; gateway billed amounts were not retrieved."
+  },
+  "summary": {
+    "unlimited": {
+      "calls": 18,
+      "input": 967158,
+      "cached": 866176,
+      "uncached": 100982,
+      "output": 18,
+      "hit_pct": 89.55889316947179,
+      "cost_usd_offpeak": 0.017756628,
+      "cost_usd_time_based": 0.017756628,
+      "ttft_mean_ms": 1983,
+      "ttft_p50_ms": 1889.0,
+      "ttft_p95_ms": 3508,
+      "duration_mean_ms": 2082.1666666666665,
+      "images_sum": 171,
+      "images_max": 18
+    },
+    "8_to_3": {
+      "calls": 18,
+      "input": 910944,
+      "cached": 730880,
+      "uncached": 180064,
+      "output": 18,
+      "hit_pct": 80.23325253802649,
+      "cost_usd_offpeak": 0.029213039999999996,
+      "cost_usd_time_based": 0.02921304,
+      "ttft_mean_ms": 1629.2222222222222,
+      "ttft_p50_ms": 1610.5,
+      "ttft_p95_ms": 2021,
+      "duration_mean_ms": 1701.1666666666667,
+      "images_sum": 87,
+      "images_max": 8
+    }
+  }
+}

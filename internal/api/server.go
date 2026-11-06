@@ -257,6 +257,7 @@ func (s *Server) Handler(token string, static http.Handler) http.Handler {
 	app.Route("/sessions/:id/collaboration/stop").POST(s.stopCollaboration)
 	app.Route("/sessions/:id/compact").POST(s.compactSession)
 	app.Route("/sessions/:id/approvals").GET(s.listApprovals)
+	app.Route("/sessions/:id/directories").GET(s.sessionDirectories).PUT(s.setSessionDirectories)
 	app.Route("/sessions/:id/command-approvals").GET(s.commandApprovals).DELETE(s.revokeCommandApprovals)
 	app.Route("/sessions/:id/computer-app-grants").GET(s.listComputerAppGrants)
 	app.Route("/sessions/:id/computer-app-grants/:appID").DELETE(s.revokeComputerAppGrant)
@@ -1284,6 +1285,9 @@ func (s *Server) revokeCommandApprovals(c *cart.Context) error {
 		return s.fail(c, err)
 	}
 	s.engine.RevokeCommandApprovals(id)
+	if err := s.revokeBrowserFileAccess(c.Request.Context(), id); err != nil {
+		return s.browserError(c, err)
+	}
 	c.JSON(http.StatusOK, s.engine.CommandApprovals(id))
 	return nil
 }

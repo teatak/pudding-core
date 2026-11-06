@@ -55,6 +55,7 @@ func TestCoolingWatermarkIsStableAtomicAndResetByCompact(t *testing.T) {
 			t.Fatalf("keep %d: %+v", keep, got)
 		}
 	}
+	next.ImageThroughID = "saved-observation-boundary"
 	in := store.AdvanceContextCoolingInput{SessionID: "s", RunningTurnID: "4", ExpectedLastMessageID: all[len(all)-1].ID, Next: next}
 	stale := in
 	stale.ExpectedLastMessageID = "stale"
@@ -125,5 +126,23 @@ func TestCoolingWatermarkIsStableAtomicAndResetByCompact(t *testing.T) {
 	}
 	if err := db.AdvanceContextCooling(ctx, in); !errors.Is(err, store.ErrHistoryChanged) {
 		t.Fatalf("pre-compact state accepted: %v", err)
+	}
+	all, err = db.ListMessages(ctx, "s", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	commit := store.AppendCompactSummaryInput{SessionID: "s", RunningTurnID: "5", TurnID: "5", MessageID: "summary2", Text: "new summary", ExpectedLastMessageID: "stale", Metadata: store.CompactMessageMetadata([]string{"summary"}, nil), ImageThroughID: "retained-image-boundary"}
+	if _, err := db.AppendCompactSummary(ctx, commit); !errors.Is(err, store.ErrHistoryChanged) {
+		t.Fatalf("stale summary accepted: %v", err)
+	}
+	if state, err := db.ContextCooling(ctx, "s"); err != nil || state != (store.ContextCooling{}) {
+		t.Fatal("failed compact committed image cleanup")
+	}
+	commit.ExpectedLastMessageID = all[len(all)-1].ID
+	if _, err := db.AppendCompactSummary(ctx, commit); err != nil {
+		t.Fatal(err)
+	}
+	if state, err := db.ContextCooling(ctx, "s"); err != nil || state.ImageThroughID != "retained-image-boundary" || state.SummaryMessageID != "summary2" || state.ThroughTurnID != "" {
+		t.Fatalf("compact image state not atomic: %+v %v", state, err)
 	}
 }

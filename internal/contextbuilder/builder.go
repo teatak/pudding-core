@@ -321,7 +321,7 @@ func (b *Builder) buildMessagesWithCooling(ctx context.Context, sess *store.Sess
 		}
 	}
 	flushAssistant()
-	req.Messages = LimitToolImages(req.Messages)
+	req.Messages = applySavedToolImages(req.Messages, msgs, cooling)
 	return req, nil
 }
 
@@ -677,6 +677,9 @@ func (b *Builder) providerParts(
 	// Only canonical system messages receive an active runtime wrapper. Keep
 	// source messages intact and neutralize reserved markers in their projection.
 	for i := range out {
+		if out[i].ImageKey != "" {
+			out[i].ImageTurnID = turnID
+		}
 		out[i].Text = EscapeSourceText(out[i].Text)
 		out[i].Content = EscapeSourceText(out[i].Content)
 	}

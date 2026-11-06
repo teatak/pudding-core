@@ -170,10 +170,14 @@ export const mergeProjectRequest = z.object({
   rootDirs: z.array(z.string()),
 });
 
+export const sessionDirectoriesResponse = z.object({ rootDirs: z.array(z.string()) });
+export const updateSessionDirectoriesRequest = z.object({ rootDirs: z.array(z.string().min(1)).max(128) }).strict();
+
 export const projectBrowserRoot = z.object({
   id: z.string(),
   name: z.string(),
   path: z.string(),
+  sources: z.array(z.enum(["project", "session", "turn", "scratch"])).optional(),
   temporary: z.boolean().optional(),
 });
 export type ProjectBrowserRoot = z.infer<typeof projectBrowserRoot>;

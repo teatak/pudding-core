@@ -250,7 +250,8 @@ type Part struct {
 	Height  int             `json:"-"`
 	// ImageKey survives model-only omission so images can be reloaded on demand
 	// and repeated request projections retain the same pruning boundaries.
-	ImageKey string `json:"-"`
+	ImageKey    string `json:"-"`
+	ImageTurnID string `json:"-"`
 }
 
 // On attachment text/media parts, CallID identifies the source tool result,

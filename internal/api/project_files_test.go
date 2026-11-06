@@ -449,3 +449,83 @@ func createProjectSession(t *testing.T, st store.Store, projectID, sessionID, ro
 		t.Fatal(err)
 	}
 }
+
+func TestSessionDirectoriesDriveFilesSearchAndGitWithoutProject(t *testing.T) {
+	srv, st := newTestServer(t)
+	ctx := context.Background()
+	const sid = "unbound_with_consent"
+	if err := st.CreateSession(ctx, &store.Session{ID: sid, Provider: "mock", Model: "mock"}); err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	root, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runProjectGit(t, root, "init", "--quiet")
+	if err := os.WriteFile(filepath.Join(root, "note.txt"), []byte("directory-search-marker"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	endpoint := srv.URL + "/sessions/" + sid
+	saved := decodeJSON[struct {
+		RootDirs []string `json:"rootDirs"`
+	}](t, req(t, http.MethodPut, endpoint+"/directories", map[string]any{"rootDirs": []string{root, root}}))
+	if len(saved.RootDirs) != 1 || saved.RootDirs[0] != root {
+		t.Fatalf("saved roots: %+v", saved)
+	}
+	roots := decodeJSON[struct {
+		ProjectID string            `json:"projectID"`
+		Roots     []projectRootView `json:"roots"`
+	}](t, req(t, http.MethodGet, endpoint+"/project/tree", nil))
+	if roots.ProjectID != "" || len(roots.Roots) != 1 || roots.Roots[0].Path != root || len(roots.Roots[0].Sources) != 1 || roots.Roots[0].Sources[0] != "session" {
+		t.Fatalf("workspace: %+v", roots)
+	}
+	query := url.Values{"rootID": {roots.Roots[0].ID}, "path": {"note.txt"}}
+	file := decodeJSON[projectFileView](t, req(t, http.MethodGet, endpoint+"/project/file?"+query.Encode(), nil))
+	if file.Content != "directory-search-marker" {
+		t.Fatal(file)
+	}
+	found := decodeJSON[struct {
+		Matches []projectSearchMatchView `json:"matches"`
+	}](t, req(t, http.MethodGet, endpoint+"/project/search?q=directory-search-marker", nil))
+	if len(found.Matches) != 1 {
+		t.Fatalf("search: %+v", found)
+	}
+	status := decodeJSON[projectGitStatusView](t, req(t, http.MethodGet, endpoint+"/project/git/status?"+query.Encode(), nil))
+	if !status.Available || status.UntrackedCount != 1 {
+		t.Fatalf("Git unavailable without project: %+v", status)
+	}
+	// Neither command revocation nor a mode downgrade silently removes saved directories.
+	r := req(t, http.MethodDelete, endpoint+"/command-approvals", nil)
+	r.Body.Close()
+	if r.StatusCode != 200 {
+		t.Fatal(r.StatusCode)
+	}
+	r = req(t, http.MethodPatch, endpoint, map[string]any{"activeMode": "chat", "modeLease": "none"})
+	r.Body.Close()
+	if r.StatusCode != 200 {
+		t.Fatal(r.StatusCode)
+	}
+	if got, err := st.GetSessionDirectories(ctx, sid); err != nil || len(got) != 1 {
+		t.Fatalf("consent changed with mode or command approvals: %v %v", got, err)
+	}
+	r = req(t, http.MethodPut, endpoint+"/directories", map[string]any{"rootDirs": []string{}})
+	r.Body.Close()
+	if r.StatusCode != 200 {
+		t.Fatal(r.StatusCode)
+	}
+	for _, path := range []string{"/project/file?" + query.Encode(), "/project/git/status?" + query.Encode()} {
+		r = req(t, http.MethodGet, endpoint+path, nil)
+		r.Body.Close()
+		if r.StatusCode < 400 {
+			t.Fatalf("revoked root still accessible: %s", path)
+		}
+	}
+	for _, body := range []any{map[string]any{}, map[string]any{"rootDirs": []string{"relative"}}, map[string]any{"rootDirs": []string{filepath.Join(root, "missing")}}} {
+		r = req(t, http.MethodPut, endpoint+"/directories", body)
+		r.Body.Close()
+		if r.StatusCode != 400 {
+			t.Fatalf("invalid directory accepted: %+v (%d)", body, r.StatusCode)
+		}
+	}
+}

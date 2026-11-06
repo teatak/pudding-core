@@ -50,6 +50,10 @@ func TestAssistantExistingTaskApproval(t *testing.T) {
 							t.Fatal(err)
 						}
 						sid := profile.Assistant.SessionID
+						initialSession, err := db.GetSession(ctx, sid)
+						if err != nil {
+							t.Fatal(err)
+						}
 						if _, err := db.BeginTurn(ctx, store.BeginTurnInput{SessionID: sid, TurnID: "source", UserMessageID: "source-message", ClientMessageID: "source-client", UserText: "Arrange work"}); err != nil {
 							t.Fatal(err)
 						}
@@ -175,7 +179,7 @@ func TestAssistantExistingTaskApproval(t *testing.T) {
 							time.Sleep(5 * time.Millisecond)
 						}
 						current, err := db.GetSession(ctx, sid)
-						if err != nil || current.ActiveMode != store.ModeChat || current.ProjectID != "" {
+						if err != nil || current.ActiveMode != store.ModeChat || current.ProjectID != initialSession.ProjectID {
 							t.Fatal("dispatch approval changed assistant permissions", current, err)
 						}
 						follow := tool.Call{CallID: "follow", Name: tool.AssistantTaskSend, Args: mustJSON(map[string]string{"task_id": task.TaskID, "prompt": "A new follow-up"})}

@@ -1330,7 +1330,10 @@ func (e *Engine) clearRunningLocked(sessionID, turnID string) {
 		}
 		close(active.done)
 	}
-	delete(e.turnProjectAccess, turnID)
+	if _, exists := e.turnProjectAccess[turnID]; exists {
+		delete(e.turnProjectAccess, turnID)
+		e.hub.Publish(event.Event{Kind: event.SessionDirectoriesChanged, SessionID: sessionID})
+	}
 }
 
 func (e *Engine) TryDrainQueued(sessionID string) {
@@ -1433,7 +1436,7 @@ func (e *Engine) streamTurn(ctx context.Context, sessionID, turnID string, resol
 		req := baseReq
 		// Leases can be granted or revoked between tool calls without changing
 		// mode or canonical history. Refresh from execution authority each time.
-		if err := e.appendTemporaryProjectAccess(ctx, sessionID, turnID, currentMode, &req); err != nil {
+		if err := e.appendDirectoryAccess(ctx, sessionID, turnID, currentMode, &req); err != nil {
 			return failed(fmt.Sprintf("build temporary access context: %v", err))
 		}
 		req.Messages = requestMessagesWithTurnParts(baseReq.Messages, parts.Parts(), continuations, sessionID, turnID, e.attachmentHome, resolved.config, tool.HasDefinition(req.Tools, tool.HistoryGetMessage))
@@ -2773,25 +2776,11 @@ func eventAttachmentsFromStore(attachments []store.Attachment) []event.Attachmen
 }
 
 func (e *Engine) projectRootDirsForToolCall(ctx context.Context, sessionID, turnID string, mode store.AgentMode) ([]string, error) {
-	workspace, err := sessionworkspace.Resolve(
-		ctx, e.store, e.attachmentHome, sessionID, sessionworkspace.ScratchExisting,
-	)
-	if err != nil {
-		return nil, err
+	policy := sessionworkspace.ScratchExisting
+	if store.NormalizeAgentMode(mode) == store.ModeCode {
+		policy = sessionworkspace.ScratchEnsure
 	}
-	dirs := append([]string(nil), workspace.RootDirs...)
-	temporary, err := e.temporaryProjectDirs(ctx, sessionID, turnID)
-	if err != nil {
-		return nil, err
-	}
-	dirs = append(dirs, temporary...)
-	dirs = store.NormalizeProjectDirs(dirs)
-	if len(dirs) > 0 || store.NormalizeAgentMode(mode) != store.ModeCode {
-		return dirs, nil
-	}
-	workspace, err = sessionworkspace.Resolve(
-		ctx, e.store, e.attachmentHome, sessionID, sessionworkspace.ScratchEnsure,
-	)
+	workspace, err := e.SessionWorkspace(ctx, sessionID, turnID, policy)
 	if err != nil {
 		return nil, err
 	}
@@ -3220,7 +3209,7 @@ func requestMessagesWithTurnParts(
 	if currentTurn := currentTurnProviderMessage(parts, continuations, sessionID, turnID, attachmentHome, cfg, canReadResult); currentTurn != nil {
 		out = append(out, provider.SplitMessage(*currentTurn)...)
 	}
-	return contextbuilder.LimitToolImages(out)
+	return out
 }
 
 func currentTurnProviderMessage(parts []store.ContentPart, continuations []provider.Continuation, sessionID, turnID, attachmentHome string, cfg provider.ModelConfig, canReadResult bool) *provider.Message {
@@ -3250,6 +3239,11 @@ func currentTurnProviderMessage(parts []store.ContentPart, continuations []provi
 		}
 	}
 	providerParts := providerPartsFromCurrentTurn(parts, sessionID, turnID, attachmentHome, cfg, canReadResult)
+	for i := range providerParts {
+		if providerParts[i].ImageKey != "" {
+			providerParts[i].ImageTurnID = turnID
+		}
+	}
 	if len(providerParts) == 0 {
 		return nil
 	}

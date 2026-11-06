@@ -73,6 +73,10 @@ func TestAssistantPermanentDeletion(t *testing.T) {
 		t.Fatal(err)
 	}
 	id := profile.Assistant.SessionID
+	dirs := []string{t.TempDir()}
+	if _, err := s.UpdateSession(ctx, id, store.SessionUpdate{DirectoryGrants: &dirs}); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := s.SaveAssistant(ctx, assistantInput(1)); err != nil {
 		t.Fatal(err)
 	}
@@ -101,13 +105,19 @@ func TestAssistantPermanentDeletion(t *testing.T) {
 	if err := s.db.QueryRow(`SELECT count(*) FROM sessions WHERE id=?`, id).Scan(&count); err != nil || count != 1 {
 		t.Fatalf("conversation lost on rollback: %d %v", count, err)
 	}
+	if got, err := s.GetSessionDirectories(ctx, id); err != nil || len(got) != 1 {
+		t.Fatalf("directory settings lost on rollback: %v %v", got, err)
+	}
 	if _, err := s.db.Exec(`DROP TRIGGER reject_assistant_delete`); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.DeleteAssistant(ctx); err != nil {
 		t.Fatal(err)
 	}
-	for _, table := range []string{"assistants", "assistant_sessions", "assistant_memories", "assistant_memory_terms", "messages", "turns", "session_children"} {
+	if _, err := s.GetSessionDirectories(ctx, id); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("deleted assistant retained directories: %v", err)
+	}
+	for _, table := range []string{"session_directory_grants", "assistants", "assistant_sessions", "assistant_memories", "assistant_memory_terms", "messages", "turns", "session_children"} {
 		if err := s.db.QueryRow(`SELECT count(*) FROM ` + table).Scan(&count); err != nil || count != 0 {
 			t.Fatalf("%s retained rows: %d %v", table, count, err)
 		}
@@ -293,6 +303,14 @@ func TestOpenAssistantDefaultsAndOneConversation(t *testing.T) {
 	if listed, err := s.ListSessions(ctx); err != nil || len(listed) != 0 {
 		t.Fatalf("assistant in recent list: %+v %v", listed, err)
 	}
+	projects, err := s.ListProjects(ctx)
+	if err != nil || len(projects) != 0 {
+		t.Fatalf("assistant must not appear in ordinary projects: %+v %v", projects, err)
+	}
+	bound, err := s.GetSession(ctx, id)
+	if err != nil || bound.ProjectID != "" {
+		t.Fatalf("assistant must remain unbound: %+v %v", bound, err)
+	}
 	if _, err := s.ArchiveSession(ctx, id); !errors.Is(err, store.ErrAssistantConversationProtected) {
 		t.Fatalf("archive assistant: %v", err)
 	}
@@ -321,8 +339,75 @@ func TestOpenAssistantDefaultsAndOneConversation(t *testing.T) {
 		t.Fatalf("reopen reset profile: %+v %v", got, err)
 	}
 	session, err := reopened.GetSession(ctx, id)
-	if err != nil || session.Provider != "mock" || session.Model != "mock" {
+	if err != nil || session.Provider != "mock" || session.Model != "mock" || session.ProjectID != "" {
 		t.Fatalf("reopen reset model: %+v %v", session, err)
+	}
+}
+
+func TestAssistantProjectMigratesToSessionDirectories(t *testing.T) {
+	for _, shared := range []bool{false, true} {
+		t.Run(fmt.Sprint("shared=", shared), func(t *testing.T) {
+			s, path := openTestStore(t)
+			ctx := context.Background()
+			opened, err := s.OpenAssistant(ctx, "小布", "mock", "mock", assistantInput(0).Appearance)
+			if err != nil {
+				t.Fatal(err)
+			}
+			id := opened.Assistant.SessionID
+			root := t.TempDir()
+			project := &store.Project{ID: "legacy_assistant", Name: "小布", RootDirs: []string{root}}
+			other := &store.Project{ID: "unrelated_same_name", Name: "小布", RootDirs: []string{t.TempDir()}}
+			for _, p := range []*store.Project{project, other} {
+				if err := s.CreateProject(ctx, p); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if _, err := s.UpdateSession(ctx, id, store.SessionUpdate{ProjectID: &project.ID}); err != nil {
+				t.Fatal(err)
+			}
+			if shared {
+				if err := s.CreateSession(ctx, &store.Session{ID: "ordinary", Provider: "mock", Model: "mock", ProjectID: project.ID}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			// Simulate the old schema and reopen through the actual migration path.
+			if _, err := s.db.Exec(`DROP TABLE session_directory_grants; PRAGMA user_version=60`); err != nil {
+				t.Fatal(err)
+			}
+			if err := s.Close(); err != nil {
+				t.Fatal(err)
+			}
+			reopened, err := Open(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer reopened.Close()
+			got, err := reopened.GetSession(ctx, id)
+			if err != nil || got.ProjectID != "" {
+				t.Fatalf("assistant still bound: %+v %v", got, err)
+			}
+			dirs, err := reopened.GetSessionDirectories(ctx, id)
+			if err != nil || len(dirs) != 1 || dirs[0] != root {
+				t.Fatalf("lost directory settings: %v %v", dirs, err)
+			}
+			if _, err := reopened.GetProject(ctx, other.ID); err != nil {
+				t.Fatalf("unrelated same-name project removed: %v", err)
+			}
+			_, err = reopened.GetProject(ctx, project.ID)
+			if shared && err != nil {
+				t.Fatal("shared ordinary project removed", err)
+			}
+			if !shared && !errors.Is(err, store.ErrNotFound) {
+				t.Fatal("unused assistant project retained", err)
+			}
+			if _, err := reopened.OpenAssistant(ctx, "Puddy", "mock", "mock", assistantInput(0).Appearance); err != nil {
+				t.Fatal(err)
+			}
+			got, err = reopened.GetSession(ctx, id)
+			if err != nil || got.ProjectID != "" {
+				t.Fatalf("opening recreated a project: %+v %v", got, err)
+			}
+		})
 	}
 }
 

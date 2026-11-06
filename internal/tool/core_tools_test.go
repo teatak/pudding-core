@@ -11,6 +11,32 @@ import (
 	"github.com/teatak/pudding-core/internal/store"
 )
 
+func TestBuiltinToolSchemasUseProviderCompatibleRoots(t *testing.T) {
+	defs := append(BuiltinDefinitions(),
+		RequestCapabilityDefinition(),
+		PluginLoadDefinition(),
+		PluginUnloadDefinition([]string{plugin.BuiltinBrowserID}),
+	)
+	for _, def := range defs {
+		t.Run(def.Name, func(t *testing.T) {
+			var schema map[string]json.RawMessage
+			if err := json.Unmarshal(def.InputSchema, &schema); err != nil {
+				t.Fatal(err)
+			}
+			if string(schema["type"]) != `"object"` {
+				t.Fatalf("tool input schema must have an object root: %s", def.InputSchema)
+			}
+			// Claude rejects root combinators, including through OpenAI-compatible
+			// gateways. Nested unions remain valid; validate cross-field rules at execution.
+			for _, keyword := range []string{"oneOf", "anyOf", "allOf"} {
+				if _, present := schema[keyword]; present {
+					t.Errorf("tool input schema has unsupported top-level %s", keyword)
+				}
+			}
+		})
+	}
+}
+
 func TestBuiltinToolsBelongToCoreOrPlugin(t *testing.T) {
 	for _, def := range BuiltinDefinitions() {
 		_, pluginTool := BuiltinPluginIDForTool(def.Name)

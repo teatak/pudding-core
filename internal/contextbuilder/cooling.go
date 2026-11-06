@@ -17,16 +17,20 @@ func WithCoolingSettings(settings CoolingSettings) Option {
 }
 
 func (b *Builder) contextCooling(ctx context.Context, sessionID string) (store.ContextCooling, error) {
+	state, err := b.store.ContextCooling(ctx, sessionID)
+	if err != nil {
+		return state, err
+	}
 	if b.coolingSettings != nil {
 		settings, err := b.coolingSettings.Settings(ctx)
 		if err != nil {
 			return store.ContextCooling{}, err
 		}
 		if settings[config.SettingToolResultCoolingEnabled] == "false" {
-			return store.ContextCooling{}, nil
+			state.ThroughTurnID = ""
 		}
 	}
-	return b.store.ContextCooling(ctx, sessionID)
+	return state, nil
 }
 
 // CoolingCandidate protects the current turn and keepEnded preceding input

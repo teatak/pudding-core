@@ -76,7 +76,7 @@ func configuredOutputLimit(cfg provider.ModelConfig, protocol string) int {
 // engine calls it only after committing the preceding complete tool exchange.
 func (e *Engine) prepareContextRequest(ctx context.Context, sessionID, turnID string, resolved *resolvedModel, mode store.AgentMode, req *provider.Request, allowCooling bool) (bool, error) {
 	if req.Config.ContextWindow <= 0 {
-		return false, nil
+		return e.tryPruneToolImages(ctx, sessionID, turnID, resolved, req, 1)
 	}
 	hard := contextInputLimit(req.Config)
 	stat, err := e.store.SessionUsage(ctx, sessionID)
@@ -116,6 +116,9 @@ func (e *Engine) prepareContextRequest(ctx context.Context, sessionID, turnID st
 		if tokens <= hard {
 			slog.Warn("engine: pre-request compact skipped", "sessionID", sessionID, "err", err)
 		}
+	}
+	if changed, imageErr := e.tryPruneToolImages(ctx, sessionID, turnID, resolved, req, factor); imageErr != nil || changed {
+		return changed, imageErr
 	}
 	if tokens > hard {
 		if err != nil {

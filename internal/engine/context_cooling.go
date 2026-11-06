@@ -30,6 +30,7 @@ func (e *Engine) tryCoolContext(ctx context.Context, sessionID, turnID string, r
 	}
 	keep := e.intSetting(ctx, config.SettingToolResultCoolingKeepTurns, config.DefaultToolResultCoolingKeepTurns, 0, 50)
 	next := contextbuilder.CoolingCandidate(all, turnID, keep)
+	next.ImageThroughID = previous.ImageThroughID
 	if next.ThroughTurnID == "" || next == previous {
 		return false, nil
 	}
@@ -42,12 +43,20 @@ func (e *Engine) tryCoolContext(ctx context.Context, sessionID, turnID string, r
 		return false, err
 	}
 	candidate.Config, candidate.Tools = resolved.config, req.Tools
-	if err := e.appendTemporaryProjectAccess(ctx, sessionID, turnID, mode, &candidate); err != nil {
+	if err := e.appendDirectoryAccess(ctx, sessionID, turnID, mode, &candidate); err != nil {
 		return false, err
 	}
 	candidate, err = e.builder.ResolveSkillReferences(ctx, sessionID, string(mode), candidate)
 	if err != nil {
 		return false, err
+	}
+	through, err := contextbuilder.ToolImageCandidate(candidate.Messages, contextbuilder.DefaultToolImageBudget(candidate.Config.ContextWindow), true)
+	if err != nil {
+		return false, err
+	}
+	if through != "" {
+		next.ImageThroughID = through
+		candidate.Messages = contextbuilder.ApplyToolImageWatermark(candidate.Messages, through)
 	}
 	estimate, err := contextbuilder.EstimateRequest(candidate, resolved.protocol)
 	if err != nil {

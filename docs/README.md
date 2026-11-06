@@ -21,6 +21,7 @@
 | [Chat / Work / Code](agent-modes-design.md) | 模式与工具能力边界 |
 | [CLI 沙箱](code-cli-sandbox-design.md) | Ask / Auto / Full、host 和授权复用 |
 | [Agent 工具契约](agent-tool-contracts.md) | 路径、临时附件、后台命令、搜索与参数诊断 |
+| [工具与提示词改进清单](tool-prompt-improvements.md) | 本次会话暴露的工具契约、提示词与交互缺口及修改建议 |
 | [工具结果按需读取](context-working-set.md)／[上下文压缩](context-compaction.md) | canonical 历史、结果投影与上下文预算 |
 | [用户问题收集](user-input-flow.md) | 等待、补答、canonical 数据与桌面面板 |
 | [会话协作](session-collaboration-plan.md) | 父子调度、结果回收、任务卡片与统一审批 |
@@ -51,6 +52,8 @@
 | [工具结果摘要原型](tool-result-memo-prototype.md) | 隔离 Chat Completions 验证入口、最终可见清单、即时释放、原生续接及快照回读；保留独立验证入口 |
 | [工具结果摘要：Core 实验接入](tool-result-memo-engine.md) | 默认关闭的 Engine／SQLite、公开历史／事件、Desktop note 展示与 DeepSeek Flash 验证 |
 | [工具结果 memo：长任务对照](tool-result-memo-benchmark.md) | DeepSeek Flash 自然采用、任务质量、缓存与完整成本；保留 pilot 和逐请求实测记录 |
+| [截图淘汰与缓存实测](screenshot-cache-benchmark.md) | 8→3 与全部保留的真实模型用量、缓存命中率、费用估算和延迟对照 |
+| [截图预算策略复测](screenshot-budget-benchmark.md) | 持久化清理位置、冷却／Compact 合并和新旧三组真实对照 |
 | [工具结果 memo：触发与开销优化](tool-result-memo-optimization.md) | 可选参数示例、精简封装与关闭／旧版／优化版三组对照 |
 | [summarize_results 真实仓库长任务对照](tool-result-summaries-repository-benchmark.md) | 冻结真实源码、自然采用、事实与引用质量、完整请求用量及失败记录 |
 | [summarize_results 提示与触发诊断](tool-result-summaries-trigger-diagnosis.md) | 2×2 对照及结果提醒探针；区分未采用、超长拒绝与实际释放，候选已撤回 |

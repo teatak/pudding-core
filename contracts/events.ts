@@ -205,6 +205,11 @@ export const collaborationChangedEvent = z.object({
   seq: z.number().int().positive(),
 });
 
+export const sessionDirectoriesChangedEvent = z.object({
+  kind: z.literal("session.directories.changed"),
+  sessionID: z.string(),
+});
+
 export const sessionEvent = z.discriminatedUnion("kind", [
   widgetNoticeEvent,
   collaborationChangedEvent,
@@ -227,6 +232,7 @@ export const sessionEvent = z.discriminatedUnion("kind", [
   processStoppedEvent,
   processRemovedEvent,
   sessionTitledEvent,
+  sessionDirectoriesChangedEvent,
   pingEvent,
 ]);
 

@@ -188,8 +188,15 @@ func TestOpenAssistantAPI(t *testing.T) {
 	if replay.Assistant.Name != "" || replay.Assistant.SessionID != got.Assistant.SessionID || replay.Assistant.Revision != 1 {
 		t.Fatalf("replay: %+v", replay)
 	}
-	if session := decodeJSON[store.Session](t, req(t, http.MethodGet, srv.URL+"/sessions/"+got.Assistant.SessionID, nil)); session.Model != "mock" {
+	session := decodeJSON[store.Session](t, req(t, http.MethodGet, srv.URL+"/sessions/"+got.Assistant.SessionID, nil))
+	if session.Model != "mock" || session.ProjectID != "" {
 		t.Fatalf("session: %+v", session)
+	}
+	listed := decodeJSON[struct {
+		Projects []store.Project `json:"projects"`
+	}](t, req(t, http.MethodGet, srv.URL+"/projects", nil))
+	if len(listed.Projects) != 0 {
+		t.Fatalf("assistant created a project: %+v", listed.Projects)
 	}
 	for _, action := range []struct{ method, suffix string }{{http.MethodPost, "/archive"}, {http.MethodDelete, ""}} {
 		response := req(t, action.method, srv.URL+"/sessions/"+got.Assistant.SessionID+action.suffix, nil)

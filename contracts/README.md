@@ -35,6 +35,18 @@ The Go daemon embeds it through this package; desktop generates `web/contracts/`
 `api.ts` and `events.ts` are the TypeScript/Zod client validation definitions for the REST and SSE protocol.
 Server structs and lifecycle semantics remain owned by core; verify both sides when changing a wire field.
 
+Protocol 63 adds `GET`/`PUT /sessions/{id}/directories` with `{rootDirs: string[]}`
+for durable conversation folder consent. New paths must be absolute existing
+folders; an empty list revokes saved conversation directories. This does not
+change project roots, current-turn consent or command-approval lifetimes.
+`session.directories.changed` invalidates directory, file and Git snapshots;
+capability approvals also refresh these snapshots. Project browser roots include
+`sources` (`project`, `session`, `turn`, `scratch`), retaining all sources when
+paths overlap. Tools and file/search/Git APIs share this effective root set even
+without a project binding. Schema 61 migrates assistant-bound project roots to
+conversation consent and unbinds the assistant, deleting only unused project
+records. Future assistant opens never provision or bind a default project.
+
 `GET /sessions/{id}/turn-outline` returns chronological turn IDs, retry parents,
 timestamps and bounded prompt/answer excerpts (512 characters each). It does not
 return message parts, tool results or file diffs. Clients fold retry attempts into

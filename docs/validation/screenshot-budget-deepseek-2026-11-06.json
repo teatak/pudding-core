@@ -1,0 +1,766 @@
+{
+  "model": "deepseek-flash",
+  "protocol": "openai-responses",
+  "scope": "Actual screenshot resizing; frozen legacy 8-to-3 versus budget projection versus unlimited; isolated per-arm cache prefixes; per-step rotating arm order; no retries; reasoning none; max output 32; fixed OK answer. Synthetic text with existing screenshot pixels. Excludes browser actions, task accuracy and image loading time. Token-weighted hit rate; official price estimates are not gateway invoices.",
+  "dimensions": [
+    [
+      1401,
+      856
+    ],
+    [
+      1401,
+      856
+    ],
+    [
+      1401,
+      856
+    ],
+    [
+      1401,
+      856
+    ],
+    [
+      1401,
+      856
+    ],
+    [
+      1401,
+      856
+    ],
+    [
+      1401,
+      856
+    ],
+    [
+      1401,
+      856
+    ],
+    [
+      1401,
+      856
+    ],
+    [
+      1401,
+      856
+    ],
+    [
+      1401,
+      856
+    ],
+    [
+      1401,
+      856
+    ]
+  ],
+  "results": [
+    {
+      "workload": "text_tail",
+      "repeat": 1,
+      "policy": "budget",
+      "step": 1,
+      "images": 1,
+      "started": "2026-11-06T04:24:50.401032Z",
+      "ttft_ms": 1267,
+      "duration_ms": 1378,
+      "usage": {
+        "InputUncachedTokens": 7574,
+        "InputCachedTokens": 0,
+        "CacheCreationTokens": 0,
+        "OutputContentTokens": 1,
+        "OutputReasoningTokens": 0
+      },
+      "answer": "OK"
+    },
+    {
+      "workload": "text_tail",
+      "repeat": 1,
+      "policy": "unlimited",
+      "step": 1,
+      "images": 1,
+      "started": "2026-11-06T04:24:51.780214Z",
+      "ttft_ms": 611,
+      "duration_ms": 675,
+      "usage": {
+        "InputUncachedTokens": 7576,
+        "InputCachedTokens": 0,
+        "CacheCreationTokens": 0,
+        "OutputContentTokens": 1,
+        "OutputReasoningTokens": 0
+      },
+      "answer": "OK"
+    },
+    {
+      "workload": "text_tail",
+      "repeat": 1,
+      "policy": "8_to_3",
+      "step": 1,
+      "images": 1,
+      "started": "2026-11-06T04:24:52.456041Z",
+      "ttft_ms": 651,
+      "duration_ms": 701,
+      "usage": {
+        "InputUncachedTokens": 7581,
+        "InputCachedTokens": 0,
+        "CacheCreationTokens": 0,
+        "OutputContentTokens": 1,
+        "OutputReasoningTokens": 0
+      },
+      "answer": "OK"
+    },
+    {
+      "workload": "text_tail",
+      "repeat": 1,
+      "policy": "unlimited",
+      "step": 2,
+      "images": 2,
+      "started": "2026-11-06T04:24:53.157449Z",
+      "ttft_ms": 721,
+      "duration_ms": 760,
+      "usage": {
+        "InputUncachedTokens": 5454,
+        "InputCachedTokens": 7552,
+        "CacheCreationTokens": 0,
+        "OutputContentTokens": 1,
+        "OutputReasoningTokens": 0
+      },
+      "answer": "OK"
+    },
+    {
+      "workload": "text_tail",
+      "repeat": 1,
+      "policy": "8_to_3",
+      "step": 2,
+      "images": 2,
+      "started": "2026-11-06T04:24:53.918089Z",
+      "ttft_ms": 1008,
+      "duration_ms": 1032,
+      "usage": {
+        "InputUncachedTokens": 5459,
+        "InputCachedTokens": 7552,
+        "CacheCreationTokens": 0,
+        "OutputContentTokens": 1,
+        "OutputReasoningTokens": 0
+      },
+      "answer": "OK"
+    },
+    {
+      "workload": "text_tail",
+      "repeat": 1,
+      "policy": "budget",
+      "step": 2,
+      "images": 2,
+      "started": "2026-11-06T04:24:54.951144Z",
+      "ttft_ms": 722,
+      "duration_ms": 763,
+      "usage": {
+        "InputUncachedTokens": 5452,
+        "InputCachedTokens": 7552,
+        "CacheCreationTokens": 0,
+        "OutputContentTokens": 1,
+        "OutputReasoningTokens": 0
+      },
+      "answer": "OK"
+    },
+    {
+      "workload": "text_tail",
+      "repeat": 1,
+      "policy": "8_to_3",
+      "step": 3,
+      "images": 3,
+      "started": "2026-11-06T04:24:55.715681Z",
+      "ttft_ms": 877,
+      "duration_ms": 934,
+      "usage": {
+        "InputUncachedTokens": 5513,
+        "InputCachedTokens": 12928,
+        "CacheCreationTokens": 0,
+        "OutputContentTokens": 1,
+        "OutputReasoningTokens": 0
+      },
+      "answer": "OK"
+    },
+    {
+      "workload": "text_tail",
+      "repeat": 1,
+      "policy": "budget",
+      "step": 3,
+      "images": 3,
+      "started": "2026-11-06T04:24:56.650775Z",
+      "ttft_ms": 938,
+      "duration_ms": 946,
+      "usage": {
+        "InputUncachedTokens": 5506,
+        "InputCachedTokens": 12928,
+        "CacheCreationTokens": 0,
+        "OutputContentTokens": 1,
+        "OutputReasoningTokens": 0
+      },
+      "answer": "OK"
+    },
+    {
+      "workload": "text_tail",
+      "repeat": 1,
+      "policy": "unlimited",
+      "step": 3,
+      "images": 3,
+      "started": "2026-11-06T04:24:57.59821Z",
+      "ttft_ms": 998,
+      "duration_ms": 1090,
+      "usage": {
+        "InputUncachedTokens": 5508,
+        "InputCachedTokens": 12928,
+        "CacheCreationTokens": 0,
+        "OutputContentTokens": 1,
+        "OutputReasoningTokens": 0
+      },
+      "answer": "OK"
+    },
+    {
+      "workload": "text_tail",
+      "repeat": 1,
+      "policy": "budget",
+      "step": 4,
+      "images": 4,
+      "started": "2026-11-06T04:24:58.688725Z",
+      "ttft_ms": 1719,
+      "duration_ms": 1783,
+      "usage": {
+        "InputUncachedTokens": 5432,
+        "InputCachedTokens": 18432,
+        "CacheCreationTokens": 0,
+        "OutputContentTokens": 1,
+        "OutputReasoningTokens": 0
+      },
+      "answer": "OK"
+    },
+    {
+      "workload": "text_tail",
+      "repeat": 1,
+      "policy": "unlimited",
+      "step": 4,
+      "images": 4,
+      "started": "2026-11-06T04:25:00.473679Z",
+      "ttft_ms": 1314,
+      "duration_ms": 1372,
+      "usage": {
+        "InputUncachedTokens": 5434,
+        "InputCachedTokens": 18432,
+        "CacheCreationTokens": 0,
+        "OutputContentTokens": 1,
+        "OutputReasoningTokens": 0
+      },
+      "answer": "OK"
+    },
+    {
+      "workload": "text_tail",
+      "repeat": 1,
+      "policy": "8_to_3",
+      "step": 4,
+      "images": 4,
+      "started": "2026-11-06T04:25:01.84667Z",
+      "ttft_ms": 944,
+      "duration_ms": 951,
+      "usage": {
+        "InputUncachedTokens": 5439,
+        "InputCachedTokens": 18432,
+        "CacheCreationTokens": 0,
+        "OutputContentTokens": 1,
+        "OutputReasoningTokens": 0
+      },
+      "answer": "OK"
+    },
+    {
+      "workload": "text_tail",
+      "repeat": 1,
+      "policy": "unlimited",
+      "step": 5,
+      "images": 5,
+      "started": "2026-11-06T04:25:02.798832Z",
+      "ttft_ms": 1041,
+      "duration_ms": 1041,
+      "usage": {
+        "InputUncachedTokens": 5488,
+        "InputCachedTokens": 23808,
+        "CacheCreationTokens": 0,
+        "OutputContentTokens": 1,
+        "OutputReasoningTokens": 0
+      },
+      "answer": "OK"
+    },
+    {
+      "workload": "text_tail",
+      "repeat": 1,
+      "policy": "8_to_3",
+      "step": 5,
+      "images": 5,
+      "started": "2026-11-06T04:25:03.840407Z",
+      "ttft_ms": 1452,
+      "duration_ms": 1570,
+      "usage": {
+        "InputUncachedTokens": 5493,
+        "InputCachedTokens": 23808,
+        "CacheCreationTokens": 0,
+        "OutputContentTokens": 1,
+        "OutputReasoningTokens": 0
+      },
+      "answer": "OK"
+    },
+    {
+      "workload": "text_tail",
+      "repeat": 1,
+      "policy": "budget",
+      "step": 5,
+      "images": 5,
+      "started": "2026-11-06T04:25:05.411456Z",
+      "ttft_ms": 945,
+      "duration_ms": 1050,
+      "usage": {
+        "InputUncachedTokens": 5486,
+        "InputCachedTokens": 23808,
+        "CacheCreationTokens": 0,
+        "OutputContentTokens": 1,
+        "OutputReasoningTokens": 0
+      },
+      "answer": "OK"
+    },
+    {
+      "workload": "text_tail",
+      "repeat": 1,
+      "policy": "8_to_3",
+      "step": 6,
+      "images": 6,
+      "started": "2026-11-06T04:25:06.462204Z",
+      "ttft_ms": 816,
+      "duration_ms": 900,
+      "usage": {
+        "InputUncachedTokens": 5547,
+        "InputCachedTokens": 29184,
+        "CacheCreationTokens": 0,
+        "OutputContentTokens": 1,
+        "OutputReasoningTokens": 0
+      },
+      "answer": "OK"
+    },
+    {
+      "workload": "text_tail",
+      "repeat": 1,
+      "policy": "budget",
+      "step": 6,
+      "images": 6,
+      "started": "2026-11-06T04:25:07.363037Z",
+      "ttft_ms": 1788,
+      "duration_ms": 1872,
+      "usage": {
+        "InputUncachedTokens": 5540,
+        "InputCachedTokens": 29184,
+        "CacheCreationTokens": 0,
+        "OutputContentTokens": 1,
+        "OutputReasoningTokens": 0
+      },
+      "answer": "OK"
+    },
+    {
+      "workload": "text_tail",
+      "repeat": 1,
+      "policy": "unlimited",
+      "step": 6,
+      "images": 6,
+      "started": "2026-11-06T04:25:09.2362Z",
+      "ttft_ms": 1297,
+      "duration_ms": 1423,
+      "usage": {
+        "InputUncachedTokens": 5542,
+        "InputCachedTokens": 29184,
+        "CacheCreationTokens": 0,
+        "OutputContentTokens": 1,
+        "OutputReasoningTokens": 0
+      },
+      "answer": "OK"
+    },
+    {
+      "workload": "text_tail",
+      "repeat": 1,
+      "policy": "budget",
+      "step": 7,
+      "images": 7,
+      "started": "2026-11-06T04:25:10.659878Z",
+      "ttft_ms": 1638,
+      "duration_ms": 1733,
+      "usage": {
+        "InputUncachedTokens": 5466,
+        "InputCachedTokens": 34688,
+        "CacheCreationTokens": 0,
+        "OutputContentTokens": 1,
+        "OutputReasoningTokens": 0
+      },
+      "answer": "OK"
+    },
+    {
+      "workload": "text_tail",
+      "repeat": 1,
+      "policy": "unlimited",
+      "step": 7,
+      "images": 7,
+      "started": "2026-11-06T04:25:12.393226Z",
+      "ttft_ms": 1420,
+      "duration_ms": 1492,
+      "usage": {
+        "InputUncachedTokens": 5468,
+        "InputCachedTokens": 34688,
+        "CacheCreationTokens": 0,
+        "OutputContentTokens": 1,
+        "OutputReasoningTokens": 0
+      },
+      "answer": "OK"
+    },
+    {
+      "workload": "text_tail",
+      "repeat": 1,
+      "policy": "8_to_3",
+      "step": 7,
+      "images": 7,
+      "started": "2026-11-06T04:25:13.885743Z",
+      "ttft_ms": 1542,
+      "duration_ms": 1629,
+      "usage": {
+        "InputUncachedTokens": 5473,
+        "InputCachedTokens": 34688,
+        "CacheCreationTokens": 0,
+        "OutputContentTokens": 1,
+        "OutputReasoningTokens": 0
+      },
+      "answer": "OK"
+    },
+    {
+      "workload": "text_tail",
+      "repeat": 1,
+      "policy": "unlimited",
+      "step": 8,
+      "images": 8,
+      "started": "2026-11-06T04:25:15.517702Z",
+      "ttft_ms": 1450,
+      "duration_ms": 1504,
+      "usage": {
+        "InputUncachedTokens": 5522,
+        "InputCachedTokens": 40064,
+        "CacheCreationTokens": 0,
+        "OutputContentTokens": 1,
+        "OutputReasoningTokens": 0
+      },
+      "answer": "OK"
+    },
+    {
+      "workload": "text_tail",
+      "repeat": 1,
+      "policy": "8_to_3",
+      "step": 8,
+      "images": 8,
+      "started": "2026-11-06T04:25:17.023884Z",
+      "ttft_ms": 1150,
+      "duration_ms": 1202,
+      "usage": {
+        "InputUncachedTokens": 5527,
+        "InputCachedTokens": 40064,
+        "CacheCreationTokens": 0,
+        "OutputContentTokens": 1,
+        "OutputReasoningTokens": 0
+      },
+      "answer": "OK"
+    },
+    {
+      "workload": "text_tail",
+      "repeat": 1,
+      "policy": "budget",
+      "step": 8,
+      "images": 8,
+      "started": "2026-11-06T04:25:18.227089Z",
+      "ttft_ms": 1498,
+      "duration_ms": 1568,
+      "usage": {
+        "InputUncachedTokens": 5520,
+        "InputCachedTokens": 40064,
+        "CacheCreationTokens": 0,
+        "OutputContentTokens": 1,
+        "OutputReasoningTokens": 0
+      },
+      "answer": "OK"
+    },
+    {
+      "workload": "text_tail",
+      "repeat": 1,
+      "policy": "8_to_3",
+      "step": 9,
+      "images": 3,
+      "started": "2026-11-06T04:25:19.795859Z",
+      "ttft_ms": 1346,
+      "duration_ms": 1357,
+      "usage": {
+        "InputUncachedTokens": 45087,
+        "InputCachedTokens": 1920,
+        "CacheCreationTokens": 0,
+        "OutputContentTokens": 1,
+        "OutputReasoningTokens": 0
+      },
+      "answer": "OK"
+    },
+    {
+      "workload": "text_tail",
+      "repeat": 1,
+      "policy": "budget",
+      "step": 9,
+      "images": 9,
+      "started": "2026-11-06T04:25:21.154079Z",
+      "ttft_ms": 1411,
+      "duration_ms": 1457,
+      "usage": {
+        "InputUncachedTokens": 5446,
+        "InputCachedTokens": 45568,
+        "CacheCreationTokens": 0,
+        "OutputContentTokens": 1,
+        "OutputReasoningTokens": 0
+      },
+      "answer": "OK"
+    },
+    {
+      "workload": "text_tail",
+      "repeat": 1,
+      "policy": "unlimited",
+      "step": 9,
+      "images": 9,
+      "started": "2026-11-06T04:25:22.612134Z",
+      "ttft_ms": 1153,
+      "duration_ms": 1182,
+      "usage": {
+        "InputUncachedTokens": 5448,
+        "InputCachedTokens": 45568,
+        "CacheCreationTokens": 0,
+        "OutputContentTokens": 1,
+        "OutputReasoningTokens": 0
+      },
+      "answer": "OK"
+    },
+    {
+      "workload": "text_tail",
+      "repeat": 1,
+      "policy": "budget",
+      "step": 10,
+      "images": 10,
+      "started": "2026-11-06T04:25:23.797084Z",
+      "ttft_ms": 1610,
+      "duration_ms": 1703,
+      "usage": {
+        "InputUncachedTokens": 5500,
+        "InputCachedTokens": 50944,
+        "CacheCreationTokens": 0,
+        "OutputContentTokens": 1,
+        "OutputReasoningTokens": 0
+      },
+      "answer": "OK"
+    },
+    {
+      "workload": "text_tail",
+      "repeat": 1,
+      "policy": "unlimited",
+      "step": 10,
+      "images": 10,
+      "started": "2026-11-06T04:25:25.500641Z",
+      "ttft_ms": 1453,
+      "duration_ms": 1517,
+      "usage": {
+        "InputUncachedTokens": 5502,
+        "InputCachedTokens": 50944,
+        "CacheCreationTokens": 0,
+        "OutputContentTokens": 1,
+        "OutputReasoningTokens": 0
+      },
+      "answer": "OK"
+    },
+    {
+      "workload": "text_tail",
+      "repeat": 1,
+      "policy": "8_to_3",
+      "step": 10,
+      "images": 4,
+      "started": "2026-11-06T04:25:27.018078Z",
+      "ttft_ms": 1302,
+      "duration_ms": 1463,
+      "usage": {
+        "InputUncachedTokens": 5461,
+        "InputCachedTokens": 46976,
+        "CacheCreationTokens": 0,
+        "OutputContentTokens": 1,
+        "OutputReasoningTokens": 0
+      },
+      "answer": "OK"
+    },
+    {
+      "workload": "text_tail",
+      "repeat": 1,
+      "policy": "unlimited",
+      "step": 11,
+      "images": 11,
+      "started": "2026-11-06T04:25:28.482431Z",
+      "ttft_ms": 1585,
+      "duration_ms": 1679,
+      "usage": {
+        "InputUncachedTokens": 5556,
+        "InputCachedTokens": 56320,
+        "CacheCreationTokens": 0,
+        "OutputContentTokens": 1,
+        "OutputReasoningTokens": 0
+      },
+      "answer": "OK"
+    },
+    {
+      "workload": "text_tail",
+      "repeat": 1,
+      "policy": "8_to_3",
+      "step": 11,
+      "images": 5,
+      "started": "2026-11-06T04:25:30.162196Z",
+      "ttft_ms": 1263,
+      "duration_ms": 1307,
+      "usage": {
+        "InputUncachedTokens": 5515,
+        "InputCachedTokens": 52352,
+        "CacheCreationTokens": 0,
+        "OutputContentTokens": 1,
+        "OutputReasoningTokens": 0
+      },
+      "answer": "OK"
+    },
+    {
+      "workload": "text_tail",
+      "repeat": 1,
+      "policy": "budget",
+      "step": 11,
+      "images": 11,
+      "started": "2026-11-06T04:25:31.470232Z",
+      "ttft_ms": 1965,
+      "duration_ms": 1965,
+      "usage": {
+        "InputUncachedTokens": 5554,
+        "InputCachedTokens": 56320,
+        "CacheCreationTokens": 0,
+        "OutputContentTokens": 1,
+        "OutputReasoningTokens": 0
+      },
+      "answer": "OK"
+    },
+    {
+      "workload": "text_tail",
+      "repeat": 1,
+      "policy": "8_to_3",
+      "step": 12,
+      "images": 6,
+      "started": "2026-11-06T04:25:33.436724Z",
+      "ttft_ms": 1138,
+      "duration_ms": 1187,
+      "usage": {
+        "InputUncachedTokens": 5441,
+        "InputCachedTokens": 57856,
+        "CacheCreationTokens": 0,
+        "OutputContentTokens": 1,
+        "OutputReasoningTokens": 0
+      },
+      "answer": "OK"
+    },
+    {
+      "workload": "text_tail",
+      "repeat": 1,
+      "policy": "budget",
+      "step": 12,
+      "images": 12,
+      "started": "2026-11-06T04:25:34.625221Z",
+      "ttft_ms": 2053,
+      "duration_ms": 2246,
+      "usage": {
+        "InputUncachedTokens": 5480,
+        "InputCachedTokens": 61824,
+        "CacheCreationTokens": 0,
+        "OutputContentTokens": 1,
+        "OutputReasoningTokens": 0
+      },
+      "answer": "OK"
+    },
+    {
+      "workload": "text_tail",
+      "repeat": 1,
+      "policy": "unlimited",
+      "step": 12,
+      "images": 12,
+      "started": "2026-11-06T04:25:36.87207Z",
+      "ttft_ms": 1641,
+      "duration_ms": 1694,
+      "usage": {
+        "InputUncachedTokens": 5482,
+        "InputCachedTokens": 61824,
+        "CacheCreationTokens": 0,
+        "OutputContentTokens": 1,
+        "OutputReasoningTokens": 0
+      },
+      "answer": "OK"
+    }
+  ],
+  "summary": {
+    "unlimited": {
+      "calls": 12,
+      "input": 449292,
+      "cached": 381312,
+      "uncached": 67980,
+      "output": 12,
+      "hit_pct": 84.8695280574771,
+      "usd_estimate": 0.011348136,
+      "ttft_mean_ms": 1223.6666666666667,
+      "ttft_p50_ms": 1305.5,
+      "duration_mean_ms": 1285.75,
+      "images_sum": 78,
+      "images_max": 12
+    },
+    "8_to_3": {
+      "calls": 12,
+      "input": 433296,
+      "cached": 325760,
+      "uncached": 107536,
+      "output": 12,
+      "hit_pct": 75.18186182194158,
+      "usd_estimate": 0.017114880000000002,
+      "ttft_mean_ms": 1124.0833333333333,
+      "ttft_p50_ms": 1144.0,
+      "duration_mean_ms": 1186.0833333333333,
+      "images_sum": 54,
+      "images_max": 8
+    },
+    "budget": {
+      "calls": 12,
+      "input": 449268,
+      "cached": 381312,
+      "uncached": 67956,
+      "output": 12,
+      "hit_pct": 84.87406180720639,
+      "usd_estimate": 0.011344536,
+      "ttft_mean_ms": 1462.8333333333333,
+      "ttft_p50_ms": 1554.0,
+      "duration_mean_ms": 1538.6666666666667,
+      "images_sum": 78,
+      "images_max": 12
+    }
+  },
+  "pricing": {
+    "source": "https://api-docs.deepseek.com/quick_start/pricing/",
+    "currency": "USD",
+    "unit": "per million tokens",
+    "cached_input": 0.003,
+    "uncached_input": 0.15,
+    "output": 0.6,
+    "note": "All calls off-peak at 04:24-04:26 UTC; estimated from usage, not gateway invoices."
+  },
+  "policy_budget": {
+    "context_window": 1000000,
+    "image_tokens": 32768,
+    "base64_bytes": 16777216,
+    "reclaim_target_fraction": 0.5,
+    "coalesced_recent_images": 3,
+    "budget_triggered_in_paid_sample": false
+  }
+}

@@ -55,7 +55,7 @@ type Session struct {
 	ReasoningModelKey string    `json:"reasoningModelKey,omitempty"`
 	ActiveMode        AgentMode `json:"activeMode"`
 	ModeLease         ModeLease `json:"modeLease"`
-	// ProjectID 指向项目目录与审批设置的唯一事实源。
+	// ProjectID 指向可选的共享项目目录与审批设置。
 	ProjectID string `json:"projectID,omitempty"`
 	// LoadedPluginIDs 是当前会话已经加载、会向后续 turn 提供工具的插件。
 	// 对客户端只读；写入仍只允许通过显式的 session 插件接口。
@@ -82,6 +82,9 @@ type ComputerAppGrant struct {
 }
 
 type SessionUpdate struct {
+	// DirectoryGrants is internal; capability approval and directory management
+	// write it after explicit user consent, never through a generic session PATCH.
+	DirectoryGrants *[]string  `json:"-"`
 	Title           *string    `json:"title"`
 	Provider        *string    `json:"provider"`
 	Model           *string    `json:"model"`
@@ -2105,6 +2108,7 @@ type ApplyTurnSteersInput struct {
 type ContextCooling struct {
 	ThroughTurnID    string
 	SummaryMessageID string
+	ImageThroughID   string
 }
 
 type AdvanceContextCoolingInput struct {
@@ -2116,6 +2120,7 @@ type AdvanceContextCoolingInput struct {
 }
 
 type AppendCompactSummaryInput struct {
+	ImageThroughID string // Image projection committed atomically with the summary.
 	// ExpectedLastMessageID is the end of the canonical snapshot summarized by
 	// this operation. Empty means the snapshot was empty, not an unchecked write.
 	ExpectedLastMessageID string
@@ -2400,6 +2405,7 @@ type Store interface {
 	ListSubtaskArchives(ctx context.Context, parentSessionID string) (map[string]time.Time, error)
 	SetSubtaskArchived(ctx context.Context, parentSessionID, childSessionID, expectedTurnID string, archived bool) error
 	CloneSession(ctx context.Context, in CloneSessionInput) (*Session, error)
+	GetSessionDirectories(ctx context.Context, id string) ([]string, error)
 	GetSession(ctx context.Context, id string) (*Session, error)
 	// ListSessions 默认只返回 active 主会话；all 包含归档及子会话，供内部维护使用。
 	ListSessions(ctx context.Context, options ...SessionListOptions) ([]*Session, error)

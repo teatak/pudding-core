@@ -21,37 +21,78 @@ func TestToolImageBudgetBatchesAndPreservesOtherContent(t *testing.T) {
 	messages := []provider.Message{{Role: provider.RoleUser, Text: "keep my request"}, {Role: provider.RoleUser, Parts: []provider.Part{{Type: provider.PartImage, ImageKey: "upload", Data: []byte("user image")}}}}
 	for i := 1; i <= 32; i++ {
 		key := fmt.Sprintf("shot-%d", i)
-		messages = append(messages, provider.Message{Role: provider.RoleUser, Parts: []provider.Part{{Type: provider.PartImage, Name: tool.BrowserScreenshot, CallID: key, ImageKey: key, MIME: "image/png", Data: []byte(key)}}})
+		messages = append(messages, provider.Message{Role: provider.RoleUser, Parts: []provider.Part{{Type: provider.PartImage, Name: tool.BrowserScreenshot, CallID: key, ImageKey: key, MIME: "image/png", Data: []byte(key), Width: 1401, Height: 856}}})
 	}
-	for _, tc := range []struct{ count, keep int }{{8, 8}, {9, 3}, {10, 4}, {14, 8}, {15, 3}, {32, 8}} {
-		source := messages[:tc.count+2]
-		before := fmt.Sprintf("%#v", source)
-		got := LimitToolImages(source)
-		count := 0
-		for _, m := range got[2:] {
-			for _, p := range m.Parts {
-				if p.Type == provider.PartImage {
-					count++
-				} else if p.ImageKey != "" && (!strings.Contains(p.Text, p.ImageKey) || !strings.Contains(p.Text, tool.MediaRead) || len(p.Data) != 0) {
-					t.Fatalf("missing readback or leaked image: %+v", p)
-				}
+	budget := DefaultToolImageBudget(1000000)
+	for _, n := range []int{8, 9, 15, 18} {
+		through, err := ToolImageCandidate(messages[:n+2], budget, false)
+		if err != nil || through != "" {
+			t.Fatalf("premature cleanup at %d: %q %v", n, through, err)
+		}
+	}
+	before := fmt.Sprintf("%#v", messages)
+	through, err := ToolImageCandidate(messages, budget, false)
+	if err != nil || through == "" {
+		t.Fatalf("missing budget cleanup: %v", err)
+	}
+	got := ApplyToolImageWatermark(messages, through)
+	count := 0
+	for _, m := range got[2:] {
+		for _, p := range m.Parts {
+			if p.Type == provider.PartImage {
+				count++
+			} else if p.ImageKey != "" && (len(p.Data) > 0 || !strings.Contains(p.Text, tool.MediaRead)) {
+				t.Fatal("bad historical placeholder")
 			}
 		}
-		if count != tc.keep || got[0].Text != "keep my request" || string(got[1].Parts[0].Data) != "user image" {
-			t.Fatalf("count=%d: kept %d, want %d", tc.count, count, tc.keep)
-		}
-		if !reflect.DeepEqual(got, LimitToolImages(got)) {
-			t.Fatal("projection is not idempotent")
-		}
-		if before != fmt.Sprintf("%#v", source) {
-			t.Fatal("source messages changed")
-		}
 	}
-	// The ninth image evicts six. Adding one image must not rewrite any prefix.
-	nine := LimitToolImages(messages[:11])
-	ten := LimitToolImages(append(append([]provider.Message(nil), nine...), messages[11]))
-	if !reflect.DeepEqual(nine, ten[:len(nine)]) {
-		t.Fatal("prefix changed between batch boundaries")
+	if count != 13 || got[0].Text != "keep my request" || string(got[1].Parts[0].Data) != "user image" {
+		t.Fatalf("wrong bounded content: %d", count)
+	}
+	if !reflect.DeepEqual(got, ApplyToolImageWatermark(got, through)) || before != fmt.Sprintf("%#v", messages) {
+		t.Fatal("projection changed source or was not idempotent")
+	}
+	appended := append(append([]provider.Message(nil), got...), messages[2])
+	if next, err := ToolImageCandidate(appended, budget, false); err != nil || next != "" {
+		t.Fatal("cleanup slid on next observation")
+	}
+	if !reflect.DeepEqual(got, appended[:len(got)]) {
+		t.Fatal("stable prefix changed")
+	}
+	// Encoded byte pressure is independent of token estimates.
+	tiny := ToolImageBudget{MaxTokens: 100000, MaxBytes: 12}
+	candidate, err := ToolImageCandidate(messages[2:5], tiny, false)
+	if err != nil || candidate == "" {
+		t.Fatalf("byte budget did not clean: %v", err)
+	}
+	if _, err := ToolImageCandidate(messages[2:3], ToolImageBudget{MaxTokens: 1, MaxBytes: 1}, false); err == nil {
+		t.Fatal("oversized latest image silently accepted")
+	}
+}
+
+func cleanImagesForRewrite(t *testing.T, messages []provider.Message) []provider.Message {
+	t.Helper()
+	through, err := ToolImageCandidate(messages, DefaultToolImageBudget(1000000), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return ApplyToolImageWatermark(messages, through)
+}
+
+func TestSavedScreenshotWatermarkSurvivesFilteredBoundary(t *testing.T) {
+	var canonical []*store.Message
+	makeImage := func(turn, toolName string) provider.Part {
+		return provider.Part{Type: provider.PartImage, ImageTurnID: turn, CallID: "reused", Name: toolName, ImageKey: "same.png", MIME: "image/png", Data: []byte(turn)}
+	}
+	for _, pair := range [][2]string{{"old", tool.BrowserScreenshot}, {"boundary", tool.MediaRead}, {"new", tool.BrowserScreenshot}} {
+		canonical = append(canonical, &store.Message{ID: pair[0], TurnID: pair[0], Role: store.RoleTool, Parts: []store.ContentPart{{Type: store.ContentPartToolUse, Name: pair[1], CallID: "reused", Args: json.RawMessage(`{"purpose":"observation"}`)}, {Type: store.ContentPartToolResult, Name: pair[1], CallID: "reused"}, {Type: store.ContentPartAttachment, Origin: "tool", AttachmentKey: "same.png", MIME: "image/png"}}})
+	}
+	// The watermark's media_read has been filtered from this mode, while captures remain.
+	projected := []provider.Message{{Parts: []provider.Part{makeImage("old", tool.BrowserScreenshot)}}, {Parts: []provider.Part{makeImage("new", tool.BrowserScreenshot)}}}
+	state := store.ContextCooling{ImageThroughID: ToolImageID(makeImage("boundary", tool.MediaRead))}
+	got := applySavedToolImages(projected, canonical, state)
+	if got[0].Parts[0].Type != provider.PartText || got[1].Parts[0].Type != provider.PartImage {
+		t.Fatal("filtered watermark revived an old image or removed a later reread")
 	}
 }
 
@@ -65,7 +106,7 @@ func TestToolImagePruningPreservesCallsButDropsBoundAnthropicThinking(t *testing
 		messages = append(messages, provider.Message{Role: provider.RoleUser, Parts: []provider.Part{{Type: provider.PartImage, Name: tool.BrowserScreenshot, ImageKey: fmt.Sprint(i), Data: []byte("image")}}})
 	}
 	messages = append(messages, provider.Message{Role: provider.RoleAssistant, Continuations: states, Parts: []provider.Part{{Type: provider.PartToolUse, CallID: "click", Name: "click"}}})
-	got := LimitToolImages(messages)
+	got := cleanImagesForRewrite(t, messages)
 	if !reflect.DeepEqual(got[0].Continuations, states) {
 		t.Fatal("state before omitted image changed")
 	}
@@ -101,7 +142,7 @@ func TestScreenshotBudgetSeparatesReferencesAndTemporaryReads(t *testing.T) {
 		messages = append(messages, provider.Message{Role: provider.RoleUser, Parts: []provider.Part{{Type: provider.PartImage, Name: tool.BrowserScreenshot, ImageKey: key, Data: []byte(key)}}})
 	}
 	addRead(tool.MediaPurposeReference, "promoted-screenshot")
-	projected := LimitToolImages(messages)
+	projected := cleanImagesForRewrite(t, messages)
 	var images []string
 	for _, m := range projected {
 		for _, p := range m.Parts {
@@ -114,7 +155,7 @@ func TestScreenshotBudgetSeparatesReferencesAndTemporaryReads(t *testing.T) {
 	if !reflect.DeepEqual(images, want) {
 		t.Fatalf("image purposes lost: got %v want %v", images, want)
 	}
-	if !reflect.DeepEqual(projected, LimitToolImages(projected)) {
+	if !reflect.DeepEqual(projected, cleanImagesForRewrite(t, projected)) {
 		t.Fatal("reprojection changed references or screenshot boundary")
 	}
 	for _, p := range projected[8].Parts {

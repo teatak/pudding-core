@@ -562,6 +562,11 @@ func (s *Store) UpdateSession(ctx context.Context, id string, upd store.SessionU
 			}
 			sess.ProjectID = *upd.ProjectID
 		}
+		if upd.DirectoryGrants != nil {
+			if err := setSessionDirectoriesTx(ctx, tx, id, *upd.DirectoryGrants); err != nil {
+				return err
+			}
+		}
 		if upd.LoadedPluginIDs != nil {
 			sess.LoadedPluginIDs = append([]string(nil), (*upd.LoadedPluginIDs)...)
 		}
@@ -1748,6 +1753,11 @@ func (s *Store) AppendCompactSummary(ctx context.Context, in store.AppendCompact
 		}
 		if _, err := tx.ExecContext(ctx, `DELETE FROM session_context_cooling WHERE session_id=?`, in.SessionID); err != nil {
 			return err
+		}
+		if in.ImageThroughID != "" {
+			if _, err := tx.ExecContext(ctx, `INSERT INTO session_context_cooling(session_id,through_turn_id,summary_message_id,image_through_id) VALUES(?,'',?,?)`, in.SessionID, in.MessageID, in.ImageThroughID); err != nil {
+				return err
+			}
 		}
 		out = &store.AppendCompactSummaryResult{Turn: turn, Message: msg, Event: &ev}
 		return nil

@@ -28,7 +28,8 @@ CREATE INDEX IF NOT EXISTS sessions_archived_at
 CREATE TABLE IF NOT EXISTS session_context_cooling (
     session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
     through_turn_id TEXT NOT NULL,
-    summary_message_id TEXT NOT NULL
+    summary_message_id TEXT NOT NULL,
+    image_through_id TEXT NOT NULL DEFAULT ''
 );
 
 -- Immutable ownership only; messages and execution state stay on Session/Turn.
@@ -44,6 +45,11 @@ CREATE INDEX IF NOT EXISTS session_children_parent
 CREATE TABLE IF NOT EXISTS subtask_archives (
     child_session_id TEXT PRIMARY KEY REFERENCES session_children(child_session_id) ON DELETE CASCADE,
     archived_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS session_directory_grants (
+    session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
+    root_dirs TEXT NOT NULL DEFAULT '[]'
 );
 
 CREATE TABLE IF NOT EXISTS computer_app_grants (

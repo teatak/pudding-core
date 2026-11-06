@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/teatak/pudding-core/internal/attachment"
+	"github.com/teatak/pudding-core/internal/config"
 	"github.com/teatak/pudding-core/internal/contextbuilder"
 	"github.com/teatak/pudding-core/internal/provider"
 	"github.com/teatak/pudding-core/internal/store"
@@ -85,7 +86,10 @@ func TestScreenshotBudgetAcrossHistoryCurrentTurnAndReadback(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	cfg := provider.ModelConfig{Capabilities: &provider.ModelCapabilities{Image: true}}
+	if _, err := db.BeginTurn(ctx, store.BeginTurnInput{SessionID: "s1", TurnID: "t2", UserMessageID: "u2", ClientMessageID: "u2", UserText: "continue"}); err != nil {
+		t.Fatal(err)
+	}
+	cfg := provider.ModelConfig{ContextWindow: 160000, Capabilities: &provider.ModelCapabilities{Image: true}}
 	builder := contextbuilder.New(db, nil, contextbuilder.WithAttachmentHome(home))
 	req, err := builder.BuildForProviderWithTools(ctx, "s1", "mock", "vision", string(store.ModeCode), []provider.ToolDef{{Name: tool.BrowserScreenshot}, {Name: tool.MediaRead}}, cfg)
 	if err != nil {
@@ -103,7 +107,38 @@ func TestScreenshotBudgetAcrossHistoryCurrentTurnAndReadback(t *testing.T) {
 		return out
 	}
 	current := requestMessagesWithTurnParts(nil, parts, nil, "s1", "t1", home, cfg, true)
-	if got, want := images(req.Messages), images(current); len(got) != 10 || !reflect.DeepEqual(got, want) || got[0] != "reference-" || got[1] != "reference-reference" || got[2] != "image-24" {
+	if got, want := images(req.Messages), images(current); len(got) != 34 || !reflect.DeepEqual(got, want) {
+		t.Fatal("builder pruned images without a budget decision")
+	}
+	req.Config = cfg
+	settings := config.NewManager(home)
+	if err := settings.Prepare(); err != nil {
+		t.Fatal(err)
+	}
+	eng := &Engine{store: db, config: settings}
+	resolved := &resolvedModel{providerName: "mock", model: "vision", protocol: "openai-compatible", config: cfg}
+	if changed, err := eng.prepareContextRequest(ctx, "s1", "t2", resolved, store.ModeCode, &req, false); err != nil || !changed {
+		t.Fatalf("image budget not committed: %v %v", changed, err)
+	}
+	state, err := db.ContextCooling(ctx, "s1")
+	if err != nil || state.ImageThroughID == "" {
+		t.Fatal("image watermark not saved")
+	}
+	current = contextbuilder.ApplyToolImageWatermark(current, state.ImageThroughID)
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	db, err = sqlitestore.Open(filepath.Join(home, "history.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	builder = contextbuilder.New(db, nil, contextbuilder.WithAttachmentHome(home))
+	req, err = builder.BuildForProviderWithTools(ctx, "s1", "mock", "vision", string(store.ModeCode), []provider.ToolDef{{Name: tool.BrowserScreenshot}, {Name: tool.MediaRead}}, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := images(req.Messages), images(current); len(got) != 9 || !reflect.DeepEqual(got, want) || got[0] != "reference-" || got[1] != "reference-reference" || got[2] != "image-25" {
 		t.Fatalf("history/current budgets disagree: %v / %v", got, want)
 	}
 	// The first screenshot is now absent, but its original can be loaded by key.
@@ -115,7 +150,7 @@ func TestScreenshotBudgetAcrossHistoryCurrentTurnAndReadback(t *testing.T) {
 	reread := []store.ContentPart{{Type: store.ContentPartToolUse, CallID: read.CallID, Name: read.Name, Args: args}, {Type: store.ContentPartToolResult, CallID: read.CallID, Name: read.Name, Ok: true, Content: read.Content}, store.AttachmentPart(read.ContextAttachments[0])}
 	reloaded := requestMessagesWithTurnParts(req.Messages, reread, nil, "s1", "t2", home, cfg, true)
 	got := images(reloaded)
-	if len(got) != 5 || got[0] != "reference-" || got[1] != "reference-reference" || got[len(got)-1] != "image-0" {
+	if len(got) != 10 || got[0] != "reference-" || got[1] != "reference-reference" || got[len(got)-1] != "image-0" {
 		t.Fatalf("readback did not become recent/bounded: %v", got)
 	}
 	// Rebuilding cannot revive the evicted images or alter saved attachments.
@@ -136,6 +171,90 @@ func TestScreenshotBudgetAcrossHistoryCurrentTurnAndReadback(t *testing.T) {
 	}
 	if attachments != 34 {
 		t.Fatalf("canonical attachments changed: %d", attachments)
+	}
+}
+
+func TestScreenshotCleanupCoalescesWithCoolingAndCompact(t *testing.T) {
+	for _, operation := range []string{"cooling", "compact"} {
+		t.Run(operation, func(t *testing.T) {
+			e, db, resolved, _ := coolingFixture(t)
+			ctx, sid := context.Background(), "sess_1"
+			home := t.TempDir()
+			WithAttachmentHome(home)(e)
+			resolved.config = provider.ModelConfig{ContextWindow: 1000000, Capabilities: &provider.ModelCapabilities{Image: true, Tools: true}}
+			e.tools = &recordingToolRunner{defs: []provider.ToolDef{{Name: tool.CommandRun}, {Name: tool.HistoryGetMessage}, {Name: tool.BrowserScreenshot}}}
+			for i := 0; i < 9; i++ {
+				img, err := attachment.NewService(home).StoreReader(sid, "browser-screenshot.png", "image/png", bytes.NewBufferString(fmt.Sprint(i)))
+				if err != nil {
+					t.Fatal(err)
+				}
+				img.Origin = attachment.OriginTool
+				id := fmt.Sprint(i)
+				if _, err := db.AppendTurnOutput(ctx, store.AppendTurnOutputInput{TurnID: "current", Parts: []store.ContentPart{{Type: store.ContentPartToolUse, Name: tool.BrowserScreenshot, CallID: id, Args: json.RawMessage(`{}`)}, {Type: store.ContentPartToolResult, Name: tool.BrowserScreenshot, CallID: id, Ok: true, Content: `{}`}, store.AttachmentPart(img)}}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			build := func() provider.Request {
+				r, err := e.builder.BuildForProviderWithTools(ctx, sid, "mock", "mock-model", "code", e.tools.(*recordingToolRunner).defs, resolved.config)
+				if err != nil {
+					t.Fatal(err)
+				}
+				r.Config = resolved.config
+				r.Tools = e.tools.(*recordingToolRunner).defs
+				return r
+			}
+			req := build()
+			if operation == "cooling" {
+				before := requestInputTokens(req)
+				if changed, err := e.tryCoolContext(ctx, sid, "current", resolved, store.ModeCode, &req, before, before-1, 1); err != nil || !changed {
+					t.Fatalf("joint cooling failed: %v %v", changed, err)
+				}
+				state, err := db.ContextCooling(ctx, sid)
+				if err != nil || state.ThroughTurnID == "" || state.ImageThroughID == "" {
+					t.Fatalf("missing joint watermark: %+v %v", state, err)
+				}
+				if err := db.SetSettings(ctx, map[string]string{config.SettingToolResultCoolingEnabled: "false"}); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				if _, err := e.compact(ctx, CompactInput{SessionID: sid}, resolved, store.ModeCode, "current", false); err != nil {
+					t.Fatal(err)
+				}
+				state, err := db.ContextCooling(ctx, sid)
+				if err != nil || state.ThroughTurnID != "" || state.SummaryMessageID == "" || state.ImageThroughID == "" {
+					t.Fatalf("missing compact image state: %+v %v", state, err)
+				}
+			}
+			after := build()
+			count := 0
+			for _, m := range after.Messages {
+				for _, p := range m.Parts {
+					if p.Type == provider.PartImage {
+						count++
+					}
+				}
+			}
+			if count != 3 {
+				t.Fatalf("%s retained %d observations, want 3", operation, count)
+			}
+			// A subsequent compact must not revive observations already omitted by cooling.
+			if operation == "cooling" {
+				if _, err := e.compact(ctx, CompactInput{SessionID: sid}, resolved, store.ModeCode, "current", false); err != nil {
+					t.Fatal(err)
+				}
+				count = 0
+				for _, m := range build().Messages {
+					for _, p := range m.Parts {
+						if p.Type == provider.PartImage {
+							count++
+						}
+					}
+				}
+				if count != 3 {
+					t.Fatal("compact revived omitted images")
+				}
+			}
+		})
 	}
 }
 
