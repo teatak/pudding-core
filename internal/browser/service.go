@@ -35,6 +35,7 @@ type Service interface {
 	Select(ctx context.Context, sessionID, tabID string, in SelectInput) (ActionResult, error)
 	Type(ctx context.Context, sessionID, tabID string, in TypeInput) (ActionResult, error)
 	Scroll(ctx context.Context, sessionID, tabID string, in ScrollInput) (ActionResult, error)
+	Dialog(ctx context.Context, sessionID, tabID string, in DialogInput) (ActionResult, error)
 	Hover(ctx context.Context, sessionID, tabID string, in HoverInput) (ActionResult, error)
 	PressKey(ctx context.Context, sessionID, tabID string, in KeyInput) (ActionResult, error)
 	Wait(ctx context.Context, sessionID, tabID string, in WaitInput) (ActionResult, error)
@@ -244,6 +245,15 @@ type KeyInput struct {
 	Selector  string   `json:"selector,omitempty"`
 	Key       string   `json:"key"`
 	Modifiers []string `json:"modifiers,omitempty"`
+}
+
+type DialogInput struct {
+	WindowID   string  `json:"windowID,omitempty"`
+	TabID      string  `json:"tabID,omitempty"`
+	Action     string  `json:"action"`
+	DialogID   string  `json:"dialogID,omitempty"`
+	Accept     *bool   `json:"accept,omitempty"`
+	PromptText *string `json:"promptText,omitempty"`
 }
 
 type HoverInput struct {

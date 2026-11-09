@@ -300,6 +300,7 @@ func TestBuiltinBrowserOpenWithoutTabIDReportsOpenFailure(t *testing.T) {
 
 type fakeToolBrowser struct {
 	hoverInput  browser.HoverInput
+	dialogInput browser.DialogInput
 	keyInput    browser.KeyInput
 	waitInput   browser.WaitInput
 	actionError error
@@ -502,5 +503,24 @@ func TestBuiltinBrowserHoverAndNewTargets(t *testing.T) {
 	cancelled := runner.Call(context.Background(), Call{SessionID: "session", Name: BrowserHover, Args: json.RawMessage(`{"tabID":"tab","selector":"#menu"}`)})
 	if cancelled.Ok || !strings.Contains(cancelled.Content, "browser_operation_cancelled") {
 		t.Fatalf("hover cancellation lost: %+v", cancelled)
+	}
+}
+
+func (f *fakeToolBrowser) Dialog(_ context.Context, sessionID, tabID string, in browser.DialogInput) (browser.ActionResult, error) {
+	f.dialogInput = in
+	return browser.ActionResult{Tab: browser.TabSnapshot{ID: tabID, SessionID: sessionID}, Action: "dialog"}, f.actionError
+}
+
+func TestBuiltinBrowserDialogDispatch(t *testing.T) {
+	fake := &fakeToolBrowser{}
+	runner := NewBuiltinRunner(WithBrowser(fake))
+	res := runner.Call(context.Background(), Call{SessionID: "session", Name: BrowserDialog, Args: json.RawMessage(`{"tabID":"tab","windowID":"popup","action":"respond","dialogID":"dialog","accept":true,"promptText":""}`)})
+	if !res.Ok || fake.dialogInput.WindowID != "popup" || fake.dialogInput.DialogID != "dialog" || fake.dialogInput.Accept == nil || !*fake.dialogInput.Accept || fake.dialogInput.PromptText == nil || *fake.dialogInput.PromptText != "" {
+		t.Fatalf("dialog response lost: %+v %+v", res, fake.dialogInput)
+	}
+	fake.actionError = context.Canceled
+	res = runner.Call(context.Background(), Call{SessionID: "session", Name: BrowserDialog, Args: json.RawMessage(`{"tabID":"tab","action":"inspect"}`)})
+	if res.Ok {
+		t.Fatalf("cancelled dialog reported success: %+v", res)
 	}
 }

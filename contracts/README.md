@@ -35,6 +35,15 @@ The Go daemon embeds it through this package; desktop generates `web/contracts/`
 `api.ts` and `events.ts` are the TypeScript/Zod client validation definitions for the REST and SSE protocol.
 Server structs and lifecycle semantics remain owned by core; verify both sides when changing a wire field.
 
+Protocol 67 adds `/browser/tabs/dialog` / `builtin_browser_dialog`: inspect the
+current alert/confirm/prompt or respond using its exact dialogID and an explicit
+accept boolean. promptText preserves the distinction between omitted and empty.
+The route bypasses the blocked page's command queue. `browser_dialog_open` means
+an action may already have run; inspect/respond, then verify without replaying.
+IDs are scoped to tab/window/session, change for consecutive dialogs, and expire
+when the dialog is dismissed, navigated away from, or destroyed. beforeunload
+continues to use the existing close flow.
+
 Protocol 66 adds `/browser/tabs/hover` / `builtin_browser_hover`, using a trusted
 pointer move without pressing any button. The hover lifecycle prepares/restores
 the browser surface, including frame and popup targets.

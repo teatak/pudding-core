@@ -5289,3 +5289,7 @@ func (b *engineTestBrowser) CloseWindow(context.Context, string, string, string)
 func (f *engineTestBrowser) Hover(context.Context, string, string, browser.HoverInput) (browser.ActionResult, error) {
 	return browser.ActionResult{}, nil
 }
+
+func (f *engineTestBrowser) Dialog(context.Context, string, string, browser.DialogInput) (browser.ActionResult, error) {
+	return browser.ActionResult{}, nil
+}

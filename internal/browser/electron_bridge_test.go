@@ -701,3 +701,36 @@ func TestElectronBridgeWaitPreservesEmptyTargetBaseline(t *testing.T) {
 		t.Fatalf("new target result lost: %+v %v", result, err)
 	}
 }
+
+func TestElectronBridgeDialogPreservesFalseAndEmptyPrompt(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/browser/tabs/dialog" {
+			t.Errorf("unexpected route %s", r.URL.Path)
+		}
+		var request map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Error(err)
+			return
+		}
+		if request["windowID"] != "popup" || request["dialogID"] != "dialog" || (request["accept"] == true && request["promptText"] != "") || (request["accept"] == false && request["promptText"] != nil) {
+			t.Errorf("response lost: %+v", request)
+		}
+		writeElectronBridgeTestJSON(w, map[string]any{"tab": electronBridgeSnapshot{SessionID: "session", TabID: "tab"}, "result": map[string]any{"responded": true}})
+	}))
+	defer server.Close()
+	service, err := NewElectronBridgeService(ElectronBridgeConfig{URL: server.URL, Token: "test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, accept := range []bool{false, true} {
+		text := ""
+		input := DialogInput{WindowID: "popup", Action: "respond", DialogID: "dialog", Accept: &accept}
+		if accept {
+			input.PromptText = &text
+		}
+		result, err := service.Dialog(context.Background(), "session", "tab", input)
+		if err != nil || result.Result["responded"] != true {
+			t.Fatalf("dialog result lost: %+v %v", result, err)
+		}
+	}
+}

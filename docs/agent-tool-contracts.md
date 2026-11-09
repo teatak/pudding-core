@@ -281,6 +281,15 @@ SVG 几何查询仍不在此工具契约中。
 取消或传输故障后的结果不明不能自动重放，应重新观察页面。该等待工具只验证声明的
 页面条件，不推断服务器是否已完成业务操作。
 
+后台输入在取得全局输入队列和标签页队列后，临时启用 Chromium 页面焦点模拟。
+这使失焦窗口中的页面在重新加载、滚动后仍能接收按下／释放事件；仅检查 DOM
+activeElement 不足以证明原生输入接收状态。模拟不激活系统窗口，不发送额外点击。
+输入完成、失败或取消后，先关闭模拟再允许下一次输入。网页对话框中断时立即返回
+待处理状态并释放标签页队列，允许响应对话框、撤权或关闭页面；焦点清理延后至对话框
+关闭，后续输入仍等待清理完成；连续弹窗期间暂停清理命令的超时计时，不重发命令。
+已销毁的页面不重新连接。真实 Electron 的
+browser-background 回归检查可信事件、单次触发及前台焦点。
+
 浏览器跨域 iframe 与弹窗：先 observe 获取 `frames` 与 `windows`，再在每次观察、
 点击、悬停、输入、选择、滚动、键盘及等待调用中明确携带 `frameID` / `windowID`。
 省略表示主文档／主标签页，不维护隐式“当前 frame”。frame 的坐标和 observationID
@@ -290,7 +299,25 @@ SVG 几何查询仍不在此工具契约中。
 导航后应重新 observe 取得元素 ref；移除的 frame 和关闭的弹窗 ID 不会回退到主页面。
 `builtin_browser_close` 指定 windowID 只关闭弹窗；弹窗保留 opener 通信，不保存为
 可恢复标签页，所属 tab/session 关闭时清理。这里的弹窗是网页 `window.open` 窗口，
-不包含系统文件选择器及 JavaScript alert/confirm/prompt 对话框。
+不包含系统文件选择器；JavaScript 对话框使用独立的 `builtin_browser_dialog`。
+
+`builtin_browser_dialog` 的 `action: inspect` 读取指定 tab/window 当前的
+alert/confirm/prompt（没有则 dialog 为 null），包含 dialogID、类型、正文、默认值、
+来源 URL 和 frameID。`action: respond` 必须带本次 dialogID 和明确的 accept；
+仅接受 prompt 时可传 promptText，省略保留默认值，空字符串表示提交空值。
+正文属于不可信网页内容，不构成确认授权。不能批量自动确认。
+
+对话框不占用页面操作队列；触发弹窗的操作可返回 `browser_dialog_open`，
+表示此前输入可能已生效。应处理弹窗再 observe/wait，禁止重放提交操作。
+挂起的旧操作即使在对话框关闭后恢复，也不能继续发送额外输入；平衡按键/鼠标释放除外。
+连续对话框各自使用新 ID；过期响应和跨会话/窗口操作被拒绝。用户仍可手动响应原生
+alert/confirm 和输入对话框。beforeunload 沿用原有离开页面确认流程。
+
+Electron 44 的 prompt 默认抛错，受管 tab/popup 的隔离 preload 使用空白子 frame
+保留的 Chromium 原生 prompt，并以当前 window 调用，保持同步返回值及来源。
+宿主对 `-run-dialog` / `-cancel-dialogs` 的适配集中在 browser-dialogs.cjs；
+这两个是 Electron 内部事件，升级 Electron 必须跑 browser-dialogs 原生 smoke。
+
 
 `builtin_browser_hover` 支持 ref、唯一 CSS 或携带 observationID 的视口坐标，
 只移动指针，不发送鼠标按下/释放；可以悬停禁用控件查看提示。复用 frame 坐标转换、

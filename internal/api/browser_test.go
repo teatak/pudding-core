@@ -1533,3 +1533,7 @@ func (f *fakeBrowserService) CloseWindow(context.Context, string, string, string
 func (f *fakeBrowserService) Hover(context.Context, string, string, browser.HoverInput) (browser.ActionResult, error) {
 	return browser.ActionResult{}, nil
 }
+
+func (f *fakeBrowserService) Dialog(context.Context, string, string, browser.DialogInput) (browser.ActionResult, error) {
+	return browser.ActionResult{}, nil
+}

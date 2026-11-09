@@ -335,6 +335,26 @@ func (r *BuiltinRunner) browserStatus(ctx context.Context, call Call) Result {
 	return out
 }
 
+func (r *BuiltinRunner) browserDialog(ctx context.Context, call Call) Result {
+	out := browserBaseResult(call)
+	if res, ok := r.browserReady(call, out); !ok {
+		return res
+	}
+	var args browser.DialogInput
+	if err := decodeStructToolArgs(call.Args, &args); err != nil {
+		return toolJSONError(out, "invalid_arguments", err.Error())
+	}
+	tabID, err := r.browserResolveTabID(ctx, call.SessionID, args.TabID)
+	if err != nil {
+		return browserToolError(out, err)
+	}
+	result, err := r.browser.Dialog(ctx, call.SessionID, tabID, args)
+	if err != nil {
+		return browserToolError(out, err)
+	}
+	return r.browserActionResult(ctx, call, out, result)
+}
+
 func (r *BuiltinRunner) browserHover(ctx context.Context, call Call) Result {
 	out := browserBaseResult(call)
 	if res, ok := r.browserReady(call, out); !ok {
