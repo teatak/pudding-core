@@ -35,6 +35,7 @@ const (
 	toolBrowserType       = "builtin_browser_type"
 	toolBrowserScroll     = "builtin_browser_scroll"
 	toolBrowserPressKey   = "builtin_browser_press_key"
+	toolBrowserHover      = "builtin_browser_hover"
 	toolBrowserWait       = "builtin_browser_wait"
 	toolSkillValidate     = "builtin_skill_validate"
 	toolPluginSave        = "builtin_plugin_save"
@@ -108,6 +109,7 @@ Use child conversations for bounded work that can make useful progress independe
 				{Name: toolBrowserScroll},
 				{Name: toolBrowserPressKey},
 				{Name: toolBrowserWait},
+				{Name: toolBrowserHover},
 			},
 			Skills: []SkillRef{{
 				ID:          BuiltinBrowserID,
@@ -136,6 +138,8 @@ Use Pudding's built-in browser for webpages that require navigation or interacti
 - For form values use builtin_browser_type with clear=true and commit=true to replace the value and dispatch change/blur. Use canonical date/time values (datetime-local: YYYY-MM-DDTHH:mm); committing a field does not submit the form.
 - Use builtin_browser_press_key for Enter to submit, Tab/Shift+Tab to move focus, Escape to dismiss, and ControlOrMeta shortcuts. Keys act on the selected tab, not the desktop.
 - Observe returns frames and native popup windows. Pass their frameID/windowID explicitly on subsequent operations; omit them for the main document. Re-observe after navigation or stale targets. Screenshot uses windowID only and whole-window viewport coordinates. Close with windowID closes only that popup.
+- Use builtin_browser_hover to reveal hover menus/tooltips without clicking; then observe or wait for the revealed content.
+- Use builtin_browser_wait with newTab/newWindow and knownIDs captured before the triggering action to discover newly opened targets, even when they appeared before wait starts. Choose explicitly from targets[]; an optional url filter is exact. CSS/text/URL waits can follow navigation of the same iframe; use the returned current frameID for a fresh observation. Removed frames and old refs do not silently rebind.
 - Use builtin_browser_wait for a specific visible/hidden element, rendered text, or URL result after an action. Prefer CSS for newly created or replaced targets. A timeout is not permission to repeat a submission; observe first. After cancellation or uncertain input delivery, re-observe before further input.
 - Click success confirms input delivery only. Verify the expected dialog, URL, or page state afterward. If the hit element is an unrelated container, re-observe and correct the target; that alone is not evidence of a blocked link or missing permissions.
 - For public web search or page text, use Web Search & Fetch (plugin ID: web-search-fetch) when listed in Available Plugins. Load it with builtin_plugin_load only if needed; never use builtin_skill_read to load it. Use Browser when interactive page state or actions are required.

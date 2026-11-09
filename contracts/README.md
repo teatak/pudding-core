@@ -35,6 +35,17 @@ The Go daemon embeds it through this package; desktop generates `web/contracts/`
 `api.ts` and `events.ts` are the TypeScript/Zod client validation definitions for the REST and SSE protocol.
 Server structs and lifecycle semantics remain owned by core; verify both sides when changing a wire field.
 
+Protocol 66 adds `/browser/tabs/hover` / `builtin_browser_hover`, using a trusted
+pointer move without pressing any button. The hover lifecycle prepares/restores
+the browser surface, including frame and popup targets.
+`wait` adds `newTab` / `newWindow`, requiring `knownIDs` from before the triggering
+action (an explicit empty array is valid). Matches are scoped to the opener and
+return `targets[]`; an optional URL filter is exact. Read-only CSS/text/URL waits
+follow an iframe's native FrameTreeNode across renderer swaps and return its
+current frameID. Removed/replaced frames and stale element refs still fail;
+input is never replayed to recover from navigation.
+Core and Desktop must be updated together.
+
 Protocol 65 adds explicit `frameID` / `windowID` browser targets. Observe returns
 native frame IDs (including cross-origin/OOPIF) and session/tab-owned popup IDs.
 Observe, click, type, select, scroll, key and wait accept both target fields;

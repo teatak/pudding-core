@@ -620,6 +620,11 @@ func TestElectronBridgeFrameAndPopupTargets(t *testing.T) {
 	}
 	actions := []func() error{
 		func() error {
+			_, err := service.Hover(ctx, "session", "tab", HoverInput{FrameID: "frame", WindowID: "popup", Selector: "#menu"})
+			return err
+		},
+
+		func() error {
 			_, e := service.Click(ctx, "session", "tab", ClickInput{FrameID: "frame", WindowID: "popup", Selector: "#go"})
 			return e
 		},
@@ -669,5 +674,30 @@ func TestElectronBridgeFrameAndPopupTargets(t *testing.T) {
 	}
 	if err := service.CloseWindow(ctx, "session", "tab", ""); err == nil {
 		t.Fatal("missing popup id must not close the parent")
+	}
+}
+
+func TestElectronBridgeWaitPreservesEmptyTargetBaseline(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Error(err)
+			return
+		}
+		known, ok := request["knownIDs"].([]any)
+		if !ok || len(known) != 0 || request["condition"] != "newWindow" {
+			t.Errorf("baseline lost: %+v", request)
+		}
+		writeElectronBridgeTestJSON(w, map[string]any{"tab": electronBridgeSnapshot{SessionID: "session", TabID: "tab"}, "result": map[string]any{"matched": true, "targets": []map[string]any{{"tabID": "tab", "windowID": "new-popup"}}}})
+	}))
+	defer server.Close()
+	service, err := NewElectronBridgeService(ElectronBridgeConfig{URL: server.URL, Token: "test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	known := []string{}
+	result, err := service.Wait(context.Background(), "session", "tab", WaitInput{Condition: "newWindow", KnownIDs: &known})
+	if err != nil || result.Result["matched"] != true || len(result.Result["targets"].([]any)) != 1 {
+		t.Fatalf("new target result lost: %+v %v", result, err)
 	}
 }

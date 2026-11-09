@@ -76,6 +76,7 @@ const (
 	BrowserScroll     = "builtin_browser_scroll"
 	BrowserPressKey   = "builtin_browser_press_key"
 	BrowserWait       = "builtin_browser_wait"
+	BrowserHover      = "builtin_browser_hover"
 	ComputerListApps  = "builtin_computer_list_apps"
 	ComputerUseApp    = "builtin_computer_use_app"
 	ComputerQuitApp   = "builtin_computer_quit_app"
@@ -681,9 +682,15 @@ func builtinRunnerDefinitions() []provider.ToolDef {
 			Capability:  store.ModeWork,
 		},
 		{
+			Name:        BrowserHover,
+			Description: "Move the browser pointer onto an observed element or viewport coordinates without clicking. Supports frameID/windowID, checks visibility and ancestor-frame occlusion, and scrolls the target into view. Coordinates require observationID. Use to reveal hover menus/tooltips; verify with observe or wait afterward. Success confirms delivery, not menu appearance. Do not replay after cancellation or uncertain delivery.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"tabID":{"type":"string"},"windowID":{"type":"string"},"frameID":{"type":"string"},"selector":{"type":"string","description":"Observed ref or unique CSS selector."},"x":{"type":"number"},"y":{"type":"number"},"observationID":{"type":"string","description":"Required with coordinates; use a fresh observation/screenshot for the selected viewport."}},"additionalProperties":false}`),
+			Capability:  store.ModeWork,
+		},
+		{
 			Name:        BrowserWait,
-			Description: "Wait for one observable page result without sending input: visible/hidden requires selector; text/textAbsent requires text and accepts an optional selector; url requires the exact destination URL; urlChanged requires the previous URL. Text matching is a case-sensitive substring of rendered text. Prefer CSS for elements that may be created/replaced; old refs expire. Default timeout 5000ms, maximum 15000ms. Returns matched=true only after the condition holds; timeout and cancellation fail without replaying the previous action. A match proves this condition only, not server-side success.",
-			InputSchema: json.RawMessage(`{"type":"object","properties":{"windowID":{"type":"string","description":"Optional popup ID from observe.windows; omit for the main tab."},"frameID":{"type":"string","description":"Optional frame ID from observe.frames. Omit for the top document. Element refs and coordinates belong to the selected frame."},"tabID":{"type":"string"},"condition":{"type":"string","enum":["visible","hidden","text","textAbsent","url","urlChanged"]},"selector":{"type":"string","minLength":1},"text":{"type":"string","minLength":1},"url":{"type":"string","minLength":1},"timeoutMs":{"type":"integer","minimum":1,"maximum":15000}},"required":["condition"],"additionalProperties":false}`),
+			Description: "Wait without sending input. newTab/newWindow waits for targets opened by tabID (optionally windowID), requires knownIDs from before the triggering action, accepts an optional exact url filter, and returns all matched targets with IDs. Page waits: visible/hidden requires selector; text/textAbsent requires text and accepts an optional selector; url requires the exact destination URL; urlChanged requires the previous URL. Text matching is a case-sensitive substring of rendered text. Prefer CSS for elements that may be created/replaced; old refs expire. CSS/text/URL waits follow the same iframe across navigation and return its current frameID; they never rebind to a replacement iframe. Default timeout 5000ms, maximum 15000ms. Returns matched=true only after the condition holds; timeout and cancellation fail without replaying the previous action. A match proves this condition only, not server-side success.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"windowID":{"type":"string","description":"Optional popup ID from observe.windows; omit for the main tab."},"frameID":{"type":"string","description":"Optional frame ID from observe.frames. Omit for the top document. Element refs and coordinates belong to the selected frame."},"tabID":{"type":"string"},"condition":{"type":"string","enum":["visible","hidden","text","textAbsent","url","urlChanged","newTab","newWindow"]},"selector":{"type":"string","minLength":1},"text":{"type":"string","minLength":1},"url":{"type":"string","minLength":1},"knownIDs":{"type":"array","maxItems":128,"uniqueItems":true,"items":{"type":"string","minLength":1},"description":"Required for newTab/newWindow: IDs observed before triggering the action; [] when none existed. Excludes existing targets even when creation finishes before wait starts."},"timeoutMs":{"type":"integer","minimum":1,"maximum":15000}},"required":["condition"],"additionalProperties":false}`),
 			Capability:  store.ModeWork,
 		},
 		{
@@ -865,6 +872,8 @@ func (r *BuiltinRunner) Call(ctx context.Context, call Call) (result Result) {
 		return r.browserScroll(ctx, call)
 	case BrowserPressKey:
 		return r.browserPressKey(ctx, call)
+	case BrowserHover:
+		return r.browserHover(ctx, call)
 	case BrowserWait:
 		return r.browserWait(ctx, call)
 	case ComputerListApps:

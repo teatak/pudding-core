@@ -115,7 +115,7 @@ func TestBuiltinPluginsMergeEnablementAndSkills(t *testing.T) {
 	if browser == nil || browser.Source != SourceBuiltin || !browser.Enabled || browser.CanUninstall || browser.RequiredMode != "work" || browser.DefaultSkillID != BuiltinBrowserID {
 		t.Fatalf("unexpected browser definition: %+v", browser)
 	}
-	if len(browser.Tools) != 14 || browser.Tools[0].Name != toolBrowserStatus || browser.Tools[10].Name != toolBrowserSelect || browser.Tools[12].Name != toolBrowserPressKey || browser.Tools[13].Name != toolBrowserWait {
+	if len(browser.Tools) != 15 || browser.Tools[0].Name != toolBrowserStatus || browser.Tools[10].Name != toolBrowserSelect || browser.Tools[12].Name != toolBrowserPressKey || browser.Tools[13].Name != toolBrowserWait || browser.Tools[14].Name != toolBrowserHover {
 		t.Fatalf("unexpected builtin tools: browser=%+v", browser.Tools)
 	}
 	for _, tc := range []struct {

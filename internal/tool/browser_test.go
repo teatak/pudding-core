@@ -299,6 +299,7 @@ func TestBuiltinBrowserOpenWithoutTabIDReportsOpenFailure(t *testing.T) {
 }
 
 type fakeToolBrowser struct {
+	hoverInput  browser.HoverInput
 	keyInput    browser.KeyInput
 	waitInput   browser.WaitInput
 	actionError error
@@ -475,5 +476,31 @@ func TestBuiltinBrowserFrameAndPopupTargets(t *testing.T) {
 	failed := runner.Call(context.Background(), Call{SessionID: "session", Name: BrowserClose, Args: json.RawMessage(`{"tabID":"tab","windowID":"popup"}`)})
 	if failed.Ok {
 		t.Fatalf("failed popup close reported success: %+v", failed)
+	}
+}
+
+func (f *fakeToolBrowser) Hover(_ context.Context, sessionID, tabID string, in browser.HoverInput) (browser.ActionResult, error) {
+	f.hoverInput = in
+	return browser.ActionResult{Tab: browser.TabSnapshot{ID: tabID, SessionID: sessionID}, Action: "hover"}, f.actionError
+}
+
+func TestBuiltinBrowserHoverAndNewTargets(t *testing.T) {
+	fake := &fakeToolBrowser{}
+	runner := NewBuiltinRunner(WithBrowser(fake))
+	res := runner.Call(context.Background(), Call{SessionID: "session", Name: BrowserHover, Args: json.RawMessage(`{"tabID":"tab","frameID":"frame","windowID":"popup","selector":"#menu"}`)})
+	if !res.Ok || fake.hoverInput.FrameID != "frame" || fake.hoverInput.WindowID != "popup" || fake.hoverInput.Selector != "#menu" {
+		t.Fatalf("hover target lost: %+v %+v", res, fake.hoverInput)
+	}
+	for _, condition := range []string{"newTab", "newWindow"} {
+		args, _ := json.Marshal(map[string]any{"tabID": "tab", "condition": condition, "knownIDs": []string{}})
+		waited := runner.Call(context.Background(), Call{SessionID: "session", Name: BrowserWait, Args: args})
+		if !waited.Ok || fake.waitInput.KnownIDs == nil || len(*fake.waitInput.KnownIDs) != 0 || fake.waitInput.Condition != condition {
+			t.Fatalf("empty baseline lost: %+v %+v", waited, fake.waitInput)
+		}
+	}
+	fake.actionError = context.Canceled
+	cancelled := runner.Call(context.Background(), Call{SessionID: "session", Name: BrowserHover, Args: json.RawMessage(`{"tabID":"tab","selector":"#menu"}`)})
+	if cancelled.Ok || !strings.Contains(cancelled.Content, "browser_operation_cancelled") {
+		t.Fatalf("hover cancellation lost: %+v", cancelled)
 	}
 }

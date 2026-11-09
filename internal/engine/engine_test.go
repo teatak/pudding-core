@@ -5285,3 +5285,7 @@ func (f *engineTestBrowser) Wait(context.Context, string, string, browser.WaitIn
 }
 
 func (b *engineTestBrowser) CloseWindow(context.Context, string, string, string) error { return nil }
+
+func (f *engineTestBrowser) Hover(context.Context, string, string, browser.HoverInput) (browser.ActionResult, error) {
+	return browser.ActionResult{}, nil
+}

@@ -282,7 +282,7 @@ SVG 几何查询仍不在此工具契约中。
 页面条件，不推断服务器是否已完成业务操作。
 
 浏览器跨域 iframe 与弹窗：先 observe 获取 `frames` 与 `windows`，再在每次观察、
-点击、输入、选择、滚动、键盘及等待调用中明确携带 `frameID` / `windowID`。
+点击、悬停、输入、选择、滚动、键盘及等待调用中明确携带 `frameID` / `windowID`。
 省略表示主文档／主标签页，不维护隐式“当前 frame”。frame 的坐标和 observationID
 只对应该 frame 的视口；截图仍是整个窗口视口，截图坐标点击不要带 frameID。
 跨域和独立进程 iframe 使用 Electron 原生 frame 执行环境；点击逐层检查父框架的
@@ -291,3 +291,18 @@ SVG 几何查询仍不在此工具契约中。
 `builtin_browser_close` 指定 windowID 只关闭弹窗；弹窗保留 opener 通信，不保存为
 可恢复标签页，所属 tab/session 关闭时清理。这里的弹窗是网页 `window.open` 窗口，
 不包含系统文件选择器及 JavaScript alert/confirm/prompt 对话框。
+
+`builtin_browser_hover` 支持 ref、唯一 CSS 或携带 observationID 的视口坐标，
+只移动指针，不发送鼠标按下/释放；可以悬停禁用控件查看提示。复用 frame 坐标转换、
+遮挡检查、取消和焦点恢复。悬停可能触发网页事件，已发送后的取消仍报告结果不明；
+菜单是否出现须另外 observe 或 wait 验证。
+
+等待跨 iframe 导航时，CSS/text/URL 条件每次重新取得同一个原生 FrameTreeNode 的
+执行环境，包括渲染进程切换，成功返回当前 frameID。旧 ref 仍失败；移除旧 iframe
+并创建同 URL 的新 iframe 不会被当成同一个目标。此重定位只用于只读等待，不重放动作。
+
+等待新目标使用 `condition: newTab | newWindow`，必须传入触发动作前观察到的
+`knownIDs`（没有则传 `[]`），避免漏掉在 wait 调用前已经打开的页面。newTab 等待指定
+tab 打开的受管标签页；newWindow 等待该 tab 所属的原生弹窗。可用 windowID 限定
+某个弹窗打开的子目标，url 可选且精确匹配。结果返回 `targets[]` 全部命中，调用方
+明确选择对应 tabID/windowID 后再操作；不会切换隐式当前页面。超时及取消不重试触发动作。

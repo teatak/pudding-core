@@ -35,6 +35,7 @@ type Service interface {
 	Select(ctx context.Context, sessionID, tabID string, in SelectInput) (ActionResult, error)
 	Type(ctx context.Context, sessionID, tabID string, in TypeInput) (ActionResult, error)
 	Scroll(ctx context.Context, sessionID, tabID string, in ScrollInput) (ActionResult, error)
+	Hover(ctx context.Context, sessionID, tabID string, in HoverInput) (ActionResult, error)
 	PressKey(ctx context.Context, sessionID, tabID string, in KeyInput) (ActionResult, error)
 	Wait(ctx context.Context, sessionID, tabID string, in WaitInput) (ActionResult, error)
 	Close() error
@@ -245,13 +246,24 @@ type KeyInput struct {
 	Modifiers []string `json:"modifiers,omitempty"`
 }
 
+type HoverInput struct {
+	FrameID       string   `json:"frameID,omitempty"`
+	WindowID      string   `json:"windowID,omitempty"`
+	TabID         string   `json:"tabID,omitempty"`
+	Selector      string   `json:"selector,omitempty"`
+	ObservationID string   `json:"observationID,omitempty"`
+	X             *float64 `json:"x,omitempty"`
+	Y             *float64 `json:"y,omitempty"`
+}
+
 type WaitInput struct {
-	FrameID   string `json:"frameID,omitempty"`
-	WindowID  string `json:"windowID,omitempty"`
-	TabID     string `json:"tabID,omitempty"`
-	Condition string `json:"condition"`
-	Selector  string `json:"selector,omitempty"`
-	Text      string `json:"text,omitempty"`
-	URL       string `json:"url,omitempty"`
-	TimeoutMS *int   `json:"timeoutMs,omitempty"`
+	KnownIDs  *[]string `json:"knownIDs,omitempty"`
+	FrameID   string    `json:"frameID,omitempty"`
+	WindowID  string    `json:"windowID,omitempty"`
+	TabID     string    `json:"tabID,omitempty"`
+	Condition string    `json:"condition"`
+	Selector  string    `json:"selector,omitempty"`
+	Text      string    `json:"text,omitempty"`
+	URL       string    `json:"url,omitempty"`
+	TimeoutMS *int      `json:"timeoutMs,omitempty"`
 }

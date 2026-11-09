@@ -518,6 +518,26 @@ func (s *ElectronBridgeService) Close() error {
 	return nil
 }
 
+func (s *ElectronBridgeService) Hover(ctx context.Context, sessionID, tabID string, in HoverInput) (ActionResult, error) {
+	if tabID == "" {
+		tabID = in.TabID
+	}
+	tabID, err := s.resolveTabID(ctx, sessionID, tabID, false)
+	if err != nil {
+		return ActionResult{}, err
+	}
+	in.TabID = tabID
+	var out electronBridgeActionResponse
+	request := struct {
+		SessionID string `json:"sessionID"`
+		HoverInput
+	}{sessionID, in}
+	if err := s.post(ctx, "/browser/tabs/hover", request, &out); err != nil {
+		return ActionResult{}, err
+	}
+	return out.result("hover"), nil
+}
+
 func (s *ElectronBridgeService) PressKey(ctx context.Context, sessionID, tabID string, in KeyInput) (ActionResult, error) {
 	if tabID == "" {
 		tabID = in.TabID
