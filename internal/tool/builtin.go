@@ -74,6 +74,8 @@ const (
 	BrowserSelect     = "builtin_browser_select"
 	BrowserType       = "builtin_browser_type"
 	BrowserScroll     = "builtin_browser_scroll"
+	BrowserPressKey   = "builtin_browser_press_key"
+	BrowserWait       = "builtin_browser_wait"
 	ComputerListApps  = "builtin_computer_list_apps"
 	ComputerUseApp    = "builtin_computer_use_app"
 	ComputerQuitApp   = "builtin_computer_quit_app"
@@ -614,14 +616,14 @@ func builtinRunnerDefinitions() []provider.ToolDef {
 		},
 		{
 			Name:        BrowserObserve,
-			Description: "Observe a managed browser tab: title, URL, page text, interactive elements (viewport intersections first, then offscreen controls), CSS bounds, stable element refs, and scroll containers. Same-origin frames and open shadow roots are included; unavailableFrames lists embedded documents that could not be read. Follow nextOffset with offset to find missing targets; nextOffset=null ends the list. Restart at offset=0 after scrolling or page changes.",
-			InputSchema: json.RawMessage(`{"type":"object","properties":{"tabID":{"type":"string","description":"Tab ID. Required when more than one tab exists."},"maxTextChars":{"type":"integer","description":"Optional max page text characters, default 6000, cap 20000."},"maxElements":{"type":"integer","description":"Optional max interactive elements per page, default 30, cap 100."},"offset":{"type":"integer","minimum":0,"description":"Element offset from the previous nextOffset, default 0. Continue paging before falling back to screenshot coordinates."}},"additionalProperties":false}`),
+			Description: "Observe a managed browser tab: title, URL, page text, interactive elements (viewport intersections first, then offscreen controls), CSS bounds, stable element refs, and scroll containers. Returns frames and popup windows for explicit targeting, including cross-origin iframes. Pass frameID/windowID on subsequent observe and action calls. Bounds are relative to the selected frame viewport. Same-origin descendants and open shadow roots are included; unavailableFrames refers to embedded documents needing their own frameID. Follow nextOffset with offset to find missing targets; nextOffset=null ends the list. Restart at offset=0 after scrolling or page changes.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"windowID":{"type":"string","description":"Optional popup ID from observe.windows; omit for the main tab."},"frameID":{"type":"string","description":"Optional frame ID from observe.frames. Omit for the top document. Element refs and coordinates belong to the selected frame."},"tabID":{"type":"string","description":"Tab ID. Required when more than one tab exists."},"maxTextChars":{"type":"integer","description":"Optional max page text characters, default 6000, cap 20000."},"maxElements":{"type":"integer","description":"Optional max interactive elements per page, default 30, cap 100."},"offset":{"type":"integer","minimum":0,"description":"Element offset from the previous nextOffset, default 0. Continue paging before falling back to screenshot coordinates."}},"additionalProperties":false}`),
 			Capability:  store.ModeWork,
 		},
 		{
 			Name:        BrowserScreenshot,
 			Description: "Capture only the current viewport of a managed browser tab and route a resized image to the model (long edge at most 1536 pixels, at most 1.2 megapixels). The original is preserved as an attachment. Older screenshots are omitted in batches; use builtin_media_read with source=attachment, attachmentKey and purpose=observation to inspect one again at higher resolution. Use purpose=reference instead when the saved image is needed for ongoing comparison. For more page content, scroll and capture again. Full-page screenshots are not supported.",
-			InputSchema: json.RawMessage(`{"type":"object","properties":{"tabID":{"type":"string","description":"Tab ID. Required when more than one tab exists."}},"additionalProperties":false}`),
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"windowID":{"type":"string","description":"Optional popup ID from observe.windows; omit for the main tab."},"tabID":{"type":"string","description":"Tab ID. Required when more than one tab exists."}},"additionalProperties":false}`),
 			Capability:  store.ModeWork,
 		},
 		{
@@ -644,32 +646,44 @@ func builtinRunnerDefinitions() []provider.ToolDef {
 		},
 		{
 			Name:        BrowserClose,
-			Description: "Close one managed browser tab by tabID, or close all tabs in the current session when tabID is omitted.",
-			InputSchema: json.RawMessage(`{"type":"object","properties":{"tabID":{"type":"string","description":"Optional tab ID to close. Omit to close all tabs in the session."}},"additionalProperties":false}`),
+			Description: "Close a popup by windowID and its owning tabID; otherwise close one tab by tabID, or all session tabs when both IDs are omitted.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"windowID":{"type":"string","description":"Optional popup ID from observe.windows; omit for the main tab."},"tabID":{"type":"string","description":"Optional tab ID to close. Omit to close all tabs in the session."}},"additionalProperties":false}`),
 			Capability:  store.ModeWork,
 		},
 		{
 			Name:        BrowserClick,
 			Description: "Click an element using focus-preserving CDP target activation. Prefer an observed element ref; screenshot coordinates are a last resort and require observationID from the same observe/screenshot. Stale coordinates fail after page or viewport changes; observe again instead of retrying the old coordinates. Prefer the element ref from observe as selector; references reject removed or repurposed nodes. CSS selectors must match exactly one element. Screenshot pixels may be scaled: use screenshot captureBounds and modelWidth/modelHeight to map image points to viewport coordinates. Success confirms input delivery; observe afterward to verify the intended effect.",
-			InputSchema: json.RawMessage(`{"type":"object","properties":{"tabID":{"type":"string","description":"Tab ID. Required when more than one tab exists."},"selector":{"type":"string","description":"Element ref from observe (preferred), or a unique CSS selector."},"x":{"type":"number","description":"Viewport X coordinate, used when selector is omitted."},"y":{"type":"number","description":"Viewport Y coordinate, used when selector is omitted."},"observationID":{"type":"string","description":"Required with x/y: ID from the observation or screenshot used to derive those coordinates."},"method":{"type":"string","enum":["auto","pointer"],"description":"Click implementation. Both values use focus-preserving target activation through CDP; auto is the default."}},"additionalProperties":false}`),
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"windowID":{"type":"string","description":"Optional popup ID from observe.windows; omit for the main tab."},"frameID":{"type":"string","description":"Optional frame ID from observe.frames. Omit for the top document. Element refs and coordinates belong to the selected frame."},"tabID":{"type":"string","description":"Tab ID. Required when more than one tab exists."},"selector":{"type":"string","description":"Element ref from observe (preferred), or a unique CSS selector."},"x":{"type":"number","description":"Viewport X coordinate, used when selector is omitted."},"y":{"type":"number","description":"Viewport Y coordinate, used when selector is omitted."},"observationID":{"type":"string","description":"Required with x/y: ID from the observation or screenshot used to derive those coordinates."},"method":{"type":"string","enum":["auto","pointer"],"description":"Click implementation. Both values use focus-preserving target activation through CDP; auto is the default."}},"additionalProperties":false}`),
 			Capability:  store.ModeWork,
 		},
 		{
 			Name:        BrowserType,
 			Description: "Type into an input, textarea, or contenteditable using its observed ref. For setting a form value use clear=true and commit=true: dispatch input and change, blur, and read back the value. Date/time inputs require their canonical HTML value format (datetime-local: YYYY-MM-DDTHH:mm, no timezone). An empty text with clear=true clears the input. Custom combobox text is not a selected option: observe and click the option ref. Success verifies the local value, not submission or business outcome.",
-			InputSchema: json.RawMessage(`{"type":"object","properties":{"tabID":{"type":"string","description":"Tab ID. Required when more than one tab exists."},"selector":{"type":"string","description":"Element ref from observe (preferred), or a unique CSS selector for an editable element. If omitted, uses the active element focused by a prior click."},"text":{"type":"string","description":"Text to type."},"clear":{"type":"boolean","description":"Replace existing text before typing."},"commit":{"type":"boolean","description":"Dispatch change and blur after input, then verify the value. Does not submit the form; default false."}},"required":["text"],"additionalProperties":false}`),
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"windowID":{"type":"string","description":"Optional popup ID from observe.windows; omit for the main tab."},"frameID":{"type":"string","description":"Optional frame ID from observe.frames. Omit for the top document. Element refs and coordinates belong to the selected frame."},"tabID":{"type":"string","description":"Tab ID. Required when more than one tab exists."},"selector":{"type":"string","description":"Element ref from observe (preferred), or a unique CSS selector for an editable element. If omitted, uses the active element focused by a prior click."},"text":{"type":"string","description":"Text to type."},"clear":{"type":"boolean","description":"Replace existing text before typing."},"commit":{"type":"boolean","description":"Dispatch change and blur after input, then verify the value. Does not submit the form; default false."}},"required":["text"],"additionalProperties":false}`),
 			Capability:  store.ModeWork,
 		},
 		{
 			Name:        BrowserSelect,
 			Description: "Select one option in a native single-select using an observed element ref (preferred) or unique CSS selector. Supply exactly one of label (exact displayed text) or value. Dispatches input/change and verifies the selected label/value; ambiguous, absent or disabled options fail. For custom comboboxes, use observe to locate and click an option ref instead. Success confirms the local selection, not business outcome; verify the intended effect afterward.",
-			InputSchema: json.RawMessage(`{"type":"object","properties":{"tabID":{"type":"string"},"selector":{"type":"string","minLength":1},"label":{"type":"string"},"value":{"type":"string"}},"required":["selector"],"additionalProperties":false}`),
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"windowID":{"type":"string","description":"Optional popup ID from observe.windows; omit for the main tab."},"frameID":{"type":"string","description":"Optional frame ID from observe.frames. Omit for the top document. Element refs and coordinates belong to the selected frame."},"tabID":{"type":"string"},"selector":{"type":"string","minLength":1},"label":{"type":"string"},"value":{"type":"string"}},"required":["selector"],"additionalProperties":false}`),
 			Capability:  store.ModeWork,
 		},
 		{
 			Name:        BrowserScroll,
 			Description: "Scroll a managed browser tab. Without selector, scroll the container under the viewport center, chaining to an ancestor when at its boundary. Use a scrollContainers selector from observe to choose another region. Result moved reports whether scrolling changed the target position; moved=false can mean the boundary was reached.",
-			InputSchema: json.RawMessage(`{"type":"object","properties":{"tabID":{"type":"string","description":"Tab ID. Required when more than one tab exists."},"selector":{"type":"string","description":"Optional scrollContainers selector from observe, or unique CSS selector."},"deltaX":{"type":"number","description":"Horizontal scroll delta in pixels."},"deltaY":{"type":"number","description":"Vertical scroll delta in pixels. Defaults to 600 when both deltas are omitted."}},"additionalProperties":false}`),
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"windowID":{"type":"string","description":"Optional popup ID from observe.windows; omit for the main tab."},"frameID":{"type":"string","description":"Optional frame ID from observe.frames. Omit for the top document. Element refs and coordinates belong to the selected frame."},"tabID":{"type":"string","description":"Tab ID. Required when more than one tab exists."},"selector":{"type":"string","description":"Optional scrollContainers selector from observe, or unique CSS selector."},"deltaX":{"type":"number","description":"Horizontal scroll delta in pixels."},"deltaY":{"type":"number","description":"Vertical scroll delta in pixels. Defaults to 600 when both deltas are omitted."}},"additionalProperties":false}`),
+			Capability:  store.ModeWork,
+		},
+		{
+			Name:        BrowserPressKey,
+			Description: "Press and release a real browser key, optionally focusing an observed ref or unique CSS selector first. Supports Enter, Tab, Escape, Backspace, Delete, Space, ArrowLeft/Up/Right/Down, Home, End, PageUp/Down, ASCII letters and digits. Modifiers: Alt, Control, Meta, Shift, ControlOrMeta (Command on macOS, Control elsewhere). Use for form submission, focus traversal and shortcuts. Success confirms delivery, not the business result; use builtin_browser_wait afterward. Do not replay after cancellation or uncertain delivery.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"windowID":{"type":"string","description":"Optional popup ID from observe.windows; omit for the main tab."},"frameID":{"type":"string","description":"Optional frame ID from observe.frames. Omit for the top document. Element refs and coordinates belong to the selected frame."},"tabID":{"type":"string"},"selector":{"type":"string","description":"Optional observed ref or unique CSS selector to focus; otherwise keeps current page focus."},"key":{"type":"string","minLength":1},"modifiers":{"type":"array","items":{"type":"string","enum":["Alt","Control","Meta","Shift","ControlOrMeta"]},"uniqueItems":true}},"required":["key"],"additionalProperties":false}`),
+			Capability:  store.ModeWork,
+		},
+		{
+			Name:        BrowserWait,
+			Description: "Wait for one observable page result without sending input: visible/hidden requires selector; text/textAbsent requires text and accepts an optional selector; url requires the exact destination URL; urlChanged requires the previous URL. Text matching is a case-sensitive substring of rendered text. Prefer CSS for elements that may be created/replaced; old refs expire. Default timeout 5000ms, maximum 15000ms. Returns matched=true only after the condition holds; timeout and cancellation fail without replaying the previous action. A match proves this condition only, not server-side success.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"windowID":{"type":"string","description":"Optional popup ID from observe.windows; omit for the main tab."},"frameID":{"type":"string","description":"Optional frame ID from observe.frames. Omit for the top document. Element refs and coordinates belong to the selected frame."},"tabID":{"type":"string"},"condition":{"type":"string","enum":["visible","hidden","text","textAbsent","url","urlChanged"]},"selector":{"type":"string","minLength":1},"text":{"type":"string","minLength":1},"url":{"type":"string","minLength":1},"timeoutMs":{"type":"integer","minimum":1,"maximum":15000}},"required":["condition"],"additionalProperties":false}`),
 			Capability:  store.ModeWork,
 		},
 		{
@@ -849,6 +863,10 @@ func (r *BuiltinRunner) Call(ctx context.Context, call Call) (result Result) {
 		return r.browserType(ctx, call)
 	case BrowserScroll:
 		return r.browserScroll(ctx, call)
+	case BrowserPressKey:
+		return r.browserPressKey(ctx, call)
+	case BrowserWait:
+		return r.browserWait(ctx, call)
 	case ComputerListApps:
 		return r.computerListApps(ctx, call)
 	case ComputerUseApp:

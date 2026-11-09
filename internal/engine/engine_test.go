@@ -4675,7 +4675,7 @@ func (b *engineTestBrowser) Observe(_ context.Context, sessionID, tabID string, 
 	}, nil
 }
 
-func (b *engineTestBrowser) Screenshot(context.Context, string, string) (browser.ScreenshotResult, error) {
+func (b *engineTestBrowser) Screenshot(context.Context, string, string, browser.ScreenshotOptions) (browser.ScreenshotResult, error) {
 	return browser.ScreenshotResult{}, nil
 }
 
@@ -5275,3 +5275,13 @@ func TestSessionsAreIsolated(t *testing.T) {
 func (f *engineTestBrowser) Select(context.Context, string, string, browser.SelectInput) (browser.ActionResult, error) {
 	return browser.ActionResult{Action: "select"}, nil
 }
+
+func (f *engineTestBrowser) PressKey(context.Context, string, string, browser.KeyInput) (browser.ActionResult, error) {
+	return browser.ActionResult{Action: "press-key"}, nil
+}
+
+func (f *engineTestBrowser) Wait(context.Context, string, string, browser.WaitInput) (browser.ActionResult, error) {
+	return browser.ActionResult{Action: "wait"}, nil
+}
+
+func (b *engineTestBrowser) CloseWindow(context.Context, string, string, string) error { return nil }

@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestElectronBridgeServiceOpenListAndRelease(t *testing.T) {
@@ -409,7 +410,7 @@ func TestElectronBridgeServiceToolEndpoints(t *testing.T) {
 	if got, err := service.Observe(context.Background(), "sess_a", "tab_a", ObserveOptions{MaxTextChars: 123, MaxElements: 4, Offset: 100}); err != nil || got.Text != "hello" || len(got.UnavailableFrames) != 1 || got.UnavailableFrames[0] != "https://frame.example.com" || len(got.Elements) != 1 || got.Viewport.ScrollY != 120 || got.Viewport.DevicePixelRatio != 2 || got.Elements[0].Ref != "pudding-ref:test:1" || got.Elements[0].Bounds.X != 30 || got.TotalElements != 125 || got.NextOffset == nil || *got.NextOffset != 104 {
 		t.Fatalf("unexpected observe result: got=%+v err=%v", got, err)
 	}
-	if got, err := service.Screenshot(context.Background(), "sess_a", "tab_a"); err != nil || got.MIME != "image/png" || got.Width != 1 || got.CaptureBounds.Y != 0 {
+	if got, err := service.Screenshot(context.Background(), "sess_a", "tab_a", ScreenshotOptions{}); err != nil || got.MIME != "image/png" || got.Width != 1 || got.CaptureBounds.Y != 0 {
 		t.Fatalf("unexpected screenshot result: got=%+v err=%v", got, err)
 	}
 	if got, err := service.Click(context.Background(), "sess_a", "tab_a", ClickInput{Selector: "#go", Method: "pointer"}); err != nil || got.Action != "click" {
@@ -502,5 +503,171 @@ func TestElectronBridgeFormActionsPreserveInputsAndObservation(t *testing.T) {
 	shot := (electronBridgeScreenshotResponse{ObservationID: "captured"}).result()
 	if observed.ObservationID != "observed" || observed.CoordinateSpace != "viewport_css_pixels" || shot.ObservationID != "captured" {
 		t.Fatal("lost observation metadata")
+	}
+}
+
+func TestElectronBridgeKeyboardAndWaitContracts(t *testing.T) {
+	var paths []string
+	var bodies []map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Error(err)
+			w.WriteHeader(400)
+			return
+		}
+		paths = append(paths, r.URL.Path)
+		bodies = append(bodies, body)
+		if r.URL.Path == "/browser/tabs/wait" && body["text"] == "missing" {
+			w.WriteHeader(http.StatusRequestTimeout)
+			writeElectronBridgeTestJSON(w, map[string]any{"error": "browser wait timed out: text", "code": "browser_wait_timeout", "retryable": false})
+			return
+		}
+		writeElectronBridgeTestJSON(w, electronBridgeActionResponse{Result: map[string]any{"matched": true, "delivered": true}})
+	}))
+	defer server.Close()
+	service, err := NewElectronBridgeService(ElectronBridgeConfig{URL: server.URL, Token: "token"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	key, err := service.PressKey(context.Background(), "session", "", KeyInput{TabID: "tab", Selector: "#input", Key: "Tab", Modifiers: []string{"Shift"}})
+	if err != nil || key.Action != "press-key" {
+		t.Fatalf("key action: %+v %v", key, err)
+	}
+	timeoutMS := 750
+	wait, err := service.Wait(context.Background(), "session", "tab", WaitInput{Condition: "text", Selector: "#result", Text: "Saved", TimeoutMS: &timeoutMS})
+	if err != nil || wait.Action != "wait" || wait.Result["matched"] != true {
+		t.Fatalf("wait action: %+v %v", wait, err)
+	}
+	if paths[0] != "/browser/tabs/press-key" || paths[1] != "/browser/tabs/wait" || bodies[0]["sessionID"] != "session" || bodies[0]["tabID"] != "tab" || bodies[0]["key"] != "Tab" || bodies[0]["modifiers"].([]any)[0] != "Shift" || bodies[1]["timeoutMs"] != float64(750) || bodies[1]["text"] != "Saved" {
+		t.Fatalf("lost wire fields: %v %+v", paths, bodies)
+	}
+	_, err = service.Wait(context.Background(), "session", "tab", WaitInput{Condition: "text", Text: "missing"})
+	if ErrorCode(err) != "browser_wait_timeout" {
+		t.Fatalf("lost timeout classification: %v", err)
+	}
+}
+
+func TestElectronBridgeCancellationReachesHost(t *testing.T) {
+	received := make(chan struct{})
+	disconnected := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Error(err)
+			return
+		}
+		close(received)
+		select {
+		case <-r.Context().Done():
+			close(disconnected)
+		case <-time.After(3 * time.Second):
+			t.Error("bridge request was not cancelled")
+		}
+	}))
+	defer server.Close()
+	service, err := NewElectronBridgeService(ElectronBridgeConfig{URL: server.URL, Token: "token"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	result := make(chan error, 1)
+	go func() { _, err := service.PressKey(ctx, "session", "tab", KeyInput{Key: "Enter"}); result <- err }()
+	select {
+	case <-received:
+	case <-time.After(3 * time.Second):
+		t.Fatal("request did not reach host")
+	}
+	cancel()
+	if err := <-result; !errors.Is(err, context.Canceled) {
+		t.Fatalf("lost cancellation: %v", err)
+	}
+	select {
+	case <-disconnected:
+	case <-time.After(3 * time.Second):
+		t.Fatal("server did not see disconnect")
+	}
+}
+
+func TestElectronBridgeFrameAndPopupTargets(t *testing.T) {
+	var requests []map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Error(err)
+			return
+		}
+		request["path"] = r.URL.Path
+		requests = append(requests, request)
+		writeElectronBridgeTestJSON(w, map[string]any{
+			"tab":     electronBridgeSnapshot{SessionID: "session", TabID: "tab"},
+			"frameID": "frame", "windowID": "popup", "coordinateSpace": "frame_viewport_css_pixels",
+			"frames":  []FrameInfo{{FrameID: "frame", URL: "https://cross.example", Main: false}},
+			"windows": []WindowInfo{{WindowID: "popup", URL: "https://popup.example"}},
+			"result":  map[string]any{"matched": true},
+		})
+	}))
+	defer server.Close()
+	service, err := NewElectronBridgeService(ElectronBridgeConfig{URL: server.URL, Token: "test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	observed, err := service.Observe(ctx, "session", "tab", ObserveOptions{FrameID: "frame", WindowID: "popup"})
+	if err != nil || observed.FrameID != "frame" || observed.WindowID != "popup" || len(observed.Frames) != 1 || len(observed.Windows) != 1 || observed.CoordinateSpace != "frame_viewport_css_pixels" {
+		t.Fatalf("target metadata lost: %+v %v", observed, err)
+	}
+	actions := []func() error{
+		func() error {
+			_, e := service.Click(ctx, "session", "tab", ClickInput{FrameID: "frame", WindowID: "popup", Selector: "#go"})
+			return e
+		},
+		func() error {
+			_, e := service.Type(ctx, "session", "tab", TypeInput{FrameID: "frame", WindowID: "popup", Selector: "#q", Text: "hello"})
+			return e
+		},
+		func() error {
+			value := "yes"
+			_, e := service.Select(ctx, "session", "tab", SelectInput{FrameID: "frame", WindowID: "popup", Selector: "select", Value: &value})
+			return e
+		},
+		func() error {
+			_, e := service.Scroll(ctx, "session", "tab", ScrollInput{FrameID: "frame", WindowID: "popup", DeltaY: 50})
+			return e
+		},
+		func() error {
+			_, e := service.PressKey(ctx, "session", "tab", KeyInput{FrameID: "frame", WindowID: "popup", Key: "Enter"})
+			return e
+		},
+		func() error {
+			_, e := service.Wait(ctx, "session", "tab", WaitInput{FrameID: "frame", WindowID: "popup", Condition: "text", Text: "done"})
+			return e
+		},
+	}
+	for _, action := range actions {
+		if err := action(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, request := range requests {
+		if request["frameID"] != "frame" || request["windowID"] != "popup" || request["sessionID"] != "session" || request["tabID"] != "tab" {
+			t.Fatalf("target lost: %+v", request)
+		}
+	}
+	shot, err := service.Screenshot(ctx, "session", "tab", ScreenshotOptions{WindowID: "popup"})
+	if err != nil || shot.WindowID != "popup" {
+		t.Fatalf("screenshot target lost: %+v %v", shot, err)
+	}
+	if err := service.CloseWindow(ctx, "session", "tab", "popup"); err != nil {
+		t.Fatal(err)
+	}
+	for _, request := range requests[len(requests)-2:] {
+		if request["windowID"] != "popup" || request["frameID"] != nil {
+			t.Fatalf("unexpected window target: %+v", request)
+		}
+	}
+	if err := service.CloseWindow(ctx, "session", "tab", ""); err == nil {
+		t.Fatal("missing popup id must not close the parent")
 	}
 }

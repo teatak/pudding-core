@@ -23,17 +23,20 @@ type Service interface {
 	Recover(ctx context.Context, sessionID string, hint RecoverHint) (TabSnapshot, error)
 	CloseSessionBrowser(ctx context.Context, sessionID string) error
 	ReleaseTab(ctx context.Context, sessionID, tabID string) error
+	CloseWindow(ctx context.Context, sessionID, tabID, windowID string) error
 	ReleaseSession(ctx context.Context, sessionID string) error
 	Open(ctx context.Context, sessionID, tabID, rawURL string) (TabSnapshot, error)
 	Back(ctx context.Context, sessionID, tabID string) (TabSnapshot, error)
 	Forward(ctx context.Context, sessionID, tabID string) (TabSnapshot, error)
 	Reload(ctx context.Context, sessionID, tabID string) (TabSnapshot, error)
 	Observe(ctx context.Context, sessionID, tabID string, opts ObserveOptions) (ObserveResult, error)
-	Screenshot(ctx context.Context, sessionID, tabID string) (ScreenshotResult, error)
+	Screenshot(ctx context.Context, sessionID, tabID string, opts ScreenshotOptions) (ScreenshotResult, error)
 	Click(ctx context.Context, sessionID, tabID string, in ClickInput) (ActionResult, error)
 	Select(ctx context.Context, sessionID, tabID string, in SelectInput) (ActionResult, error)
 	Type(ctx context.Context, sessionID, tabID string, in TypeInput) (ActionResult, error)
 	Scroll(ctx context.Context, sessionID, tabID string, in ScrollInput) (ActionResult, error)
+	PressKey(ctx context.Context, sessionID, tabID string, in KeyInput) (ActionResult, error)
+	Wait(ctx context.Context, sessionID, tabID string, in WaitInput) (ActionResult, error)
 	Close() error
 }
 
@@ -72,12 +75,38 @@ type RecoverHint struct {
 }
 
 type ObserveOptions struct {
+	FrameID      string `json:"frameID,omitempty"`
+	WindowID     string `json:"windowID,omitempty"`
 	MaxTextChars int
 	MaxElements  int
 	Offset       int
 }
 
+type FrameInfo struct {
+	FrameID       string `json:"frameID"`
+	ParentFrameID string `json:"parentFrameID"`
+	URL           string `json:"url"`
+	Name          string `json:"name"`
+	Main          bool   `json:"main"`
+}
+
+type WindowInfo struct {
+	WindowID       string `json:"windowID"`
+	ParentWindowID string `json:"parentWindowID"`
+	URL            string `json:"url"`
+	Title          string `json:"title"`
+	Focused        bool   `json:"focused"`
+}
+
+type ScreenshotOptions struct {
+	WindowID string `json:"windowID,omitempty"`
+}
+
 type ObserveResult struct {
+	FrameID           string            `json:"frameID,omitempty"`
+	WindowID          string            `json:"windowID,omitempty"`
+	Frames            []FrameInfo       `json:"frames"`
+	Windows           []WindowInfo      `json:"windows"`
 	ObservationID     string            `json:"observationID"`
 	CoordinateSpace   string            `json:"coordinateSpace"`
 	Tab               TabSnapshot       `json:"tab"`
@@ -147,6 +176,7 @@ type ObservedElement struct {
 }
 
 type ScreenshotResult struct {
+	WindowID          string      `json:"windowID,omitempty"`
 	ObservationID     string      `json:"observationID"`
 	Tab               TabSnapshot `json:"tab"`
 	MIME              string      `json:"mime"`
@@ -162,6 +192,8 @@ type ScreenshotResult struct {
 }
 
 type ClickInput struct {
+	FrameID       string   `json:"frameID,omitempty"`
+	WindowID      string   `json:"windowID,omitempty"`
 	ObservationID string   `json:"observationID,omitempty"`
 	TabID         string   `json:"tabID,omitempty"`
 	Selector      string   `json:"selector,omitempty"`
@@ -171,6 +203,8 @@ type ClickInput struct {
 }
 
 type TypeInput struct {
+	FrameID  string `json:"frameID,omitempty"`
+	WindowID string `json:"windowID,omitempty"`
 	Commit   bool   `json:"commit,omitempty"`
 	TabID    string `json:"tabID,omitempty"`
 	Selector string `json:"selector,omitempty"`
@@ -179,6 +213,8 @@ type TypeInput struct {
 }
 
 type SelectInput struct {
+	FrameID  string  `json:"frameID,omitempty"`
+	WindowID string  `json:"windowID,omitempty"`
 	TabID    string  `json:"tabID,omitempty"`
 	Selector string  `json:"selector"`
 	Label    *string `json:"label,omitempty"`
@@ -186,6 +222,8 @@ type SelectInput struct {
 }
 
 type ScrollInput struct {
+	FrameID  string  `json:"frameID,omitempty"`
+	WindowID string  `json:"windowID,omitempty"`
 	TabID    string  `json:"tabID,omitempty"`
 	Selector string  `json:"selector,omitempty"`
 	DeltaX   float64 `json:"deltaX,omitempty"`
@@ -196,4 +234,24 @@ type ActionResult struct {
 	Tab    TabSnapshot    `json:"tab"`
 	Action string         `json:"action"`
 	Result map[string]any `json:"result"`
+}
+
+type KeyInput struct {
+	FrameID   string   `json:"frameID,omitempty"`
+	WindowID  string   `json:"windowID,omitempty"`
+	TabID     string   `json:"tabID,omitempty"`
+	Selector  string   `json:"selector,omitempty"`
+	Key       string   `json:"key"`
+	Modifiers []string `json:"modifiers,omitempty"`
+}
+
+type WaitInput struct {
+	FrameID   string `json:"frameID,omitempty"`
+	WindowID  string `json:"windowID,omitempty"`
+	TabID     string `json:"tabID,omitempty"`
+	Condition string `json:"condition"`
+	Selector  string `json:"selector,omitempty"`
+	Text      string `json:"text,omitempty"`
+	URL       string `json:"url,omitempty"`
+	TimeoutMS *int   `json:"timeoutMs,omitempty"`
 }

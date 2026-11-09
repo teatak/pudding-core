@@ -40,6 +40,8 @@ type electronBridgeRequest struct {
 }
 
 type electronBridgeObserveRequest struct {
+	FrameID      string `json:"frameID,omitempty"`
+	WindowID     string `json:"windowID,omitempty"`
 	SessionID    string `json:"sessionID"`
 	TabID        string `json:"tabID,omitempty"`
 	MaxTextChars int    `json:"maxTextChars,omitempty"`
@@ -48,11 +50,14 @@ type electronBridgeObserveRequest struct {
 }
 
 type electronBridgeScreenshotRequest struct {
+	WindowID  string `json:"windowID,omitempty"`
 	SessionID string `json:"sessionID"`
 	TabID     string `json:"tabID,omitempty"`
 }
 
 type electronBridgeClickRequest struct {
+	FrameID       string   `json:"frameID,omitempty"`
+	WindowID      string   `json:"windowID,omitempty"`
 	ObservationID string   `json:"observationID,omitempty"`
 	SessionID     string   `json:"sessionID"`
 	TabID         string   `json:"tabID,omitempty"`
@@ -63,6 +68,8 @@ type electronBridgeClickRequest struct {
 }
 
 type electronBridgeTypeRequest struct {
+	FrameID   string `json:"frameID,omitempty"`
+	WindowID  string `json:"windowID,omitempty"`
 	Commit    bool   `json:"commit,omitempty"`
 	SessionID string `json:"sessionID"`
 	TabID     string `json:"tabID,omitempty"`
@@ -72,6 +79,8 @@ type electronBridgeTypeRequest struct {
 }
 
 type electronBridgeScrollRequest struct {
+	FrameID   string  `json:"frameID,omitempty"`
+	WindowID  string  `json:"windowID,omitempty"`
 	SessionID string  `json:"sessionID"`
 	TabID     string  `json:"tabID,omitempty"`
 	Selector  string  `json:"selector,omitempty"`
@@ -143,6 +152,10 @@ func ErrorRetryable(err error) bool {
 }
 
 type electronBridgeObserveResponse struct {
+	FrameID           string                 `json:"frameID,omitempty"`
+	WindowID          string                 `json:"windowID,omitempty"`
+	Frames            []FrameInfo            `json:"frames"`
+	Windows           []WindowInfo           `json:"windows"`
 	ObservationID     string                 `json:"observationID"`
 	CoordinateSpace   string                 `json:"coordinateSpace"`
 	Tab               electronBridgeSnapshot `json:"tab"`
@@ -161,6 +174,7 @@ type electronBridgeObserveResponse struct {
 }
 
 type electronBridgeScreenshotResponse struct {
+	WindowID          string                 `json:"windowID,omitempty"`
 	ObservationID     string                 `json:"observationID"`
 	Tab               electronBridgeSnapshot `json:"tab"`
 	MIME              string                 `json:"mime"`
@@ -374,6 +388,7 @@ func (s *ElectronBridgeService) Observe(ctx context.Context, sessionID, tabID st
 	}
 	var out electronBridgeObserveResponse
 	if err := s.post(ctx, "/browser/tabs/observe", electronBridgeObserveRequest{
+		FrameID: opts.FrameID, WindowID: opts.WindowID,
 		SessionID:    sessionID,
 		TabID:        tabID,
 		MaxTextChars: opts.MaxTextChars,
@@ -385,13 +400,14 @@ func (s *ElectronBridgeService) Observe(ctx context.Context, sessionID, tabID st
 	return out.result(), nil
 }
 
-func (s *ElectronBridgeService) Screenshot(ctx context.Context, sessionID, tabID string) (ScreenshotResult, error) {
+func (s *ElectronBridgeService) Screenshot(ctx context.Context, sessionID, tabID string, opts ScreenshotOptions) (ScreenshotResult, error) {
 	tabID, err := s.resolveTabID(ctx, sessionID, tabID, false)
 	if err != nil {
 		return ScreenshotResult{}, err
 	}
 	var out electronBridgeScreenshotResponse
 	if err := s.post(ctx, "/browser/tabs/screenshot", electronBridgeScreenshotRequest{
+		WindowID:  opts.WindowID,
 		SessionID: sessionID,
 		TabID:     tabID,
 	}, &out); err != nil {
@@ -410,6 +426,7 @@ func (s *ElectronBridgeService) Click(ctx context.Context, sessionID, tabID stri
 	}
 	var out electronBridgeActionResponse
 	if err := s.post(ctx, "/browser/tabs/click", electronBridgeClickRequest{
+		FrameID: in.FrameID, WindowID: in.WindowID,
 		ObservationID: in.ObservationID,
 		SessionID:     sessionID,
 		TabID:         tabID,
@@ -436,6 +453,7 @@ func (s *ElectronBridgeService) Type(ctx context.Context, sessionID, tabID strin
 	}
 	var out electronBridgeActionResponse
 	if err := s.post(ctx, "/browser/tabs/type", electronBridgeTypeRequest{
+		FrameID: in.FrameID, WindowID: in.WindowID,
 		Commit:    in.Commit,
 		SessionID: sessionID,
 		TabID:     tabID,
@@ -484,6 +502,7 @@ func (s *ElectronBridgeService) Scroll(ctx context.Context, sessionID, tabID str
 	}
 	var out electronBridgeActionResponse
 	if err := s.post(ctx, "/browser/tabs/scroll", electronBridgeScrollRequest{
+		FrameID: in.FrameID, WindowID: in.WindowID,
 		SessionID: sessionID,
 		TabID:     tabID,
 		Selector:  in.Selector,
@@ -497,6 +516,46 @@ func (s *ElectronBridgeService) Scroll(ctx context.Context, sessionID, tabID str
 
 func (s *ElectronBridgeService) Close() error {
 	return nil
+}
+
+func (s *ElectronBridgeService) PressKey(ctx context.Context, sessionID, tabID string, in KeyInput) (ActionResult, error) {
+	if tabID == "" {
+		tabID = in.TabID
+	}
+	tabID, err := s.resolveTabID(ctx, sessionID, tabID, false)
+	if err != nil {
+		return ActionResult{}, err
+	}
+	in.TabID = tabID
+	var out electronBridgeActionResponse
+	request := struct {
+		SessionID string `json:"sessionID"`
+		KeyInput
+	}{sessionID, in}
+	if err := s.post(ctx, "/browser/tabs/press-key", request, &out); err != nil {
+		return ActionResult{}, err
+	}
+	return out.result("press-key"), nil
+}
+
+func (s *ElectronBridgeService) Wait(ctx context.Context, sessionID, tabID string, in WaitInput) (ActionResult, error) {
+	if tabID == "" {
+		tabID = in.TabID
+	}
+	tabID, err := s.resolveTabID(ctx, sessionID, tabID, false)
+	if err != nil {
+		return ActionResult{}, err
+	}
+	in.TabID = tabID
+	var out electronBridgeActionResponse
+	request := struct {
+		SessionID string `json:"sessionID"`
+		WaitInput
+	}{sessionID, in}
+	if err := s.post(ctx, "/browser/tabs/wait", request, &out); err != nil {
+		return ActionResult{}, err
+	}
+	return out.result("wait"), nil
 }
 
 func (s *ElectronBridgeService) navigation(ctx context.Context, path, sessionID, tabID string) (TabSnapshot, error) {
@@ -562,7 +621,7 @@ func (s *ElectronBridgeService) post(ctx context.Context, path string, in any, o
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return fmt.Errorf("%w: %v", ErrUnavailable, err)
+		return fmt.Errorf("%w: %w", ErrUnavailable, err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
@@ -648,6 +707,7 @@ func parseElectronBridgeTime(value string, fallback time.Time) time.Time {
 
 func (out electronBridgeObserveResponse) result() ObserveResult {
 	return ObserveResult{
+		FrameID: out.FrameID, WindowID: out.WindowID, Frames: out.Frames, Windows: out.Windows,
 		ObservationID:     out.ObservationID,
 		CoordinateSpace:   out.CoordinateSpace,
 		Tab:               out.Tab.tab(),
@@ -676,6 +736,7 @@ func (out electronBridgeScreenshotResponse) result() ScreenshotResult {
 		mime = "image/png"
 	}
 	return ScreenshotResult{
+		WindowID:          out.WindowID,
 		ObservationID:     out.ObservationID,
 		Tab:               out.Tab.tab(),
 		MIME:              mime,
@@ -718,4 +779,15 @@ func newID(prefix string) string {
 		return prefix + "_" + strconv.FormatInt(time.Now().UnixNano(), 36)
 	}
 	return prefix + "_" + hex.EncodeToString(b[:])
+}
+
+func (s *ElectronBridgeService) CloseWindow(ctx context.Context, sessionID, tabID, windowID string) error {
+	if strings.TrimSpace(windowID) == "" {
+		return errors.New("windowID is required")
+	}
+	return s.post(ctx, "/browser/tabs/close", struct {
+		SessionID string `json:"sessionID"`
+		TabID     string `json:"tabID"`
+		WindowID  string `json:"windowID"`
+	}{sessionID, tabID, windowID}, nil)
 }

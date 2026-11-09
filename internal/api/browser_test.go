@@ -1452,7 +1452,7 @@ func (f *fakeBrowserService) Observe(_ context.Context, _, _ string, options bro
 	return browser.ObserveResult{TotalElements: 125}, nil
 }
 
-func (f *fakeBrowserService) Screenshot(context.Context, string, string) (browser.ScreenshotResult, error) {
+func (f *fakeBrowserService) Screenshot(context.Context, string, string, browser.ScreenshotOptions) (browser.ScreenshotResult, error) {
 	return browser.ScreenshotResult{}, nil
 }
 
@@ -1519,3 +1519,13 @@ func (f *fakeBrowserService) Select(ctx context.Context, sessionID, tabID string
 	f.selectInput = in
 	return browser.ActionResult{Tab: tab, Action: "select"}, nil
 }
+
+func (f *fakeBrowserService) PressKey(context.Context, string, string, browser.KeyInput) (browser.ActionResult, error) {
+	return browser.ActionResult{Action: "press-key"}, nil
+}
+
+func (f *fakeBrowserService) Wait(context.Context, string, string, browser.WaitInput) (browser.ActionResult, error) {
+	return browser.ActionResult{Action: "wait"}, nil
+}
+
+func (f *fakeBrowserService) CloseWindow(context.Context, string, string, string) error { return nil }

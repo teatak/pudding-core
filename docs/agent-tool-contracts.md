@@ -265,3 +265,29 @@ Code 模式在 Browser 出现在可用插件列表时，引导加载该插件，
 检查页面、`builtin_browser_screenshot` 返回视口截图附件。修改后复用 tabID 并 reload。
 已有可见页不等于插件已加载；单张截图不证明动画连续性。指定动画时间、多帧采样及任意
 SVG 几何查询仍不在此工具契约中。
+
+`builtin_browser_press_key` 向当前页发送配对的真实按下/释放事件，可指定元素 ref 或
+唯一 CSS selector 聚焦。支持 Enter、Tab、Escape、编辑/方向键、字母数字和修饰键；
+`ControlOrMeta` 在 macOS 对应 Command，其他平台对应 Control。它不代替文本填值工具，
+也不代表提交成功。
+
+动作后用 `builtin_browser_wait` 等待具体结果：`visible`/`hidden` 指定 selector，
+`text`/`textAbsent` 指定文字并可限定 selector，`url` 精确匹配目标网址，
+`urlChanged` 与提供的旧网址比较。默认 5 秒、最多 15 秒，条件未满足返回
+`browser_wait_timeout`。新建或重建的控件应使用 CSS，旧 ref 失效仍明确报错。
+
+取消通过 Core HTTP context 断开传到 Electron 请求上下文；排队动作、后续 CDP 命令和
+结果轮询检查取消状态。已经发送的输入无法撤回，仍补发必要的释放事件以免按键卡住；
+取消或传输故障后的结果不明不能自动重放，应重新观察页面。该等待工具只验证声明的
+页面条件，不推断服务器是否已完成业务操作。
+
+浏览器跨域 iframe 与弹窗：先 observe 获取 `frames` 与 `windows`，再在每次观察、
+点击、输入、选择、滚动、键盘及等待调用中明确携带 `frameID` / `windowID`。
+省略表示主文档／主标签页，不维护隐式“当前 frame”。frame 的坐标和 observationID
+只对应该 frame 的视口；截图仍是整个窗口视口，截图坐标点击不要带 frameID。
+跨域和独立进程 iframe 使用 Electron 原生 frame 执行环境；点击逐层检查父框架的
+遮挡并转换边框、缩放及滚动后的坐标。旋转、镜像、透视 iframe 暂不支持，明确返回错误。
+导航后应重新 observe 取得元素 ref；移除的 frame 和关闭的弹窗 ID 不会回退到主页面。
+`builtin_browser_close` 指定 windowID 只关闭弹窗；弹窗保留 opener 通信，不保存为
+可恢复标签页，所属 tab/session 关闭时清理。这里的弹窗是网页 `window.open` 窗口，
+不包含系统文件选择器及 JavaScript alert/confirm/prompt 对话框。

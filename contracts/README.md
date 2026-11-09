@@ -35,6 +35,23 @@ The Go daemon embeds it through this package; desktop generates `web/contracts/`
 `api.ts` and `events.ts` are the TypeScript/Zod client validation definitions for the REST and SSE protocol.
 Server structs and lifecycle semantics remain owned by core; verify both sides when changing a wire field.
 
+Protocol 65 adds explicit `frameID` / `windowID` browser targets. Observe returns
+native frame IDs (including cross-origin/OOPIF) and session/tab-owned popup IDs.
+Observe, click, type, select, scroll, key and wait accept both target fields;
+screenshot accepts windowID and captures that window's full viewport. Close with
+windowID closes only that popup and never deletes its owning tab's persisted state.
+Popup targets are live-only: closing the owning tab/session releases them. Refs are
+scoped to their document; stale/detached frames fail instead of falling back.
+Core and Desktop must be updated together.
+
+Protocol 64 adds managed browser `press-key` and `wait` bridge endpoints and
+`builtin_browser_press_key` / `builtin_browser_wait` tools. Keys use paired CDP
+down/up events with optional modifiers and target focus. Waits support visible,
+hidden, text, textAbsent, exact url and urlChanged conditions (default 5s, cap 15s).
+Bridge disconnects cancel pending work and polling. Already dispatched input is
+not rolled back; cancelled/uncertain actions must not be replayed blindly.
+Core and Desktop must be updated together.
+
 Protocol 63 adds `GET`/`PUT /sessions/{id}/directories` with `{rootDirs: string[]}`
 for durable conversation folder consent. New paths must be absolute existing
 folders; an empty list revokes saved conversation directories. This does not

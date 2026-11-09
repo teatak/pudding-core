@@ -299,17 +299,23 @@ func TestBuiltinBrowserOpenWithoutTabIDReportsOpenFailure(t *testing.T) {
 }
 
 type fakeToolBrowser struct {
-	observation    browser.ObserveResult
-	observeOptions browser.ObserveOptions
-	screenshot     browser.ScreenshotResult
-	tabs           []browser.TabSnapshot
-	releasedTabIDs []string
-	closedSession  string
-	reloadTabID    string
-	createdTabs    int
-	blankTabs      int
-	openNewTabURL  string
-	openErr        error
+	keyInput    browser.KeyInput
+	waitInput   browser.WaitInput
+	actionError error
+
+	observation     browser.ObserveResult
+	observeOptions  browser.ObserveOptions
+	screenshot      browser.ScreenshotResult
+	tabs            []browser.TabSnapshot
+	releasedTabIDs  []string
+	closedSession   string
+	closedWindow    string
+	closedWindowTab string
+	reloadTabID     string
+	createdTabs     int
+	blankTabs       int
+	openNewTabURL   string
+	openErr         error
 }
 
 func (f *fakeToolBrowser) ProcessMode(context.Context, string) string {
@@ -392,7 +398,7 @@ func (f *fakeToolBrowser) Observe(_ context.Context, sessionID, tabID string, op
 	return out, nil
 }
 
-func (f *fakeToolBrowser) Screenshot(context.Context, string, string) (browser.ScreenshotResult, error) {
+func (f *fakeToolBrowser) Screenshot(context.Context, string, string, browser.ScreenshotOptions) (browser.ScreenshotResult, error) {
 	return f.screenshot, nil
 }
 
@@ -412,4 +418,62 @@ func (f *fakeToolBrowser) Close() error { return nil }
 
 func (f *fakeToolBrowser) Select(context.Context, string, string, browser.SelectInput) (browser.ActionResult, error) {
 	return browser.ActionResult{Action: "select"}, nil
+}
+
+func (f *fakeToolBrowser) PressKey(_ context.Context, _, tabID string, in browser.KeyInput) (browser.ActionResult, error) {
+	in.TabID = tabID
+	f.keyInput = in
+	return browser.ActionResult{Action: "press-key", Result: map[string]any{"delivered": true, "effect": "unverified"}}, f.actionError
+}
+
+func (f *fakeToolBrowser) Wait(_ context.Context, _, tabID string, in browser.WaitInput) (browser.ActionResult, error) {
+	in.TabID = tabID
+	f.waitInput = in
+	return browser.ActionResult{Action: "wait", Result: map[string]any{"matched": true}}, f.actionError
+}
+
+func TestBuiltinBrowserKeyAndWait(t *testing.T) {
+	fake := &fakeToolBrowser{}
+	runner := NewBuiltinRunner(WithBrowser(fake))
+	key := runner.Call(context.Background(), Call{SessionID: "session", Name: BrowserPressKey, Args: json.RawMessage(`{"tabID":"tab","selector":"#input","key":"Enter","modifiers":["Shift"]}`)})
+	if !key.Ok || fake.keyInput.Key != "Enter" || fake.keyInput.TabID != "tab" || len(fake.keyInput.Modifiers) != 1 {
+		t.Fatalf("key input lost: %+v %+v", key, fake.keyInput)
+	}
+	wait := runner.Call(context.Background(), Call{SessionID: "session", Name: BrowserWait, Args: json.RawMessage(`{"tabID":"tab","condition":"text","text":"Saved","timeoutMs":500}`)})
+	if !wait.Ok || fake.waitInput.Condition != "text" || fake.waitInput.Text != "Saved" || fake.waitInput.TimeoutMS == nil || *fake.waitInput.TimeoutMS != 500 {
+		t.Fatalf("wait input lost: %+v %+v", wait, fake.waitInput)
+	}
+	fake.actionError = context.Canceled
+	cancelled := runner.Call(context.Background(), Call{SessionID: "session", Name: BrowserPressKey, Args: json.RawMessage(`{"tabID":"tab","key":"Enter"}`)})
+	if cancelled.Ok || !strings.Contains(cancelled.Content, "browser_operation_cancelled") || !strings.Contains(cancelled.Content, "observe before retrying") {
+		t.Fatalf("cancellation was misreported: %+v", cancelled)
+	}
+}
+
+func (f *fakeToolBrowser) CloseWindow(_ context.Context, _ string, tabID, windowID string) error {
+	f.closedWindow = windowID
+	f.closedWindowTab = tabID
+	return f.actionError
+}
+
+func TestBuiltinBrowserFrameAndPopupTargets(t *testing.T) {
+	fake := &fakeToolBrowser{}
+	runner := NewBuiltinRunner(WithBrowser(fake))
+	observed := runner.Call(context.Background(), Call{SessionID: "session", Name: BrowserObserve, Args: json.RawMessage(`{"tabID":"tab","windowID":"popup","frameID":"frame"}`)})
+	if !observed.Ok || fake.observeOptions.FrameID != "frame" || fake.observeOptions.WindowID != "popup" {
+		t.Fatalf("target lost: %+v %+v", observed, fake.observeOptions)
+	}
+	key := runner.Call(context.Background(), Call{SessionID: "session", Name: BrowserPressKey, Args: json.RawMessage(`{"tabID":"tab","windowID":"popup","frameID":"frame","key":"Enter"}`)})
+	if !key.Ok || fake.keyInput.FrameID != "frame" || fake.keyInput.WindowID != "popup" {
+		t.Fatalf("target lost: %+v %+v", key, fake.keyInput)
+	}
+	closed := runner.Call(context.Background(), Call{SessionID: "session", Name: BrowserClose, Args: json.RawMessage(`{"tabID":"tab","windowID":"popup"}`)})
+	if !closed.Ok || fake.closedWindow != "popup" || fake.closedWindowTab != "tab" || fake.closedSession != "" || len(fake.releasedTabIDs) != 0 {
+		t.Fatalf("popup close affected parent: %+v %+v", closed, fake)
+	}
+	fake.actionError = context.Canceled
+	failed := runner.Call(context.Background(), Call{SessionID: "session", Name: BrowserClose, Args: json.RawMessage(`{"tabID":"tab","windowID":"popup"}`)})
+	if failed.Ok {
+		t.Fatalf("failed popup close reported success: %+v", failed)
+	}
 }

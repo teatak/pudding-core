@@ -68,8 +68,10 @@ func (r *BuiltinRunner) browserObserve(ctx context.Context, call Call) Result {
 		return res
 	}
 	var args struct {
+		WindowID     string `json:"windowID"`
 		TabID        string `json:"tabID"`
 		MaxTextChars int    `json:"maxTextChars"`
+		FrameID      string `json:"frameID"`
 		MaxElements  int    `json:"maxElements"`
 		Offset       int    `json:"offset"`
 	}
@@ -84,6 +86,7 @@ func (r *BuiltinRunner) browserObserve(ctx context.Context, call Call) Result {
 		return browserToolError(out, err)
 	}
 	result, err := r.browser.Observe(ctx, call.SessionID, tabID, browser.ObserveOptions{
+		WindowID: args.WindowID, FrameID: args.FrameID,
 		MaxTextChars: args.MaxTextChars,
 		MaxElements:  args.MaxElements,
 		Offset:       args.Offset,
@@ -107,6 +110,7 @@ func (r *BuiltinRunner) browserScreenshot(ctx context.Context, call Call) Result
 		return res
 	}
 	var args struct {
+		WindowID string `json:"windowID"`
 		TabID    string `json:"tabID"`
 		FullPage bool   `json:"fullPage"` // Decode only to reject unsupported legacy requests.
 	}
@@ -121,7 +125,7 @@ func (r *BuiltinRunner) browserScreenshot(ctx context.Context, call Call) Result
 	if err != nil {
 		return browserToolError(out, err)
 	}
-	result, err := r.browser.Screenshot(ctx, call.SessionID, tabID)
+	result, err := r.browser.Screenshot(ctx, call.SessionID, tabID, browser.ScreenshotOptions{WindowID: args.WindowID})
 	if err != nil {
 		return browserToolError(out, err)
 	}
@@ -160,6 +164,7 @@ func (r *BuiltinRunner) browserScreenshot(ctx context.Context, call Call) Result
 		"captureBounds":     result.CaptureBounds,
 		"fullPage":          false,
 		"coordinateSpace":   "viewport_css_pixels",
+		"windowID":          result.WindowID,
 		"observationID":     result.ObservationID,
 		"coordinateHint":    "Click x/y and observation bounds use CSS pixels relative to the current viewport. Map this image to click coordinates: x = captureBounds.x + imageX * captureBounds.width / modelWidth; y = captureBounds.y + imageY * captureBounds.height / modelHeight. If the image is displayed resized, substitute its displayed width/height for modelWidth/modelHeight. Only click points inside the viewport; scroll and observe again for offscreen targets. Pass observationID with coordinate clicks. Capture again after scrolling, navigation or layout changes.",
 		"capturedAt":        result.CapturedAt,
@@ -330,6 +335,57 @@ func (r *BuiltinRunner) browserStatus(ctx context.Context, call Call) Result {
 	return out
 }
 
+func (r *BuiltinRunner) browserPressKey(ctx context.Context, call Call) Result {
+	out := browserBaseResult(call)
+	if res, ok := r.browserReady(call, out); !ok {
+		return res
+	}
+	var args browser.KeyInput
+	if err := decodeStructToolArgs(call.Args, &args); err != nil {
+		return toolJSONError(out, "invalid_arguments", err.Error())
+	}
+	tabID, err := r.browserResolveTabID(ctx, call.SessionID, args.TabID)
+	if err != nil {
+		return browserToolError(out, err)
+	}
+	result, err := r.browser.PressKey(ctx, call.SessionID, tabID, args)
+	if err != nil {
+		return browserToolError(out, err)
+	}
+	return r.browserActionResult(ctx, call, out, result)
+}
+
+func (r *BuiltinRunner) browserWait(ctx context.Context, call Call) Result {
+	out := browserBaseResult(call)
+	if res, ok := r.browserReady(call, out); !ok {
+		return res
+	}
+	var args browser.WaitInput
+	if err := decodeStructToolArgs(call.Args, &args); err != nil {
+		return toolJSONError(out, "invalid_arguments", err.Error())
+	}
+	tabID, err := r.browserResolveTabID(ctx, call.SessionID, args.TabID)
+	if err != nil {
+		return browserToolError(out, err)
+	}
+	result, err := r.browser.Wait(ctx, call.SessionID, tabID, args)
+	if err != nil {
+		return browserToolError(out, err)
+	}
+	return r.browserActionResult(ctx, call, out, result)
+}
+
+func (r *BuiltinRunner) browserActionResult(ctx context.Context, call Call, out Result, result browser.ActionResult) Result {
+	if err := r.syncBrowserState(ctx, call.SessionID, result.Tab); err != nil {
+		return browserToolError(out, err)
+	}
+	out.Ok = true
+	out.Content = jsonString(map[string]any{"ok": true, "action": result})
+	out.SummaryKind = SummaryReturnedFields
+	out.SummaryCount = 2
+	return out
+}
+
 func (r *BuiltinRunner) browserNavigate(ctx context.Context, call Call, action string) Result {
 	out := browserBaseResult(call)
 	if res, ok := r.browserReady(call, out); !ok {
@@ -375,10 +431,23 @@ func (r *BuiltinRunner) browserClose(ctx context.Context, call Call) Result {
 		return res
 	}
 	var args struct {
-		TabID string `json:"tabID"`
+		WindowID string `json:"windowID"`
+		TabID    string `json:"tabID"`
 	}
 	if err := decodeStructToolArgs(call.Args, &args); err != nil {
 		return toolJSONError(out, "invalid_arguments", err.Error())
+	}
+	if args.WindowID != "" {
+		tabID, err := r.browserResolveTabID(ctx, call.SessionID, args.TabID)
+		if err != nil {
+			return browserToolError(out, err)
+		}
+		if err := r.browser.CloseWindow(ctx, call.SessionID, tabID, args.WindowID); err != nil {
+			return browserToolError(out, err)
+		}
+		out.Ok = true
+		out.Content = jsonString(map[string]any{"ok": true, "windowID": args.WindowID, "closed": true})
+		return out
 	}
 	tabs, err := r.browserTabs(ctx, call.SessionID)
 	if err != nil {
@@ -537,7 +606,10 @@ func (r *BuiltinRunner) syncBrowserState(ctx context.Context, sessionID string, 
 
 func browserToolError(out Result, err error) Result {
 	reason := "browser_error"
-	if code := browser.ErrorCode(err); code != "" {
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		reason = "browser_operation_cancelled"
+		return toolJSONError(out, reason, "Browser request cancelled or timed out. Already dispatched input may have taken effect; observe before retrying.")
+	} else if code := browser.ErrorCode(err); code != "" {
 		reason = code
 	} else if errors.Is(err, browser.ErrUnavailable) {
 		reason = "browser_unavailable"

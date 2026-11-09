@@ -873,7 +873,7 @@ func (s *Server) screenshotBrowserTab(c *cart.Context) error {
 		return badRequest(c, "Full-page screenshots are not supported. Capture the viewport and scroll for more content.")
 	}
 
-	result, err := s.browser.Screenshot(c.Request.Context(), sessionID, tabID)
+	result, err := s.browser.Screenshot(c.Request.Context(), sessionID, tabID, browser.ScreenshotOptions{})
 	if err != nil {
 		return s.browserError(c, err)
 	}
