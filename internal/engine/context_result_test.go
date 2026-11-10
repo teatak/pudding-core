@@ -213,9 +213,6 @@ func TestToolOutputSettingIsFrozenWithModelSnapshot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = ms.SetSettings(ctx, map[string]string{config.SettingToolOutputTextEnabled: "true"}); err != nil {
-		t.Fatal(err)
-	}
 	first, err := eng.resolveModel(ctx, sess)
 	if err != nil {
 		t.Fatal(err)

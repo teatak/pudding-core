@@ -26,7 +26,7 @@
 
 ## 工具结果文本展开
 
-开发者设置 `tool_output_text_enabled` 默认关闭。开启后，新 turn 将已声明的字符串
+对话显示设置 `tool_output_text_enabled` 默认开启，显式关闭的选择会保留。开启时，新 turn 将已声明的字符串
 展开为同一条 tool result 内的正文；已有 turn（包括重启继续）保留开始时的开关快照。
 工具输入 schema、执行状态和原始结果不变。未经声明的字段、没有声明的旧历史仍沿用
 原格式。声明来自 `provider.ToolDef.ModelOutput` 或本次 `tool.Result.ModelOutput`，

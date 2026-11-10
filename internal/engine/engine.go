@@ -757,7 +757,7 @@ func (e *Engine) resolveModel(ctx context.Context, sess *store.Session) (result 
 	}
 	defer func() {
 		if result != nil && resolveErr == nil {
-			result.config.ToolOutputTextEnabled = settings[config.SettingToolOutputTextEnabled] == "true"
+			result.config.ToolOutputTextEnabled = settings[config.SettingToolOutputTextEnabled] != "false"
 			resolveErr = result.refreshConfigJSON()
 		}
 	}()

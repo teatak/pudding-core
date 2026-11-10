@@ -336,6 +336,7 @@ func TestManagerResetSettingsOnlyRewritesSettingsYAML(t *testing.T) {
 		SettingShowCompactSummary:          "false",
 		SettingShowReasoning:               "false",
 		SettingShowRawToolInfo:             "false",
+		SettingToolOutputTextEnabled:       "false",
 		SettingShowPluginPreviewVersions:   "true",
 		SettingEditorFontFamily:            "Fira Code, monospace",
 		SettingEditorFontSize:              "16",
@@ -364,6 +365,7 @@ func TestManagerResetSettingsOnlyRewritesSettingsYAML(t *testing.T) {
 		reset[SettingShowCompactSummary] != "true" ||
 		reset[SettingShowReasoning] != "true" ||
 		reset[SettingShowRawToolInfo] != "true" ||
+		reset[SettingToolOutputTextEnabled] != "true" ||
 		reset[SettingShowPluginPreviewVersions] != "false" ||
 		reset[SettingEditorFontFamily] != DefaultEditorFontFamily ||
 		reset[SettingEditorFontSize] != "12" ||
@@ -604,7 +606,7 @@ func TestWriteYAMLDoesNotFollowPredictableTempSymlink(t *testing.T) {
 	}
 }
 
-func TestToolOutputTextSettingDefaultsOffAndPersists(t *testing.T) {
+func TestToolOutputTextSettingDefaultsOnAndPersists(t *testing.T) {
 	ctx := context.Background()
 	home := t.TempDir()
 	m := newTestManager(home)
@@ -612,10 +614,13 @@ func TestToolOutputTextSettingDefaultsOffAndPersists(t *testing.T) {
 		t.Fatal(err)
 	}
 	settings, err := m.Settings(ctx)
-	if err != nil || settings[SettingToolOutputTextEnabled] != "false" {
+	if err != nil || settings[SettingToolOutputTextEnabled] != "true" {
 		t.Fatalf("default: %v %v", settings, err)
 	}
-	if err := m.SetSettings(ctx, map[string]string{SettingToolOutputTextEnabled: "true"}); err != nil {
+	if err := m.SetSettings(ctx, map[string]string{SettingToolOutputTextEnabled: "false"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.SetSettings(ctx, map[string]string{SettingShowReasoning: "false"}); err != nil {
 		t.Fatal(err)
 	}
 	reloaded := newTestManager(home)
@@ -623,8 +628,15 @@ func TestToolOutputTextSettingDefaultsOffAndPersists(t *testing.T) {
 		t.Fatal(err)
 	}
 	settings, err = reloaded.Settings(ctx)
-	if err != nil || settings[SettingToolOutputTextEnabled] != "true" {
+	if err != nil || settings[SettingToolOutputTextEnabled] != "false" {
 		t.Fatal("setting did not persist")
+	}
+	if err := reloaded.SetSettings(ctx, map[string]string{SettingToolOutputTextEnabled: "true"}); err != nil {
+		t.Fatal(err)
+	}
+	settings, err = newTestManager(home).Settings(ctx)
+	if err != nil || settings[SettingToolOutputTextEnabled] != "true" {
+		t.Fatal("enabling did not persist")
 	}
 	if err := reloaded.SetSettings(ctx, map[string]string{SettingToolOutputTextEnabled: "not a boolean"}); err == nil {
 		t.Fatal("invalid flag accepted")

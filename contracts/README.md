@@ -129,7 +129,8 @@ notifications. Widget SDK 1.2.0 supports the declaration on `defineInterface`
 (relative to its return value) and `interaction.notify` (relative to the notice).
 The declaration never becomes part of a model's tool input schema.
 
-`tool_output_text_enabled` is a default-off developer setting. A new turn freezes
+`tool_output_text_enabled` is a default-on conversation display setting; an explicit
+false value remains an opt-out. A new turn freezes
 it into model configuration; changing it does not alter an in-flight turn or its
 restart continuation. External MCP calls read the current setting per call.
 Canonical output and declarations are stored even when disabled. Older records
