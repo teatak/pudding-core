@@ -75,8 +75,10 @@ func (t *Tracker) BeginCall(turnID, callID string, roots, targets []string) erro
 
 // BeginCallWithOrigin captures explicit targets and records how the mutation
 // was attributed. Command observations additionally capture already-tracked
-// files. Empty or project-root targets never expand into a project-wide scan.
-func (t *Tracker) BeginCallWithOrigin(turnID, callID string, roots, targets []string, origin store.FileChangeOrigin) error {
+// files. Optional exactFiles are captured without traversing directories, even
+// if a missing file becomes a directory. Empty or project-root targets never
+// expand into a project-wide scan.
+func (t *Tracker) BeginCallWithOrigin(turnID, callID string, roots, targets []string, origin store.FileChangeOrigin, exactFiles ...string) error {
 	turnID = strings.TrimSpace(turnID)
 	callID = strings.TrimSpace(callID)
 	if turnID == "" || callID == "" {
@@ -87,9 +89,19 @@ func (t *Tracker) BeginCallWithOrigin(turnID, callID string, roots, targets []st
 		return nil
 	}
 	targets = normalizeTargets(roots, targets)
+	exactFiles = normalizeExactFiles(roots, exactFiles)
 	t.mu.Lock()
 	tracked := t.turns[turnID]
 	var known []fileKey
+	for _, file := range exactFiles {
+		root := containingRoot(roots, file)
+		relative, err := filepath.Rel(root, file)
+		if err != nil {
+			t.mu.Unlock()
+			return err
+		}
+		known = append(known, fileKey{root: root, path: filepath.ToSlash(relative)})
+	}
 	if tracked != nil && origin == store.FileChangeOriginCommandObserved {
 		// Opaque commands may modify or remove files already owned by this turn.
 		// Observe those exact files, never discover additional project content.
@@ -307,7 +319,7 @@ func normalizeRoots(roots []string) []string {
 	return out
 }
 
-func normalizeTargets(roots, targets []string) []string {
+func normalizeExactFiles(roots, targets []string) []string {
 	normalized := make([]string, 0, len(targets))
 	seen := make(map[string]struct{}, len(targets))
 	for _, raw := range targets {
@@ -334,6 +346,11 @@ func normalizeTargets(roots, targets []string) []string {
 		}
 		return normalized[i] < normalized[j]
 	})
+	return normalized
+}
+
+func normalizeTargets(roots, targets []string) []string {
+	normalized := normalizeExactFiles(roots, targets)
 	out := make([]string, 0, len(normalized))
 	for _, target := range normalized {
 		nested := false

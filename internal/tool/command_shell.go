@@ -279,23 +279,52 @@ func isShellFileDescriptor(value string) bool {
 }
 
 func commandVerificationArgv(command string) []string {
+	argv, _ := commandVerificationInvocation(command)
+	return argv
+}
+
+// Recognize a direct check or one literal cd followed by a check. This only
+// describes execution; it does not rewrite the command or change approvals.
+func commandVerificationInvocation(command string) ([]string, string) {
 	if runtime.GOOS == "windows" {
 		// POSIX parsing cannot establish PowerShell verification semantics.
-		return nil
+		return nil, ""
 	}
 	analysis, err := analyzeShellCommand(command)
-	if err != nil || analysis.Dynamic || len(analysis.Commands) != 1 {
-		return nil
+	if err != nil || analysis.Dynamic || len(analysis.file.Stmts) != 1 {
+		return nil, ""
 	}
-	// Counting calls alone loses shell exit semantics (for example ! go test,
-	// or go test | > log). Only a direct, non-negated call owns this exit code.
-	if len(analysis.file.Stmts) != 1 || analysis.file.Stmts[0].Negated {
-		return nil
+	stmt := analysis.file.Stmts[0]
+	if stmt.Negated {
+		return nil, ""
 	}
-	if _, ok := analysis.file.Stmts[0].Cmd.(*syntax.CallExpr); !ok {
-		return nil
+	if _, ok := stmt.Cmd.(*syntax.CallExpr); ok && len(analysis.Commands) == 1 {
+		return analysis.Commands[0], ""
 	}
-	return analysis.Commands[0]
+	chain, ok := stmt.Cmd.(*syntax.BinaryCmd)
+	if !ok || chain.Op != syntax.AndStmt || len(analysis.Commands) != 2 || chain.X.Negated || chain.Y.Negated {
+		return nil, ""
+	}
+	cd, leftCall := chain.X.Cmd.(*syntax.CallExpr)
+	_, rightCall := chain.Y.Cmd.(*syntax.CallExpr)
+	if !leftCall || !rightCall || len(cd.Assigns) != 0 || len(chain.X.Redirs) != 0 {
+		return nil, ""
+	}
+	before := analysis.Commands[0]
+	if len(before) < 2 || before[0] != "cd" || (len(before) != 2 && (len(before) != 3 || before[1] != "--")) {
+		return nil, ""
+	}
+	directory := before[len(before)-1]
+	word := cd.Args[len(cd.Args)-1]
+	if directory == "" || directory == "-" || (len(before) == 2 && strings.HasPrefix(directory, "-")) || !isStaticCommandWord(word) {
+		return nil, ""
+	}
+	for _, part := range word.Parts {
+		if literal, ok := part.(*syntax.Lit); ok && strings.ContainsAny(literal.Value, "*?[\\~") {
+			return nil, "" // expansions/escapes need shell evaluation
+		}
+	}
+	return analysis.Commands[1], directory
 }
 
 type CommandVerificationWarning struct {

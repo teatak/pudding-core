@@ -5,13 +5,131 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"sort"
+	"strings"
 	"testing"
 
 	"github.com/teatak/pudding-core/internal/store"
 	"github.com/teatak/pudding-core/internal/turnfiles"
 )
+
+func TestCommandDeclaredMutationFiles(t *testing.T) {
+	root, other := t.TempDir(), t.TempDir()
+	writeCommandTestFile(t, root, "sub/existing.txt", "user edits")
+	cwd := filepath.Join(root, "sub")
+	wantRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantOther, err := filepath.EvalSymlinks(other)
+	if err != nil {
+		t.Fatal(err)
+	}
+	call := Call{Name: CommandRun, ProjectDirs: []string{root, other}, Args: resultJSON(map[string]any{
+		"scope": "project", "cwd": cwd, "command": "python generate.py", "mutation_paths": []string{"existing.txt", "new.txt", "./new.txt", filepath.Join(other, "other.txt")},
+	})}
+	tracking, ok := MutationTrackingForCall(call)
+	want := []string{filepath.Join(wantRoot, "sub", "existing.txt"), filepath.Join(wantRoot, "sub", "new.txt"), filepath.Join(wantOther, "other.txt")}
+	sort.Strings(want)
+	if !ok || len(tracking.Targets) != 0 || !reflect.DeepEqual(tracking.ExactFiles, want) || tracking.Origin != store.FileChangeOriginCommandObserved {
+		t.Fatalf("tracking=%+v want %v", tracking, want)
+	}
+	details, err := NewBuiltinRunner().ApprovalDetails(context.Background(), call)
+	if err != nil || !reflect.DeepEqual(details["mutationPaths"], want) {
+		t.Fatalf("approval paths differ: %+v %v", details, err)
+	}
+
+	// A statically inferred path must not turn an explicit file into a recursive target.
+	call.Args = resultJSON(map[string]any{"scope": "project", "cwd": cwd, "command": "touch new.txt", "mutation_paths": []string{"new.txt"}})
+	tracking, ok = MutationTrackingForCall(call)
+	if !ok || len(tracking.Targets) != 0 || len(tracking.ExactFiles) != 1 {
+		t.Fatalf("duplicate recursive target: %+v", tracking)
+	}
+
+	call.Args = resultJSON(map[string]any{"scope": "project", "cwd": cwd, "command": commandHelperCommand("report"), "mutation_paths": []string{"new.txt"}})
+	result := NewBuiltinRunner().Call(context.Background(), call)
+	if payload := decodeCommandPayload(t, result); !result.Ok || payload.ExitCode != 0 {
+		t.Fatalf("valid declaration rejected: %s", result.Content)
+	}
+	var output struct {
+		Paths []string `json:"mutationPaths"`
+	}
+	if err := json.Unmarshal([]byte(result.Content), &output); err != nil || !reflect.DeepEqual(output.Paths, tracking.ExactFiles) {
+		t.Fatalf("output paths: %+v %v", output, err)
+	}
+}
+
+func TestCommandDeclaredMutationFilesRejectInvalidPathsBeforeExecution(t *testing.T) {
+	root, outside := t.TempDir(), t.TempDir()
+	writeCommandTestFile(t, root, "dir/file.txt", "unchanged")
+	if err := os.Symlink(outside, filepath.Join(root, "escape")); err != nil {
+		t.Fatal(err)
+	}
+	oversized := make([]string, maxCommandMutationTargets+1)
+	for i := range oversized {
+		oversized[i] = "same.txt"
+	}
+	for _, tc := range []struct {
+		name       string
+		paths      any
+		background bool
+	}{
+		{"root", []string{"."}, false},
+		{"directory", []string{"dir"}, false},
+		{"outside", []string{filepath.Join(outside, "output.txt")}, false},
+		{"parent escape", []string{"../outside.txt"}, false},
+		{"symlink escape", []string{"escape/output.txt"}, false},
+		{"empty", []string{" "}, false},
+		{"glob", []string{"*.go"}, false},
+		{"nul", []string{"bad\x00.txt"}, false},
+		{"wrong shape", "file.txt", false},
+		{"too many", oversized, false},
+		{"background", []string{"file.txt"}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			marker := filepath.Join(root, "executed.txt")
+			call := Call{Name: CommandRun, ProjectDirs: []string{root}, Args: resultJSON(map[string]any{"scope": "project", "command": commandHelperCommand("write-after", marker), "mutation_paths": tc.paths, "background": tc.background})}
+			runner := NewBuiltinRunner()
+			defer runner.Close()
+			if _, err := runner.ApprovalDetails(context.Background(), call); err == nil {
+				t.Fatal("invalid declaration accepted by approval")
+			}
+			result := runner.Call(context.Background(), call)
+			if result.Ok {
+				t.Fatalf("invalid declaration executed: %s", result.Content)
+			}
+			if _, err := os.Stat(marker); !os.IsNotExist(err) {
+				t.Fatalf("command ran: %v", err)
+			}
+			if _, ok := MutationTrackingForCall(call); ok {
+				t.Fatal("invalid declaration silently tracked")
+			}
+		})
+	}
+}
+
+func TestCommandMutationDeclarationsDoNotChangeRisk(t *testing.T) {
+	root := t.TempDir()
+	base := resultJSON(map[string]any{"scope": "project", "command": "python generate.py"})
+	declared := resultJSON(map[string]any{"scope": "project", "command": "python generate.py", "mutation_paths": []string{"new.txt"}})
+	before, beforeOK := classifyCommandCall(base, []string{root})
+	after, afterOK := classifyCommandCall(declared, []string{root})
+	if beforeOK != afterOK || !reflect.DeepEqual(before, after) {
+		t.Fatalf("metadata changed execution authority: %+v / %+v", before, after)
+	}
+	for _, goos := range []string{"windows", "linux", "darwin"} {
+		args := commandRunArgs{Command: "echo test", Execution: CommandExecutionSandbox, MutationPaths: []string{"new.txt"}}
+		if err := validateCommandInputForOS(args, goos); err != nil {
+			t.Fatalf("%s: %v", goos, err)
+		}
+		args.Background = true
+		if err := validateCommandInputForOS(args, goos); err == nil || !strings.Contains(err.Error(), "mutation_paths") {
+			t.Fatalf("%s background accepted: %v", goos, err)
+		}
+	}
+}
 
 func TestMutationTrackingForCall(t *testing.T) {
 	root := t.TempDir()

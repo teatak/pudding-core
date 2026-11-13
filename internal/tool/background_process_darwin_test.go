@@ -3,6 +3,7 @@
 package tool
 
 import (
+	"context"
 	"strings"
 	"testing"
 )
@@ -28,11 +29,9 @@ func TestBackgroundProcessSandboxedPTYAcceptsInput(t *testing.T) {
 	if !write.Ok {
 		t.Fatalf("write sandboxed PTY input: %+v", write)
 	}
-	poll := decodeBackgroundProcessPayload(t, backgroundToolCall(runner, "sess_sandbox_tty", root, CommandSession, map[string]any{
-		"action":     "poll",
-		"process_id": started.ProcessID,
-		"wait_ms":    2000,
-	}))
+	result, chunks := pollCommandUntilFinished(t, context.Background(), runner, "sess_sandbox_tty", started.ProcessID)
+	poll := decodeBackgroundProcessPayload(t, result)
+	poll.Output = chunks
 	if poll.Running || poll.SandboxDenied || !strings.Contains(backgroundOutputText(poll.Output), "received:sandbox-tty") {
 		t.Fatalf("sandboxed PTY input was not observed: %+v output=%q", poll, backgroundOutputText(poll.Output))
 	}

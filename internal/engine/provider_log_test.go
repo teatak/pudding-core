@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/teatak/pudding-core/internal/event"
 	"github.com/teatak/pudding-core/internal/provider"
 	"github.com/teatak/pudding-core/internal/provider/mock"
 	"github.com/teatak/pudding-core/internal/store"
@@ -60,7 +61,7 @@ func TestConsumeStreamLogsTerminalWithoutChangingErrors(t *testing.T) {
 	}{
 		{"length", &provider.Chunk{Done: true, Finish: provider.FinishLength}, "done", store.TurnRunning, "", ""},
 		{"error", &provider.Chunk{Err: privateError}, "provider_error", store.TurnFailed, privateError.Error(), "provider_error"},
-		{"output_limit", &provider.Chunk{Err: &provider.OutputLimitError{Message: "openai responses: incomplete: max_output_tokens"}}, "provider_error", store.TurnFailed, "openai responses: incomplete: max_output_tokens", "output_limit"},
+		{"output_limit", &provider.Chunk{Err: &provider.OutputLimitError{Message: "openai responses: incomplete: max_output_tokens"}}, "provider_error", store.TurnFailed, "output_limit_exceeded: openai responses: incomplete: max_output_tokens", "output_limit"},
 		{"missing", nil, "missing_terminal", store.TurnFailed, "provider stream ended without terminal chunk", ""},
 		{"cancel", &provider.Chunk{Err: context.Canceled}, "cancelled", store.TurnCancelled, "", "cancelled"},
 	} {
@@ -97,6 +98,7 @@ func TestIncompleteProviderStreamDoesNotExecuteTool(t *testing.T) {
 	for _, finish := range []provider.FinishReason{provider.FinishLength, provider.FinishStop} {
 		t.Run(string(finish), func(t *testing.T) {
 			eng, ms, _, sid := newTestEngine(t, mock.WithDelay(0), mock.WithChunks([]provider.Chunk{
+				{Part: provider.PartText, Delta: "saved partial answer"},
 				{Tool: &provider.ToolCallChunk{Index: 0, CallID: "partial", Name: tool.TimeGetCurrent, ArgsDelta: `{"timezone":"UTC"`}},
 				{Done: true, Finish: finish},
 			}))
@@ -113,6 +115,22 @@ func TestIncompleteProviderStreamDoesNotExecuteTool(t *testing.T) {
 			eng.Wait()
 			if len(runner.calls) != 0 {
 				t.Fatalf("incomplete output reached tools: %v", runner.calls)
+			}
+			events, err := ms.EventsAfter(context.Background(), sid, 0, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			last := events[len(events)-1]
+			if finish == provider.FinishLength && (last.Kind != event.TurnFailed || !last.Interrupted || !strings.HasPrefix(last.Error, "output_limit_exceeded:")) {
+				t.Fatalf("output limit reported success: %+v", last)
+			}
+			messages, err := ms.ListMessages(context.Background(), sid, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			encoded, _ := json.Marshal(messages)
+			if !bytes.Contains(encoded, []byte("saved partial answer")) {
+				t.Fatal("interrupted output lost")
 			}
 		})
 	}

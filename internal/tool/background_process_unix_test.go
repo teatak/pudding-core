@@ -71,11 +71,9 @@ func TestBackgroundProcessPTYAcceptsInput(t *testing.T) {
 	if !write.Ok {
 		t.Fatalf("write PTY input: %+v", write)
 	}
-	poll := decodeBackgroundProcessPayload(t, backgroundToolCall(runner, "sess_tty", root, CommandSession, map[string]any{
-		"action":     "poll",
-		"process_id": started.ProcessID,
-		"wait_ms":    2000,
-	}))
+	result, chunks := pollCommandUntilFinished(t, context.Background(), runner, "sess_tty", started.ProcessID)
+	poll := decodeBackgroundProcessPayload(t, result)
+	poll.Output = chunks
 	if poll.Running || !strings.Contains(backgroundOutputText(poll.Output), "received:hello-tty") {
 		t.Fatalf("PTY input was not observed: %+v", poll)
 	}

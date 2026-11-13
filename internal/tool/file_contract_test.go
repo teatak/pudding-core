@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -66,7 +67,11 @@ func TestFileWriteAllowsExplicitEmptyContent(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
-		args, err := json.Marshal(map[string]any{"scope": "project", "path": path, "content": ""})
+		input := map[string]any{"scope": "project", "path": path, "content": ""}
+		if path == "existing.txt" {
+			input["expected_hash"] = patchContentHash([]byte("original"))
+		}
+		args, err := json.Marshal(input)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -167,5 +172,73 @@ func TestFileSliceContinuesAfterTruncatedResultWithoutSkippingLines(t *testing.T
 	}
 	if strings.Join(received, "\n") != strings.Join(lines, "\n") {
 		t.Fatalf("expected all 100 source lines, received %d", len(received))
+	}
+}
+
+func TestFileWriteVersionConflictAndConcurrentWriters(t *testing.T) {
+	root := t.TempDir()
+	runner := NewBuiltinRunner(WithHomeDir(t.TempDir()))
+	target := filepath.Join(root, "file.txt")
+	if err := os.WriteFile(target, []byte("original content"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	read := runner.Call(context.Background(), Call{Name: FileRead, ProjectDirs: []string{root}, Args: json.RawMessage(`{"scope":"project","path":"file.txt","max_chars":1}`)})
+	version := decodeToolResult(t, read)["contentHash"]
+	if version != patchContentHash([]byte("original content")) {
+		t.Fatalf("hash was not for full content: %s", read.Content)
+	}
+	write := func(session, content string, hash any) Result {
+		args := map[string]any{"scope": "project", "path": "file.txt", "content": content}
+		if hash != nil {
+			args["expected_hash"] = hash
+		}
+		return runner.Call(context.Background(), Call{SessionID: session, Name: FileWrite, ProjectDirs: []string{root}, Args: resultJSON(args)})
+	}
+	missing := write("a", "must not write", nil)
+	if missing.Ok || decodeToolResult(t, missing)["reason"] != "file_version_required" {
+		t.Fatalf("unguarded overwrite: %s", missing.Content)
+	}
+	var wg sync.WaitGroup
+	results := make(chan Result, 2)
+	for _, session := range []string{"a", "b"} {
+		wg.Add(1)
+		go func(session string) { defer wg.Done(); results <- write(session, session, version) }(session)
+	}
+	wg.Wait()
+	close(results)
+	success := 0
+	var winner string
+	for result := range results {
+		if result.Ok {
+			success++
+			winner = decodeToolResult(t, result)["contentHash"].(string)
+		} else if decodeToolResult(t, result)["reason"] != "file_conflict" {
+			t.Fatalf("unexpected failure: %s", result.Content)
+		}
+	}
+	if success != 1 {
+		t.Fatalf("%d concurrent writes succeeded", success)
+	}
+	current, err := os.ReadFile(target)
+	if err != nil || patchContentHash(current) != winner {
+		t.Fatalf("winner overwritten: %q %v", current, err)
+	}
+	if err := os.Remove(target); err != nil {
+		t.Fatal(err)
+	}
+	deleted := write("a", "do not recreate", winner)
+	if deleted.Ok || decodeToolResult(t, deleted)["reason"] != "file_conflict" {
+		t.Fatalf("recreated removed file: %s", deleted.Content)
+	}
+	if _, err := os.Stat(target); !os.IsNotExist(err) {
+		t.Fatalf("deleted file reappeared: %v", err)
+	}
+	created := write("a", "new", nil)
+	if !created.Ok {
+		t.Fatalf("create failed: %s", created.Content)
+	}
+	overwritten := write("b", "overwrite", nil)
+	if overwritten.Ok {
+		t.Fatal("create replaced existing file")
 	}
 }

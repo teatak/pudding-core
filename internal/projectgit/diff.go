@@ -13,13 +13,31 @@ import (
 )
 
 func ReadPatchDiff(ctx context.Context, repo Repository, staged bool, patchLimit int) (PatchDiff, error) {
+	return ReadPatchDiffWithOptions(ctx, repo, staged, patchLimit, PatchDiffOptions{ContextLines: 3})
+}
+
+type PatchDiffOptions struct {
+	Paths        []string
+	ContextLines int
+	SummaryOnly  bool
+}
+
+func ReadPatchDiffWithOptions(ctx context.Context, repo Repository, staged bool, patchLimit int, options PatchDiffOptions) (PatchDiff, error) {
+	if options.ContextLines < 0 || options.ContextLines > 100 {
+		return PatchDiff{}, newError(CodeInvalidPath, "context_lines must be between 0 and 100", nil)
+	}
+	paths, err := NormalizeDiffPaths(options.Paths)
+	if err != nil {
+		return PatchDiff{}, err
+	}
 	commandCtx, cancel := context.WithTimeout(ctx, commandTimeout)
 	defer cancel()
-	baseArgs := []string{"diff", "--no-ext-diff", "--no-textconv", "--no-color", "--find-renames=50%"}
+	baseArgs := []string{"--literal-pathspecs", "diff", "--no-ext-diff", "--no-textconv", "--no-color", "--find-renames=50%"}
 	if staged {
 		baseArgs = append(baseArgs, "--cached")
 	}
 	numstatArgs := append(append([]string(nil), baseArgs...), "--numstat", "-z")
+	numstatArgs = append(append(numstatArgs, "--"), paths...)
 	stats := runWithoutExternalFilters(commandCtx, repo.Root, metadataLimitBytes, numstatArgs...)
 	if stats.err != nil {
 		return PatchDiff{}, commandError(commandCtx, CodeDiffFailed, stats)
@@ -31,12 +49,40 @@ func ReadPatchDiff(ctx context.Context, repo Repository, staged bool, patchLimit
 	if err != nil {
 		return PatchDiff{}, newError(CodeParseFailed, err.Error(), err)
 	}
-	patchArgs := append(append([]string(nil), baseArgs...), "--src-prefix=a/", "--dst-prefix=b/")
+	if options.SummaryOnly {
+		return PatchDiff{Files: files, Additions: additions, Deletions: deletions}, nil
+	}
+	patchArgs := append(append([]string(nil), baseArgs...), "--src-prefix=a/", "--dst-prefix=b/", "--unified="+strconv.Itoa(options.ContextLines))
+	patchArgs = append(append(patchArgs, "--"), paths...)
 	patch := runWithoutExternalFilters(commandCtx, repo.Root, patchLimit, patchArgs...)
 	if patch.err != nil {
 		return PatchDiff{}, commandError(commandCtx, CodeDiffFailed, patch)
 	}
 	return PatchDiff{Patch: patch.stdout, Truncated: patch.truncated, Files: files, Additions: additions, Deletions: deletions}, nil
+}
+
+// Paths are repository-relative literals, including names containing spaces,
+// glob characters or Git pathspec syntax. They never become command options.
+func NormalizeDiffPaths(rawPaths []string) ([]string, error) {
+	if len(rawPaths) > 512 {
+		return nil, newError(CodeInvalidPath, "paths supports at most 512 entries", nil)
+	}
+	paths := make([]string, 0, len(rawPaths))
+	seen := make(map[string]bool)
+	for _, raw := range rawPaths {
+		if raw == "" || strings.ContainsRune(raw, 0) || filepath.IsAbs(filepath.FromSlash(raw)) {
+			return nil, newError(CodeInvalidPath, "paths must contain non-empty repository-relative paths", nil)
+		}
+		clean := filepath.ToSlash(filepath.Clean(filepath.FromSlash(raw)))
+		if clean == "." || clean == ".." || strings.HasPrefix(clean, "../") || strings.EqualFold(strings.Split(clean, "/")[0], ".git") {
+			return nil, newError(CodeInvalidPath, "Git path is outside the diff scope", nil)
+		}
+		if !seen[clean] {
+			seen[clean] = true
+			paths = append(paths, clean)
+		}
+	}
+	return paths, nil
 }
 
 func ParseNumstat(raw string) ([]DiffFile, int, int, error) {

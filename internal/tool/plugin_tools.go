@@ -31,6 +31,8 @@ var builtinPluginTools = map[string]string{
 	BrowserDialog:     plugin.BuiltinBrowserID,
 	BrowserHover:      plugin.BuiltinBrowserID,
 	BrowserWait:       plugin.BuiltinBrowserID,
+	BrowserUpload:     plugin.BuiltinBrowserID,
+	BrowserDownloads:  plugin.BuiltinBrowserID,
 	SkillValidate:     plugin.BuiltinSkillAuthoringID,
 	PluginSave:        plugin.BuiltinPluginAuthoringID,
 	CameraCapture:     plugin.BuiltinCaptureID,

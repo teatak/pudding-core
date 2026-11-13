@@ -25,6 +25,13 @@ require (
 require github.com/emersion/go-imap-id v0.0.0-20190926060100-f94a56b9ecde
 
 require (
+	github.com/go-git/gcfg v1.5.1-0.20230307220236-3a3c6141e376 // indirect
+	github.com/go-git/go-billy/v5 v5.9.0 // indirect
+	github.com/jbenet/go-context v0.0.0-20150711004518-d14ea06fba99 // indirect
+	gopkg.in/warnings.v0 v0.1.2 // indirect
+)
+
+require (
 	github.com/emersion/go-imap v1.2.1
 	github.com/emersion/go-message v0.18.2
 	github.com/emersion/go-sasl v0.0.0-20200509203442-7bfe0ed36a21 // indirect

@@ -120,6 +120,17 @@ func OpenSessionScratch(dir, sessionID string) (*os.Root, string, error) {
 	return root, filepath.Join(path, "scratch"), err
 }
 
+// Command outputs survive scratch cleanup and are removed with the session.
+func OpenSessionCommandOutputs(dir, sessionID string) (*os.Root, string, error) {
+	artifacts, path, err := OpenSessionArtifacts(dir, sessionID)
+	if err != nil {
+		return nil, "", err
+	}
+	defer artifacts.Close()
+	root, err := openArtifactDirectory(artifacts, "command-output", true)
+	return root, filepath.Join(path, "command-output"), err
+}
+
 func RemoveSessionScratch(dir, sessionID string) error {
 	root, _, err := sessionArtifactsRoot(dir, sessionID, false)
 	if errors.Is(err, os.ErrNotExist) {

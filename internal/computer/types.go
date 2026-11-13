@@ -15,6 +15,7 @@ const (
 	ActionScroll     = "scroll"
 	ActionFocus      = "focus"
 	ActionSelectText = "select_text"
+	ActionInsertText = "insert_text"
 	ActionPressKey   = "press_key"
 	ActionTypeText   = "type_text"
 	ActionPaste      = "paste"

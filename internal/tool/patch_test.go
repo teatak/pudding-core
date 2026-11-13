@@ -3,7 +3,9 @@ package tool
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -45,7 +47,7 @@ func TestFilePatchArgumentErrorsAreSpecific(t *testing.T) {
 		{name: "null content", args: `{"scope":"project","files":[{"path":"notes.txt","action":"delete","content":null}]}`, kind: "invalid_type", field: "files[0].content", expected: "string", hasOffset: true},
 		{name: "null hunks", args: `{"scope":"project","files":[{"path":"notes.txt","action":"delete","hunks":null}]}`, kind: "invalid_type", field: "files[0].hunks", expected: "array", hasOffset: true},
 		{name: "null hunk", args: `{"scope":"project","files":[{"path":"notes.txt","action":"edit","hunks":[null]}]}`, kind: "invalid_type", field: "files[0].hunks[0]", expected: "object", hasOffset: true},
-		{name: "invalid relocate type", args: `{"scope":"project","files":[{"path":"notes.txt","action":"edit","hunks":[{"start_line":1,"old_lines":["old"],"new_lines":["new"],"relocate":"true"}]}]}`, kind: "invalid_type", field: "files.hunks.relocate", expected: "boolean", hasOffset: true},
+		{name: "invalid relocate type", args: `{"scope":"project","files":[{"path":"notes.txt","action":"edit","hunks":[{"start_line":1,"old_lines":["old"],"new_lines":["new"],"relocate":"true"}]}]}`, kind: "invalid_type", field: "files[0].hunks[0].relocate", expected: "boolean", hasOffset: true},
 		{name: "missing hunk line", args: `{"scope":"project","files":[{"path":"notes.txt","action":"edit","hunks":[{"old_lines":["old"],"new_lines":["new"]}]}]}`, kind: "hunk_line_invalid", field: "files[0].hunks[0].start_line", expected: "integer >= 1"},
 		{name: "missing hunk input", args: `{"scope":"project","files":[{"path":"notes.txt","action":"edit","hunks":[{"start_line":1,"new_lines":["new"]}]}]}`, kind: "hunk_old_lines_required", field: "files[0].hunks[0].old_lines", expected: "array"},
 		{name: "missing hunk output", args: `{"scope":"project","files":[{"path":"notes.txt","action":"edit","hunks":[{"start_line":1,"old_lines":["old"]}]}]}`, kind: "hunk_new_lines_required", field: "files[0].hunks[0].new_lines", expected: "array"},
@@ -193,7 +195,7 @@ func TestFilePatchResourceDiagnosticsLeaveFilesUnchanged(t *testing.T) {
 			name: "review diff", reason: "patch_diff_too_large", metric: "review_diff_bytes", unit: "bytes", limit: patchMaxDiffBytes,
 			setup: func(t *testing.T, root string) []map[string]any {
 				writePatchTestFile(t, filepath.Join(root, "notes.txt"), strings.Repeat("a", 140<<10)+"\n")
-				return []map[string]any{{"path": "notes.txt", "action": "replace", "content": strings.Repeat("b", 140<<10) + "\n"}}
+				return []map[string]any{{"path": "notes.txt", "action": "replace", "content": strings.Repeat("b", 140<<10) + "\n", "expected_hash": patchContentHash([]byte(strings.Repeat("a", 140<<10) + "\n"))}}
 			},
 		},
 	} {
@@ -233,7 +235,7 @@ func TestFilePatchMissingPathRejectsWholeBatch(t *testing.T) {
 	path := filepath.Join(root, "notes.txt")
 	writePatchTestFile(t, path, "original\n")
 	args := map[string]any{"scope": "project", "files": []map[string]any{
-		{"path": "notes.txt", "action": "replace", "content": "changed\n"},
+		{"path": "notes.txt", "action": "replace", "content": "changed\n", "expected_hash": patchContentHash([]byte("original\n"))},
 		{"action": "create", "content": "must not be written\n"},
 	}}
 	result := patchTestCall(NewBuiltinRunner(), "session_missing_path", root, FilePatch, args)
@@ -254,7 +256,7 @@ func TestFilePatchUsesApprovalSnapshotAndWritesAtomicBatch(t *testing.T) {
 	args, _ := json.Marshal(map[string]any{
 		"scope": "project",
 		"files": []map[string]any{
-			{"path": "update.txt", "action": "replace", "content": "new line\n"},
+			{"path": "update.txt", "action": "replace", "content": "new line\n", "expected_hash": patchContentHash([]byte("old line\n"))},
 			{"path": "nested/create.txt", "action": "create", "content": "created\n"},
 			{"path": "delete.txt", "action": "delete"},
 		},
@@ -520,8 +522,8 @@ func TestFilePatchRejectsDriftWithoutPartialWrites(t *testing.T) {
 	args, _ := json.Marshal(map[string]any{
 		"scope": "project",
 		"files": []map[string]any{
-			{"path": "first.txt", "action": "replace", "content": "first new\n"},
-			{"path": "second.txt", "action": "replace", "content": "second new\n"},
+			{"path": "first.txt", "action": "replace", "content": "first new\n", "expected_hash": patchContentHash([]byte("first old\n"))},
+			{"path": "second.txt", "action": "replace", "content": "second new\n", "expected_hash": patchContentHash([]byte("second old\n"))},
 		},
 	})
 	call := Call{SessionID: "session_a", TurnID: "turn_patch", CallID: "call_drift", Name: FilePatch, Args: args, ProjectDirs: []string{root}}
@@ -550,7 +552,7 @@ func TestFilePatchFailsClosedWithoutApprovalSnapshot(t *testing.T) {
 	runner := NewBuiltinRunner()
 	args, _ := json.Marshal(map[string]any{
 		"scope": "project",
-		"files": []map[string]any{{"path": "notes.txt", "action": "replace", "content": "approved\n"}},
+		"files": []map[string]any{{"path": "notes.txt", "action": "replace", "content": "approved\n", "expected_hash": patchContentHash([]byte("old\n"))}},
 	})
 	call := Call{SessionID: "session_a", TurnID: "turn_patch", CallID: "call_missing", Name: FilePatch, Args: args, ProjectDirs: []string{root}}
 	if _, err := runner.ApprovalDetails(context.Background(), call); err != nil {
@@ -577,7 +579,7 @@ func TestFilePatchRejectsChangedArgumentsAfterApproval(t *testing.T) {
 	runner := NewBuiltinRunner()
 	approvedArgs, _ := json.Marshal(map[string]any{
 		"scope": "project",
-		"files": []map[string]any{{"path": "notes.txt", "action": "replace", "content": "approved\n"}},
+		"files": []map[string]any{{"path": "notes.txt", "action": "replace", "content": "approved\n", "expected_hash": patchContentHash([]byte("old\n"))}},
 	})
 	call := Call{SessionID: "session_a", TurnID: "turn_patch", CallID: "call_changed", Name: FilePatch, Args: approvedArgs, ProjectDirs: []string{root}}
 	if _, err := runner.ApprovalDetails(context.Background(), call); err != nil {
@@ -585,7 +587,7 @@ func TestFilePatchRejectsChangedArgumentsAfterApproval(t *testing.T) {
 	}
 	call.Args, _ = json.Marshal(map[string]any{
 		"scope": "project",
-		"files": []map[string]any{{"path": "notes.txt", "action": "replace", "content": "different\n"}},
+		"files": []map[string]any{{"path": "notes.txt", "action": "replace", "content": "different\n", "expected_hash": patchContentHash([]byte("old\n"))}},
 	})
 
 	result := runner.Call(context.Background(), call)
@@ -604,7 +606,7 @@ func TestFilePatchRejectsExpiredApprovalSnapshot(t *testing.T) {
 	runner := NewBuiltinRunner()
 	args, _ := json.Marshal(map[string]any{
 		"scope": "project",
-		"files": []map[string]any{{"path": "notes.txt", "action": "replace", "content": "new\n"}},
+		"files": []map[string]any{{"path": "notes.txt", "action": "replace", "content": "new\n", "expected_hash": patchContentHash([]byte("old\n"))}},
 	})
 	call := Call{SessionID: "session_a", TurnID: "turn_patch", CallID: "call_expired", Name: FilePatch, Args: args, ProjectDirs: []string{root}}
 	if _, err := runner.ApprovalDetails(context.Background(), call); err != nil {
@@ -669,7 +671,7 @@ func TestFilePatchRejectsCrossRootAndNoop(t *testing.T) {
 
 	noop := patchTestCallWithRoots(runner, "session_a", []string{firstRoot}, FilePatch, map[string]any{
 		"scope": "project",
-		"files": []map[string]any{{"path": "first.txt", "action": "replace", "content": "same\n"}},
+		"files": []map[string]any{{"path": "first.txt", "action": "replace", "content": "same\n", "expected_hash": patchContentHash([]byte("same\n"))}},
 	})
 	if noop.Ok || !strings.Contains(noop.Content, `"reason":"no_changes"`) {
 		t.Fatalf("no-op patch should fail: %+v", noop)
@@ -678,12 +680,297 @@ func TestFilePatchRejectsCrossRootAndNoop(t *testing.T) {
 	crossRoot := patchTestCallWithRoots(runner, "session_a", []string{firstRoot, secondRoot}, FilePatch, map[string]any{
 		"scope": "project",
 		"files": []map[string]any{
-			{"path": first, "action": "replace", "content": "first new\n"},
-			{"path": second, "action": "replace", "content": "second new\n"},
+			{"path": first, "action": "replace", "content": "first new\n", "expected_hash": patchContentHash([]byte("same\n"))},
+			{"path": second, "action": "replace", "content": "second new\n", "expected_hash": patchContentHash([]byte("old\n"))},
 		},
 	})
 	if crossRoot.Ok || !strings.Contains(crossRoot.Content, `"reason":"cross_root_patch"`) {
 		t.Fatalf("cross-root patch should fail: %+v", crossRoot)
+	}
+}
+
+func TestFilePatchReplacementRequiresReadVersion(t *testing.T) {
+	for _, scenario := range []string{"missing", "changed", "deleted", "current", "invalid hash"} {
+		t.Run(scenario, func(t *testing.T) {
+			root := t.TempDir()
+			path := filepath.Join(root, "file.txt")
+			writePatchTestFile(t, path, "original\n")
+			runner := NewBuiltinRunner()
+			defer runner.Close()
+			read := runner.Call(context.Background(), Call{Name: FileRead, ProjectDirs: []string{root}, Args: resultJSON(map[string]any{"scope": "project", "path": path})})
+			if !read.Ok {
+				t.Fatal(read.Content)
+			}
+			hash := decodeToolResult(t, read)["contentHash"].(string)
+			file := map[string]any{"path": path, "action": "replace", "content": "replacement\n", "expected_hash": hash}
+			want, reason := "original\n", ""
+			switch scenario {
+			case "missing":
+				delete(file, "expected_hash")
+				reason = "file_version_required"
+			case "changed":
+				want, reason = "user edit\n", "file_conflict"
+				writePatchTestFile(t, path, want)
+			case "deleted":
+				reason = "file_conflict"
+				if err := os.Remove(path); err != nil {
+					t.Fatal(err)
+				}
+			case "invalid hash":
+				file["expected_hash"], reason = "not a hash", "invalid_arguments"
+			case "current":
+				want = "replacement\n"
+			}
+			result := patchTestCall(runner, "versions", root, FilePatch, map[string]any{"scope": "project", "files": []map[string]any{
+				{"path": "created.txt", "action": "create", "content": "new\n"}, file,
+			}})
+			if result.Ok != (reason == "") || reason != "" && decodeToolResult(t, result)["reason"] != reason {
+				t.Fatalf("version outcome: %s", result.Content)
+			}
+			if scenario == "deleted" {
+				if _, err := os.Stat(path); !os.IsNotExist(err) {
+					t.Fatalf("deleted file recreated: %v", err)
+				}
+			} else if got := readPatchTestFile(t, path); got != want {
+				t.Fatalf("content = %q, want %q", got, want)
+			}
+			if reason != "" {
+				if _, err := os.Stat(filepath.Join(root, "created.txt")); !os.IsNotExist(err) {
+					t.Fatalf("failed batch partially wrote: %v", err)
+				}
+			}
+		})
+	}
+}
+
+func TestUnifiedPatchPreservesTextBytes(t *testing.T) {
+	for _, tc := range []struct{ name, before, body, after string }{
+		{"LF", "old\n", "@@ -1 +1 @@\n-old\n+new\n", "new\n"},
+		{"CRLF", "old\r\nkeep\r\n", "@@ -1,2 +1,2 @@\n-old\r\n+new\r\n keep\r\n", "new\r\nkeep\r\n"},
+		{"no final newline", "old", "@@ -1 +1 @@\n-old\n\\ No newline at end of file\n+new\n\\ No newline at end of file\n", "new"},
+		{"add final newline", "old", "@@ -1 +1 @@\n-old\n\\ No newline at end of file\n+old\n", "old\n"},
+		{"remove final newline", "old\n", "@@ -1 +1 @@\n-old\n+old\n\\ No newline at end of file\n", "old"},
+		{"bare CR at EOF", "old\r", "@@ -1 +1 @@\n-old\r\n\\ No newline at end of file\n+new\r\n\\ No newline at end of file\n", "new\r"},
+		{"blank context and header-like content", "\n-- old\n++ old\n", "@@ -1,3 +1,3 @@\n \n--- old\n-++ old\n+-- new\n+++ new\n", "\n-- new\n++ new\n"},
+		{"insert into empty", "", "@@ -0,0 +1 @@\n+new\n", "new\n"},
+		{"delete all lines keeps file", "old\n", "@@ -1 +0,0 @@\n-old\n", ""},
+		{"multiple hunks with shifted coordinates", "a\nb\nc\nd\ne\n", "@@ -1 +1,2 @@\n a\n+inserted\n@@ -4 +5 @@\n-d\n+D\n", "a\ninserted\nb\nc\nD\ne\n"},
+		{"insert after line", "a\nb\n", "@@ -1,0 +2 @@\n+middle\n", "a\nmiddle\nb\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			path := filepath.Join(root, "notes.txt")
+			writePatchTestFile(t, path, tc.before)
+			result := patchTestCall(NewBuiltinRunner(), "session", root, FilePatch, map[string]any{
+				"scope": "project", "diff": "--- a/notes.txt\n+++ b/notes.txt\n" + tc.body,
+			})
+			if !result.Ok {
+				t.Fatalf("apply: %s", result.Content)
+			}
+			if got := readPatchTestFile(t, path); got != tc.after {
+				t.Fatalf("bytes = %q, want %q", got, tc.after)
+			}
+		})
+	}
+}
+
+func TestUnifiedPatchGitBatchUsesApprovalAndTracking(t *testing.T) {
+	root := newGitTestRepository(t, true)
+	before := map[string]string{"notes.txt": "old\r\n", "删除.txt": "remove", "space name.txt": "old\n"}
+	for name, content := range before {
+		writePatchTestFile(t, filepath.Join(root, name), content)
+	}
+	runGitTest(t, root, "add", ".")
+	runGitTest(t, root, "commit", "-m", "patch baseline")
+	writePatchTestFile(t, filepath.Join(root, "notes.txt"), "new\r\n")
+	writePatchTestFile(t, filepath.Join(root, "space name.txt"), "changed\n")
+	writePatchTestFile(t, filepath.Join(root, "created.txt"), "created")
+	if err := os.Remove(filepath.Join(root, "删除.txt")); err != nil {
+		t.Fatal(err)
+	}
+	runGitTest(t, root, "add", ".")
+	cmd := exec.Command("git", "-c", "core.quotePath=true", "diff", "--cached", "--no-ext-diff", "--no-textconv", "--no-renames", "HEAD", "--")
+	cmd.Dir = root
+	diff, err := cmd.Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Restore only the fixture's worktree; the submitted diff is real Git output.
+	for name, content := range before {
+		writePatchTestFile(t, filepath.Join(root, name), content)
+	}
+	if err := os.Remove(filepath.Join(root, "created.txt")); err != nil {
+		t.Fatal(err)
+	}
+	runner := NewBuiltinRunner()
+	call := Call{SessionID: "session", TurnID: "turn", CallID: "patch", Name: FilePatch, ProjectDirs: []string{root}, Args: resultJSON(map[string]any{"scope": "project", "diff": string(diff)})}
+	risk, ok := ClassifyToolCallForProject(call.Name, call.Args, call.ProjectDirs)
+	if !ok || risk.Class != RiskClassDestructive || len(risk.Paths) != 4 {
+		t.Fatalf("deletion classification: %+v", risk)
+	}
+	tracking, ok := MutationTrackingForCall(call)
+	if !ok || len(tracking.Targets) != 4 {
+		t.Fatalf("tracking: %+v", tracking)
+	}
+	details, err := runner.ApprovalDetails(context.Background(), call)
+	if err != nil || details["fileCount"] != 4 || details["destructive"] != true {
+		t.Fatalf("approval: %+v %v", details, err)
+	}
+	for name, want := range before {
+		if got := readPatchTestFile(t, filepath.Join(root, name)); got != want {
+			t.Fatalf("approval changed %s", name)
+		}
+	}
+	result := runner.Call(context.Background(), call)
+	if !result.Ok || decodePatchPayload(t, result).FileCount != 4 {
+		t.Fatalf("apply: %s", result.Content)
+	}
+	for name, want := range map[string]string{"notes.txt": "new\r\n", "space name.txt": "changed\n", "created.txt": "created"} {
+		if got := readPatchTestFile(t, filepath.Join(root, name)); got != want {
+			t.Fatalf("%s = %q, want %q", name, got, want)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(root, "删除.txt")); !os.IsNotExist(err) {
+		t.Fatalf("delete: %v", err)
+	}
+	assertNoPatchTempFiles(t, root)
+}
+
+func TestUnifiedPatchRelocationUsesExactBytes(t *testing.T) {
+	for _, tc := range []struct {
+		name, before, after string
+		relocate, ok        bool
+	}{
+		{"opt in", "prefix\nold\n", "prefix\nnew\n", true, true},
+		{"default rejects shift", "prefix\nold\n", "prefix\nold\n", false, false},
+		{"ambiguous", "prefix\nold\nold\n", "prefix\nold\nold\n", true, false},
+		{"endings disambiguate", "old\r\nold\n", "old\r\nnew\n", true, true},
+		{"ending mismatch", "old\r\n", "old\r\n", true, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			writePatchTestFile(t, filepath.Join(root, "x"), tc.before)
+			result := patchTestCall(NewBuiltinRunner(), "session", root, FilePatch, map[string]any{
+				"scope": "project", "relocate": tc.relocate, "diff": "--- a/x\n+++ b/x\n@@ -1 +1 @@\n-old\n+new\n",
+			})
+			if result.Ok != tc.ok || readPatchTestFile(t, filepath.Join(root, "x")) != tc.after {
+				t.Fatalf("apply: %s", result.Content)
+			}
+			if tc.ok && len(decodePatchPayload(t, result).Files[0].Relocations) != 1 {
+				t.Fatalf("relocation missing: %s", result.Content)
+			}
+		})
+	}
+}
+
+func TestUnifiedPatchRejectsMalformedBatchesWithoutWrites(t *testing.T) {
+	valid := "--- a/first\n+++ b/first\n@@ -1 +1 @@\n-old\n+new\n"
+	header := "--- a/second\n+++ b/second\n"
+	for name, invalid := range map[string]string{
+		"truncated":              header + "@@ -1 +1 @@\n-old\n",
+		"excess":                 header + "@@ -1 +1 @@\n-old\n+new\n+extra\n",
+		"coordinates":            header + "@@ -1 +2 @@\n-old\n+new\n",
+		"zero coordinates":       header + "@@ -0 +0 @@\n-old\n+new\n",
+		"context only":           header + "@@ -1 +1 @@\n old\n",
+		"orphan marker":          header + "@@ -1 +1 @@\n\\ No newline at end of file\n-old\n+new\n",
+		"double marker":          header + "@@ -1 +1 @@\n-old\n\\ No newline at end of file\n\\ No newline at end of file\n+new\n",
+		"after EOF":              header + "@@ -1,2 +1 @@\n-old\n\\ No newline at end of file\n-extra\n+new\n",
+		"mismatch":               header + "@@ -1 +1 @@\n-not current\n+new\n",
+		"partial delete":         "--- a/second\n+++ /dev/null\n@@ -1 +0,0 @@\n-old\n",
+		"rename":                 "--- a/second\n+++ b/renamed\n@@ -1 +1 @@\n-old\n+new\n",
+		"binary":                 "diff --git a/second b/second\nGIT binary patch\n",
+		"mode change":            "diff --git a/second b/second\nold mode 100644\nnew mode 100755\n",
+		"executable create":      "diff --git a/second b/second\nnew file mode 100755\n" + header + "@@ -1 +1 @@\n-old\n+new\n",
+		"mode mismatch":          "diff --git a/second b/second\nnew file mode 100644\n" + header + "@@ -1 +1 @@\n-old\n+new\n",
+		"duplicate target":       valid,
+		"unterminated insertion": header + "@@ -2,0 +3 @@\n+new\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			root := t.TempDir()
+			writePatchTestFile(t, filepath.Join(root, "first"), "old\n")
+			writePatchTestFile(t, filepath.Join(root, "second"), "old\nextra")
+			result := patchTestCall(NewBuiltinRunner(), "session", root, FilePatch, map[string]any{"scope": "project", "diff": valid + invalid})
+			if result.Ok {
+				t.Fatal("invalid batch accepted")
+			}
+			if readPatchTestFile(t, filepath.Join(root, "first")) != "old\n" || readPatchTestFile(t, filepath.Join(root, "second")) != "old\nextra" {
+				t.Fatal("failed batch wrote a file")
+			}
+			assertNoPatchTempFiles(t, root)
+		})
+	}
+}
+
+func TestUnifiedPatchInputContractAndLimits(t *testing.T) {
+	valid := "--- a/x\n+++ b/x\n@@ -1 +1 @@\n-old\n+new\n"
+	for _, tc := range []struct{ raw, kind, field string }{
+		{`{"scope":"project","diff":null}`, "invalid_type", "diff"},
+		{`{"scope":"project","diff":[]}`, "invalid_type", "diff"},
+		{`{"scope":"project","diff":""}`, "invalid_diff", "diff"},
+		{string(resultJSON(map[string]any{"scope": "project", "diff": valid, "files": []any{}})), "conflicting_fields", "diff"},
+		{`{"scope":"project","files":[],"relocate":true}`, "invalid_value", "relocate"},
+	} {
+		_, err := decodeFilePatchArgs([]byte(tc.raw))
+		if err == nil || err.kind != tc.kind || err.field != tc.field {
+			t.Errorf("%s: %+v", tc.raw, err)
+		}
+	}
+	var tooManyFiles, tooManyHunks strings.Builder
+	tooManyHunks.WriteString("--- a/x\n+++ b/x\n")
+	for i := 1; i <= patchMaxHunksPerFile+1; i++ {
+		fmt.Fprintf(&tooManyHunks, "@@ -%d +%d @@\n-old\n+new\n", i, i)
+		if i <= patchMaxFiles+1 {
+			fmt.Fprintf(&tooManyFiles, "--- a/f%d\n+++ b/f%d\n@@ -1 +1 @@\n-old\n+new\n", i, i)
+		}
+	}
+	for _, diff := range []string{tooManyFiles.String(), tooManyHunks.String(), strings.Repeat("x", patchMaxTotalBytes+1), "```diff\n" + valid + "```", valid + "\x00", "--- \"bad\"garbage\n+++ x\n"} {
+		if _, err := parseUnifiedPatch(diff, false); err == nil || err.kind != "invalid_diff" || err.field != "diff" {
+			t.Fatalf("invalid input accepted: size=%d error=%+v", len(diff), err)
+		}
+	}
+}
+
+func TestUnifiedPatchRetainsPathAndApprovalBoundaries(t *testing.T) {
+	root, other := t.TempDir(), t.TempDir()
+	writePatchTestFile(t, filepath.Join(root, "x"), "old\n")
+	writePatchTestFile(t, filepath.Join(other, "x"), "old\n")
+	makeDiff := func(old, next string) string { return "--- " + old + "\n+++ " + next + "\n@@ -1 +1 @@\n-old\n+new\n" }
+	for _, tc := range []struct {
+		name, diff string
+		roots      []string
+	}{
+		{"ambiguous relative", makeDiff("a/x", "b/x"), []string{root, other}},
+		{"outside", makeDiff(filepath.Join(other, "x"), filepath.Join(other, "x")), []string{root}},
+		{"traversal", makeDiff("../x", "../x"), []string{root}},
+		{"cross root", makeDiff(filepath.Join(root, "x"), filepath.Join(root, "x")) + makeDiff(filepath.Join(other, "x"), filepath.Join(other, "x")), []string{root, other}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			result := patchTestCallWithRoots(NewBuiltinRunner(), "session", tc.roots, FilePatch, map[string]any{"scope": "project", "diff": tc.diff})
+			if result.Ok || readPatchTestFile(t, filepath.Join(root, "x")) != "old\n" || readPatchTestFile(t, filepath.Join(other, "x")) != "old\n" {
+				t.Fatalf("boundary bypassed: %s", result.Content)
+			}
+		})
+	}
+	for _, drift := range []string{"file", "arguments"} {
+		t.Run(drift, func(t *testing.T) {
+			path := filepath.Join(root, "x")
+			writePatchTestFile(t, path, "old\n")
+			runner := NewBuiltinRunner()
+			call := Call{SessionID: "session", CallID: "patch", Name: FilePatch, ProjectDirs: []string{root, other}, Args: resultJSON(map[string]any{"scope": "project", "diff": makeDiff(strconv.Quote(path)+"\tdate", strconv.Quote(path)+"\tdate")})}
+			if _, err := runner.ApprovalDetails(context.Background(), call); err != nil {
+				t.Fatal(err)
+			}
+			want := "old\n"
+			if drift == "file" {
+				want = "external edit\n"
+				writePatchTestFile(t, path, want)
+			} else {
+				call.Args = resultJSON(map[string]any{"scope": "project", "diff": makeDiff(path, path), "relocate": true})
+			}
+			if result := runner.Call(context.Background(), call); result.Ok || readPatchTestFile(t, path) != want {
+				t.Fatalf("stale approval applied: %s", result.Content)
+			}
+		})
 	}
 }
 

@@ -327,7 +327,8 @@ const (
 
 // OutputLimitError identifies incomplete output rejected by a provider as an
 // error. It preserves the original error text and remains a failed stream,
-// distinct from a successful stream ending with FinishLength.
+// distinct from a normally terminated stream ending with FinishLength. Both
+// indicate incomplete model output and must not complete the task successfully.
 type OutputLimitError struct{ Message string }
 
 func (e *OutputLimitError) Error() string { return e.Message }

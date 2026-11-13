@@ -831,3 +831,32 @@ func (s *ElectronBridgeService) CloseWindow(ctx context.Context, sessionID, tabI
 		WindowID  string `json:"windowID"`
 	}{sessionID, tabID, windowID}, nil)
 }
+
+func (s *ElectronBridgeService) Upload(ctx context.Context, sessionID, tabID string, in UploadInput) (ActionResult, error) {
+	id, err := s.resolveTabID(ctx, sessionID, tabID, false)
+	if err != nil {
+		return ActionResult{}, err
+	}
+	in.TabID = id
+	request := struct {
+		SessionID string `json:"sessionID"`
+		UploadInput
+	}{sessionID, in}
+	var out electronBridgeActionResponse
+	if err := s.post(ctx, "/browser/tabs/upload", request, &out); err != nil {
+		return ActionResult{}, err
+	}
+	return out.result("upload"), nil
+}
+
+func (s *ElectronBridgeService) Downloads(ctx context.Context, sessionID string, in DownloadInput) (DownloadResult, error) {
+	request := struct {
+		SessionID string `json:"sessionID"`
+		DownloadInput
+	}{sessionID, in}
+	var out DownloadResult
+	if err := s.post(ctx, "/browser/downloads", request, &out); err != nil {
+		return DownloadResult{}, err
+	}
+	return out, nil
+}

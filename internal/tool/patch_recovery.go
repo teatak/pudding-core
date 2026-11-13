@@ -41,7 +41,7 @@ type patchRecoveryContextLine struct {
 
 func newPatchHunkError(reason, detail, path string, index int, hunk patchHunkArg, lines []patchTextLine, mismatchOffset int) *patchError {
 	oldLines := *hunk.OldLines
-	candidates, count := patchExactCandidateLines(lines, oldLines)
+	candidates, count := patchExactCandidateLines(lines, oldLines, hunk.oldEndings)
 	recovery := &patchHunkRecovery{
 		Path:                path,
 		Hunk:                index + 1,
@@ -84,41 +84,49 @@ func (r *patchHunkRecovery) hint() string {
 			complete = complete && !line.Truncated
 		}
 		if complete {
-			return "No files were changed. One exact old_lines block was found. If the candidate context identifies the intended target, retry with its startLine or set relocate=true on this hunk; no extra read is needed. Keep the complete old_lines you already supplied. Otherwise read a focused builtin_file_slice with order=natural."
+			return "No files were changed. One exact source block was found. If the candidate context identifies the intended target, correct the hunk coordinates or enable relocate=true (top-level for diff, per-hunk for files); no extra read is needed. Keep the complete source lines you already supplied. Otherwise read a focused builtin_file_slice with order=natural."
 		}
 	}
-	matchHint := "No exact non-empty old_lines block was found."
+	matchHint := "No exact non-empty source block was found."
 	if r.ExactMatchCount == 1 {
-		matchHint = "One exact old_lines block was found, but its diagnostic context is truncated."
+		matchHint = "One exact source block was found, but its diagnostic context is truncated."
 	} else if r.ExactMatchCount > 1 {
-		matchHint = "Multiple exact old_lines blocks were found; use surrounding context to disambiguate, not proximity alone."
+		matchHint = "Multiple exact source blocks were found; use surrounding context to disambiguate, not proximity alone."
 	}
-	return "No files were changed. " + matchHint + " Read a fresh builtin_file_slice with order=natural around the intended target, then rebuild hunks against the current pre-patch file. Do not copy truncated diagnostic text into old_lines."
+	return "No files were changed. " + matchHint + " Read a fresh builtin_file_slice with order=natural around the intended target, then rebuild hunks against the current pre-patch file. Do not use truncated diagnostic text as source lines."
 }
 
-func patchExactCandidateLines(lines []patchTextLine, oldLines []string) ([]int, int) {
+func patchExactCandidateLines(lines []patchTextLine, oldLines []string, optionalEndings ...[]string) ([]int, int) {
 	candidates := make([]int, 0, patchRecoveryMaxCandidates)
 	if len(oldLines) == 0 || len(oldLines) > len(lines) {
 		return candidates, 0
 	}
 	// KMP over whole lines bounds the scan even for large, repetitive files.
 	// Equality is identical to the apply path, including whitespace and blank lines.
+	var endings []string
+	if len(optionalEndings) > 0 {
+		endings = optionalEndings[0]
+	}
+	equalOld := func(i, j int) bool { return oldLines[i] == oldLines[j] && (endings == nil || endings[i] == endings[j]) }
+	equalLine := func(line patchTextLine, i int) bool {
+		return line.text == oldLines[i] && (endings == nil || line.ending == endings[i])
+	}
 	prefix := make([]int, len(oldLines))
 	for i, matched := 1, 0; i < len(oldLines); i++ {
-		for matched > 0 && oldLines[i] != oldLines[matched] {
+		for matched > 0 && !equalOld(i, matched) {
 			matched = prefix[matched-1]
 		}
-		if oldLines[i] == oldLines[matched] {
+		if equalOld(i, matched) {
 			matched++
 		}
 		prefix[i] = matched
 	}
 	count, matched := 0, 0
 	for i, line := range lines {
-		for matched > 0 && line.text != oldLines[matched] {
+		for matched > 0 && !equalLine(line, matched) {
 			matched = prefix[matched-1]
 		}
-		if line.text == oldLines[matched] {
+		if equalLine(line, matched) {
 			matched++
 		}
 		if matched == len(oldLines) {

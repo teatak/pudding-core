@@ -469,6 +469,10 @@ func TestElectronBridgeFormActionsPreserveInputsAndObservation(t *testing.T) {
 			t.Fatal(err)
 		}
 		bodies = append(bodies, body)
+		if r.URL.Path == "/browser/tabs/observe" {
+			_, _ = w.Write([]byte(`{"elements":[{"tag":"input","accessibleName":"Account","placeholder":"name","checked":false,"expanded":false,"readOnly":false,"value":"","valueTruncated":true,"indeterminate":true}]}`))
+			return
+		}
 		writeElectronBridgeTestJSON(w, electronBridgeActionResponse{Result: map[string]any{"delivered": true, "effect": "unverified"}})
 	}))
 	defer server.Close()
@@ -498,6 +502,14 @@ func TestElectronBridgeFormActionsPreserveInputsAndObservation(t *testing.T) {
 	}
 	if len(bodies) != 3 {
 		t.Fatal("invalid selection reached the bridge")
+	}
+	forms, err := service.Observe(ctx, "session", "tab", ObserveOptions{})
+	if err != nil || len(forms.Elements) != 1 {
+		t.Fatalf("observation failed: %+v %v", forms, err)
+	}
+	field := forms.Elements[0]
+	if field.AccessibleName != "Account" || field.Placeholder != "name" || field.Checked == nil || *field.Checked || field.Expanded == nil || *field.Expanded || field.ReadOnly == nil || *field.ReadOnly || field.Value == nil || *field.Value != "" || !field.ValueTruncated || !field.Indeterminate {
+		t.Fatalf("form metadata lost during decoding: %+v", field)
 	}
 	observed := (electronBridgeObserveResponse{ObservationID: "observed", CoordinateSpace: "viewport_css_pixels"}).result()
 	shot := (electronBridgeScreenshotResponse{ObservationID: "captured"}).result()
@@ -545,6 +557,16 @@ func TestElectronBridgeKeyboardAndWaitContracts(t *testing.T) {
 	_, err = service.Wait(context.Background(), "session", "tab", WaitInput{Condition: "text", Text: "missing"})
 	if ErrorCode(err) != "browser_wait_timeout" {
 		t.Fatalf("lost timeout classification: %v", err)
+	}
+	for _, condition := range []string{"value", "valueChanged"} {
+		empty := ""
+		if _, err := service.Wait(context.Background(), "session", "tab", WaitInput{Condition: condition, Selector: "#value", Value: &empty}); err != nil {
+			t.Fatal(err)
+		}
+		last := bodies[len(bodies)-1]
+		if last["condition"] != condition || last["value"] != "" || last["selector"] != "#value" {
+			t.Fatalf("empty form value lost: %+v", last)
+		}
 	}
 }
 
@@ -732,5 +754,47 @@ func TestElectronBridgeDialogPreservesFalseAndEmptyPrompt(t *testing.T) {
 		if err != nil || result.Result["responded"] != true {
 			t.Fatalf("dialog result lost: %+v %v", result, err)
 		}
+	}
+}
+
+func TestElectronBridgeFileTransfersPreserveScopeAndPaths(t *testing.T) {
+	var requests []map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Error(err)
+			w.WriteHeader(400)
+			return
+		}
+		requests = append(requests, request)
+		if r.URL.Path == "/browser/tabs/upload" {
+			writeElectronBridgeTestJSON(w, electronBridgeActionResponse{Result: map[string]any{"delivered": true}})
+			return
+		}
+		if r.URL.Path != "/browser/downloads" {
+			t.Errorf("unexpected route %s", r.URL.Path)
+		}
+		_, _ = w.Write([]byte(`{"downloads":[{"id":"download","sessionID":"session","tabID":"closed","windowID":"popup","state":"completed","filename":"result.txt","path":"/downloads/unique/result.txt","receivedBytes":12,"totalBytes":12}]}`))
+	}))
+	defer server.Close()
+	service, err := NewElectronBridgeService(ElectronBridgeConfig{URL: server.URL, Token: "token"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	uploaded, err := service.Upload(context.Background(), "session", "tab", UploadInput{WindowID: "popup", FrameID: "frame", Selector: "pudding-ref:file", Files: []string{"/snapshot/file.txt"}})
+	if err != nil || uploaded.Action != "upload" || uploaded.Result["delivered"] != true {
+		t.Fatalf("upload result lost: %+v %v", uploaded, err)
+	}
+	empty := []string{}
+	popup := "popup"
+	result, err := service.Downloads(context.Background(), "session", DownloadInput{Action: "wait", TabID: "closed", WindowID: &popup, KnownIDs: &empty})
+	if err != nil || len(result.Downloads) != 1 || result.Downloads[0].Path != "/downloads/unique/result.txt" || result.Downloads[0].State != "completed" {
+		t.Fatalf("download result lost: %+v %v", result, err)
+	}
+	if requests[0]["sessionID"] != "session" || requests[0]["tabID"] != "tab" || requests[0]["windowID"] != "popup" || requests[0]["frameID"] != "frame" || requests[0]["files"].([]any)[0] != "/snapshot/file.txt" {
+		t.Fatalf("upload fields lost: %+v", requests[0])
+	}
+	if requests[1]["sessionID"] != "session" || requests[1]["tabID"] != "closed" || requests[1]["knownIDs"] == nil || len(requests[1]["knownIDs"].([]any)) != 0 {
+		t.Fatalf("download baseline lost: %+v", requests[1])
 	}
 }

@@ -37,10 +37,9 @@ func TestCommandPermissionTextDoesNotReplaceFailure(t *testing.T) {
 	args := map[string]any{"scope": "project", "command": commandHelperCommand("permission-error")}
 	result := backgroundToolCall(runner, "permission", root, CommandRun, args)
 	started := decodeBackgroundProcessPayload(t, result)
-	result = backgroundToolCall(runner, "permission", root, CommandSession, map[string]any{
-		"action": "poll", "process_id": started.ProcessID, "wait_ms": 10000,
-	})
+	result, chunks := pollCommandUntilFinished(t, context.Background(), runner, "permission", started.ProcessID)
 	payload := decodeBackgroundProcessPayload(t, result)
+	payload.Output = chunks
 	if payload.Running || payload.SandboxDenied || payload.Reason != "non_zero_exit" || payload.Error == "" || !strings.Contains(backgroundOutputText(payload.Output), "malformed file") {
 		t.Fatalf("background toolchain failure was relabeled: %s", result.Content)
 	}

@@ -4,6 +4,8 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
@@ -40,6 +42,7 @@ const (
 	maxFileSliceSkip              = 5000
 	maxFileSlicePayload           = 64 * 1024
 	maxFileSearchBytes            = 1 << 20
+	maxFileSearchDirectBytes      = 16 << 20
 	maxFileSearchLineChars        = 200
 	maxFileSearchExcerptLineChars = 400
 	defaultFileSearchMax          = 100
@@ -79,15 +82,21 @@ func (p resolvedFilePath) payload(base map[string]any) map[string]any {
 	return base
 }
 
-func (r *BuiltinRunner) fileList(call Call) Result {
+func (r *BuiltinRunner) fileList(ctx context.Context, call Call) Result {
 	out := Result{CallID: call.CallID, Name: call.Name}
 	var args struct {
-		Scope      string `json:"scope"`
-		Path       string `json:"path"`
-		MaxEntries int    `json:"max_entries"`
+		WidgetID       string   `json:"widget_id,omitempty"`
+		Scope          string   `json:"scope"`
+		Path           string   `json:"path"`
+		MaxEntries     int      `json:"max_entries"`
+		Cursor         string   `json:"cursor"`
+		Recursive      bool     `json:"recursive"`
+		IncludeGlobs   []string `json:"include_globs"`
+		ExcludeGlobs   []string `json:"exclude_globs"`
+		IncludeIgnored bool     `json:"include_ignored"`
 	}
-	if err := decodeStructToolArgs(call.Args, &args); err != nil {
-		return toolJSONError(out, "invalid_arguments", err.Error())
+	if err := decodeToolArgumentObject(call.Args, &args); err != nil {
+		return toolArgumentFailure(out, err)
 	}
 	args.Scope = strings.TrimSpace(args.Scope)
 	maxEntries := args.MaxEntries
@@ -97,7 +106,13 @@ func (r *BuiltinRunner) fileList(call Call) Result {
 	if maxEntries > 1000 {
 		maxEntries = 1000
 	}
-	if isProjectFileScope(args.Scope) && projectRootListRequested(args.Path) {
+	if err := validateSearchGlobs(args.IncludeGlobs, args.ExcludeGlobs); err != nil {
+		return toolJSONError(out, "invalid_glob", err.Error())
+	}
+	if !args.Recursive && (len(args.IncludeGlobs) > 0 || len(args.ExcludeGlobs) > 0 || args.IncludeIgnored || args.Cursor != "") {
+		return toolJSONError(out, "invalid_arguments", "glob filters, include_ignored and cursor require recursive=true")
+	}
+	if !args.Recursive && isProjectFileScope(args.Scope) && projectRootListRequested(args.Path) {
 		if projectRoots := normalizeProjectDirs(call.ProjectDirs); len(projectRoots) > 1 {
 			return projectRootListResult(out, projectRoots, maxEntries)
 		}
@@ -105,6 +120,9 @@ func (r *BuiltinRunner) fileList(call Call) Result {
 	resolved, err := r.resolveFilePath(call, args.Scope, args.Path, false, true, false)
 	if err != nil {
 		return filePathError(out, args.Scope, err)
+	}
+	if args.Recursive {
+		return r.fileListRecursive(ctx, out, resolved, maxEntries, args.IncludeGlobs, args.ExcludeGlobs, args.IncludeIgnored, args.Cursor)
 	}
 	entries, err := os.ReadDir(resolved.target)
 	if err != nil {
@@ -194,11 +212,12 @@ func projectRootListResult(out Result, roots []string, maxEntries int) Result {
 func (r *BuiltinRunner) fileStat(call Call) Result {
 	out := Result{CallID: call.CallID, Name: call.Name}
 	var args struct {
-		Scope string `json:"scope"`
-		Path  string `json:"path"`
+		WidgetID string `json:"widget_id,omitempty"`
+		Scope    string `json:"scope"`
+		Path     string `json:"path"`
 	}
-	if err := decodeStructToolArgs(call.Args, &args); err != nil {
-		return toolJSONError(out, "invalid_arguments", err.Error())
+	if err := decodeToolArgumentObject(call.Args, &args); err != nil {
+		return toolArgumentFailure(out, err)
 	}
 	args.Scope = strings.TrimSpace(args.Scope)
 	resolved, err := r.resolveFilePath(call, args.Scope, args.Path, false, true, true)
@@ -248,18 +267,22 @@ func (r *BuiltinRunner) fileStat(call Call) Result {
 func (r *BuiltinRunner) fileSearch(ctx context.Context, call Call) Result {
 	out := Result{CallID: call.CallID, Name: call.Name}
 	var args struct {
-		Scope         string   `json:"scope"`
-		Path          string   `json:"path"`
-		Query         string   `json:"query"`
-		Mode          string   `json:"mode"`
-		CaseSensitive *bool    `json:"case_sensitive"`
-		IncludeGlobs  []string `json:"include_globs"`
-		ExcludeGlobs  []string `json:"exclude_globs"`
-		ContextLines  int      `json:"context_lines"`
-		MaxResults    int      `json:"max_results"`
+		WidgetID       string   `json:"widget_id,omitempty"`
+		Scope          string   `json:"scope"`
+		Path           string   `json:"path"`
+		Query          string   `json:"query"`
+		Mode           string   `json:"mode"`
+		CaseSensitive  *bool    `json:"case_sensitive"`
+		IncludeGlobs   []string `json:"include_globs"`
+		ExcludeGlobs   []string `json:"exclude_globs"`
+		ContextLines   int      `json:"context_lines"`
+		MaxResults     int      `json:"max_results"`
+		Cursor         string   `json:"cursor"`
+		OutputMode     string   `json:"output_mode"`
+		IncludeIgnored bool     `json:"include_ignored"`
 	}
-	if err := decodeStructToolArgs(call.Args, &args); err != nil {
-		return toolJSONError(out, "invalid_arguments", err.Error())
+	if err := decodeToolArgumentObject(call.Args, &args); err != nil {
+		return toolArgumentFailure(out, err)
 	}
 	args.Scope = strings.TrimSpace(args.Scope)
 	caseSensitive := true
@@ -278,15 +301,18 @@ func (r *BuiltinRunner) fileSearch(ctx context.Context, call Call) Result {
 		excludeGlobs = append(append([]string(nil), excludeGlobs...), "fixtures/**")
 	}
 	result, err := SearchTextFiles(ctx, resolved.target, TextFileSearchOptions{
-		BaseRoot:      resolved.root,
-		CaseSensitive: caseSensitive,
-		ContextLines:  args.ContextLines,
-		ExcludeGlobs:  excludeGlobs,
-		IncludeGlobs:  args.IncludeGlobs,
-		MaxResults:    args.MaxResults,
-		Mode:          args.Mode,
-		Query:         args.Query,
-		SkipHidden:    args.Scope == managedScopeSkill || args.Scope == managedScopePlugin || args.Scope == managedScopeTemp || args.Scope == managedScopeWidget,
+		BaseRoot:       resolved.root,
+		CaseSensitive:  caseSensitive,
+		ContextLines:   args.ContextLines,
+		ExcludeGlobs:   excludeGlobs,
+		IncludeGlobs:   args.IncludeGlobs,
+		MaxResults:     args.MaxResults,
+		Cursor:         args.Cursor,
+		Mode:           args.Mode,
+		Query:          args.Query,
+		SkipHidden:     args.Scope == managedScopeSkill || args.Scope == managedScopePlugin || args.Scope == managedScopeTemp || args.Scope == managedScopeWidget,
+		OutputMode:     args.OutputMode,
+		IncludeIgnored: args.IncludeIgnored,
 	})
 	if err != nil {
 		var searchErr *TextFileSearchError
@@ -317,20 +343,35 @@ func (r *BuiltinRunner) fileSearch(ctx context.Context, call Call) Result {
 		})
 	}
 	out.Ok = true
-	out.Content = jsonString(resolved.payload(map[string]any{
-		"ok":            true,
-		"scope":         args.Scope,
-		"query":         result.Query,
-		"matches":       items,
-		"matchCount":    len(items),
-		"filesScanned":  result.FilesScanned,
-		"resultsCapped": result.ResultsCapped,
-		"caseSensitive": result.CaseSensitive,
-		"searchType":    result.Mode,
-		"contextLines":  result.ContextLines,
-		"includeGlobs":  result.IncludeGlobs,
-		"excludeGlobs":  result.ExcludeGlobs,
-	}))
+	payload := resolved.payload(map[string]any{
+		"ok":             true,
+		"scope":          args.Scope,
+		"query":          result.Query,
+		"matches":        items,
+		"matchCount":     len(items),
+		"filesScanned":   result.FilesScanned,
+		"resultsCapped":  result.ResultsCapped,
+		"nextCursor":     result.NextCursor,
+		"complete":       result.Complete,
+		"skipped":        result.Skipped,
+		"caseSensitive":  result.CaseSensitive,
+		"searchType":     result.Mode,
+		"contextLines":   result.ContextLines,
+		"includeGlobs":   result.IncludeGlobs,
+		"excludeGlobs":   result.ExcludeGlobs,
+		"outputMode":     result.OutputMode,
+		"includeIgnored": result.IncludeIgnored,
+	})
+	if result.OutputMode == "files" {
+		files := make([]string, 0, len(items))
+		for _, item := range items {
+			files = append(files, item["path"].(string))
+		}
+		delete(payload, "matches")
+		delete(payload, "matchCount")
+		payload["files"], payload["fileCount"] = files, len(files)
+	}
+	out.Content = jsonString(payload)
 	out.SummaryKind = SummaryReturnedItems
 	out.SummaryCount = len(items)
 	return out
@@ -339,17 +380,18 @@ func (r *BuiltinRunner) fileSearch(ctx context.Context, call Call) Result {
 func (r *BuiltinRunner) fileSlice(call Call) Result {
 	out := Result{CallID: call.CallID, Name: call.Name}
 	var args struct {
-		Scope  string `json:"scope"`
-		Path   string `json:"path"`
-		Origin string `json:"origin"`
-		Start  int    `json:"start"`
-		End    int    `json:"end"`
-		Lines  int    `json:"lines"`
-		Skip   int    `json:"skip"`
-		Order  string `json:"order"`
+		WidgetID string `json:"widget_id,omitempty"`
+		Scope    string `json:"scope"`
+		Path     string `json:"path"`
+		Origin   string `json:"origin"`
+		Start    int    `json:"start"`
+		End      int    `json:"end"`
+		Lines    int    `json:"lines"`
+		Skip     int    `json:"skip"`
+		Order    string `json:"order"`
 	}
-	if err := decodeStructToolArgs(call.Args, &args); err != nil {
-		return toolJSONError(out, "invalid_arguments", err.Error())
+	if err := decodeToolArgumentObject(call.Args, &args); err != nil {
+		return toolArgumentFailure(out, err)
 	}
 	args.Scope = strings.TrimSpace(args.Scope)
 	resolved, err := r.resolveFilePath(call, args.Scope, args.Path, false, false, false)
@@ -449,12 +491,13 @@ func (r *BuiltinRunner) fileSlice(call Call) Result {
 func (r *BuiltinRunner) fileRead(call Call) Result {
 	out := Result{CallID: call.CallID, Name: call.Name}
 	var args struct {
+		WidgetID string `json:"widget_id,omitempty"`
 		Scope    string `json:"scope"`
 		Path     string `json:"path"`
 		MaxChars int    `json:"max_chars"`
 	}
-	if err := decodeStructToolArgs(call.Args, &args); err != nil {
-		return toolJSONError(out, "invalid_arguments", err.Error())
+	if err := decodeToolArgumentObject(call.Args, &args); err != nil {
+		return toolArgumentFailure(out, err)
 	}
 	args.Scope = strings.TrimSpace(args.Scope)
 	resolved, err := r.resolveFilePath(call, args.Scope, args.Path, false, false, false)
@@ -509,11 +552,12 @@ func (r *BuiltinRunner) fileRead(call Call) Result {
 	}
 	out.Ok = true
 	out.Content = jsonString(resolved.payload(map[string]any{
-		"ok":        true,
-		"scope":     args.Scope,
-		"content":   content,
-		"truncated": truncated,
-		"chars":     len([]rune(string(data))),
+		"ok":          true,
+		"scope":       args.Scope,
+		"content":     content,
+		"contentHash": patchContentHash(data),
+		"truncated":   truncated,
+		"chars":       len([]rune(string(data))),
 	}))
 	out.SummaryKind = SummaryReadChars
 	out.SummaryCount = len([]rune(content))
@@ -523,9 +567,10 @@ func (r *BuiltinRunner) fileRead(call Call) Result {
 func (r *BuiltinRunner) fileWrite(call Call) Result {
 	out := Result{CallID: call.CallID, Name: call.Name}
 	var args struct {
-		Scope   string  `json:"scope"`
-		Path    string  `json:"path"`
-		Content *string `json:"content"`
+		Scope        string  `json:"scope"`
+		Path         string  `json:"path"`
+		Content      *string `json:"content"`
+		ExpectedHash string  `json:"expected_hash,omitempty"`
 	}
 	if err := decodeToolArgumentObject(call.Args, &args,
 		toolArgumentField{"scope", "string"}, toolArgumentField{"path", "string"}, toolArgumentField{"content", "string"}); err != nil {
@@ -545,17 +590,73 @@ func (r *BuiltinRunner) fileWrite(call Call) Result {
 	if err != nil {
 		return filePathError(out, args.Scope, err)
 	}
+	// Serialize compare-and-write across sessions sharing this runner. Engine
+	// resource locks additionally serialize this with other project mutations.
+	r.fileWriteMu.Lock()
+	defer r.fileWriteMu.Unlock()
+	if resolved.project || args.ExpectedHash != "" {
+		if args.ExpectedHash != "" {
+			if len(args.ExpectedHash) != 64 || strings.Trim(args.ExpectedHash, "0123456789abcdef") != "" {
+				return toolJSONError(out, "invalid_arguments", "expected_hash must be the SHA-256 contentHash returned by file_read")
+			}
+		}
+		currentHash, readErr := hashFileContent(resolved.target)
+		if readErr != nil && !errors.Is(readErr, os.ErrNotExist) {
+			return toolJSONError(out, "read_failed", readErr.Error())
+		}
+		if readErr == nil && args.ExpectedHash == "" {
+			return toolJSON(out, false, resolved.payload(map[string]any{"ok": false, "reason": "file_version_required", "hint": "Read the current file, then pass its contentHash as expected_hash to replace it; use file_patch for focused edits."}))
+		}
+		if args.ExpectedHash != "" && (readErr != nil || currentHash != args.ExpectedHash) {
+			return toolJSON(out, false, resolved.payload(map[string]any{"ok": false, "reason": "file_conflict", "hint": "The file changed or was removed since it was read. Read it again and merge your changes before retrying."}))
+		}
+	}
 	if err := os.MkdirAll(filepath.Dir(resolved.target), 0o700); err != nil {
 		return toolJSONError(out, "mkdir_failed", err.Error())
 	}
-	if err := os.WriteFile(resolved.target, []byte(*args.Content), 0o600); err != nil {
+	flags := os.O_WRONLY | os.O_CREATE | os.O_TRUNC
+	if resolved.project && args.ExpectedHash == "" {
+		flags = os.O_WRONLY | os.O_CREATE | os.O_EXCL
+	} else if args.ExpectedHash != "" {
+		flags = os.O_WRONLY | os.O_TRUNC
+	}
+	file, err := os.OpenFile(resolved.target, flags, 0o600)
+	if errors.Is(err, os.ErrExist) || args.ExpectedHash != "" && errors.Is(err, os.ErrNotExist) {
+		return toolJSONError(out, "file_conflict", "file changed before writing; read it again before retrying")
+	}
+	if err != nil {
+		return toolJSONError(out, "write_failed", err.Error())
+	}
+	_, writeErr := file.WriteString(*args.Content)
+	closeErr := file.Close()
+	if err := errors.Join(writeErr, closeErr); err != nil {
 		return toolJSONError(out, "write_failed", err.Error())
 	}
 	out.Ok = true
-	out.Content = jsonString(resolved.payload(map[string]any{"ok": true, "scope": args.Scope, "bytes": len([]byte(*args.Content))}))
+	out.Content = jsonString(resolved.payload(map[string]any{"ok": true, "scope": args.Scope, "bytes": len([]byte(*args.Content)), "contentHash": patchContentHash([]byte(*args.Content))}))
 	out.SummaryKind = SummaryChangedLines
 	out.SummaryCount = countLines(*args.Content)
 	return out
+}
+
+func hashFileContent(path string) (string, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil {
+		return "", err
+	}
+	if !info.Mode().IsRegular() {
+		return "", errors.New("expected a regular file")
+	}
+	hash := sha256.New()
+	if _, err := io.Copy(hash, file); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(hash.Sum(nil)), nil
 }
 
 func (r *BuiltinRunner) fileDelete(call Call) Result {
@@ -1028,26 +1129,33 @@ type fileSearchMatcher struct {
 }
 
 type fileSearchOptions struct {
-	baseRoot     string
-	matcher      fileSearchMatcher
-	includeGlobs []string
-	excludeGlobs []string
-	contextLines int
-	skipHidden   bool
+	baseRoot       string
+	matcher        fileSearchMatcher
+	includeGlobs   []string
+	excludeGlobs   []string
+	contextLines   int
+	skipHidden     bool
+	skipped        map[string]int
+	filesOnly      bool
+	includeIgnored bool
+	page           *filePage
 }
 
 // TextFileSearchOptions configures the shared UTF-8 content search used by
 // both model tools and the project browser.
 type TextFileSearchOptions struct {
-	BaseRoot      string
-	CaseSensitive bool
-	ContextLines  int
-	ExcludeGlobs  []string
-	IncludeGlobs  []string
-	MaxResults    int
-	Mode          string
-	Query         string
-	SkipHidden    bool
+	BaseRoot       string
+	CaseSensitive  bool
+	ContextLines   int
+	ExcludeGlobs   []string
+	IncludeGlobs   []string
+	MaxResults     int
+	Mode           string
+	Query          string
+	SkipHidden     bool
+	OutputMode     string
+	IncludeIgnored bool
+	Cursor         string
 }
 
 type TextFileSearchMatch struct {
@@ -1061,15 +1169,20 @@ type TextFileSearchMatch struct {
 }
 
 type TextFileSearchResult struct {
-	CaseSensitive bool
-	ContextLines  int
-	ExcludeGlobs  []string
-	FilesScanned  int
-	IncludeGlobs  []string
-	Matches       []TextFileSearchMatch
-	Mode          string
-	Query         string
-	ResultsCapped bool
+	CaseSensitive  bool
+	ContextLines   int
+	ExcludeGlobs   []string
+	FilesScanned   int
+	IncludeGlobs   []string
+	Matches        []TextFileSearchMatch
+	Mode           string
+	Query          string
+	ResultsCapped  bool
+	Complete       bool
+	Skipped        map[string]int
+	OutputMode     string
+	IncludeIgnored bool
+	NextCursor     string
 }
 
 type TextFileSearchError struct {
@@ -1205,6 +1318,13 @@ func validateSearchGlobs(groups ...[]string) error {
 // SearchTextFiles performs the canonical bounded text search for authorized
 // file roots. Callers remain responsible for authorizing root before calling.
 func SearchTextFiles(ctx context.Context, root string, options TextFileSearchOptions) (TextFileSearchResult, error) {
+	requestedRoot := root
+	if options.OutputMode == "" {
+		options.OutputMode = "content"
+	}
+	if options.OutputMode != "content" && options.OutputMode != "files" {
+		return TextFileSearchResult{}, &TextFileSearchError{Code: "invalid_output_mode", Detail: "output_mode must be content or files"}
+	}
 	options.Query = strings.TrimSpace(options.Query)
 	if options.Query == "" {
 		return TextFileSearchResult{}, &TextFileSearchError{Code: "query_required", Detail: "query must be a non-empty string"}
@@ -1239,33 +1359,70 @@ func SearchTextFiles(ctx context.Context, root string, options TextFileSearchOpt
 	baseRoot := options.BaseRoot
 	if strings.TrimSpace(baseRoot) == "" {
 		baseRoot = root
+		if info, err := os.Lstat(root); err == nil && info.Mode().IsRegular() {
+			baseRoot = filepath.Dir(root)
+		}
 	}
 	if evaluated, evaluateErr := filepath.EvalSymlinks(baseRoot); evaluateErr == nil {
+		info, statErr := os.Lstat(baseRoot)
+		// Replace only a directory prefix; resolving a symlink search target
+		// here would bypass searchTextFiles' no-symlink check.
+		if rel, err := filepath.Rel(baseRoot, root); err == nil && statErr == nil && info.IsDir() && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			root = filepath.Join(evaluated, rel)
+		}
 		baseRoot = evaluated
 	}
+	queryOptions := options
+	queryOptions.BaseRoot, queryOptions.Mode = baseRoot, mode
+	queryOptions.Cursor, queryOptions.MaxResults = "", 0
+	page, err := newFilePage(root, options.Cursor, []any{"search", root, queryOptions})
+	if err != nil {
+		return TextFileSearchResult{}, err
+	}
+	skipped := make(map[string]int)
 	matches, filesScanned, capped, err := searchTextFiles(ctx, root, fileSearchOptions{
-		baseRoot:     baseRoot,
-		matcher:      matcher,
-		includeGlobs: options.IncludeGlobs,
-		excludeGlobs: options.ExcludeGlobs,
-		contextLines: options.ContextLines,
-		skipHidden:   options.SkipHidden,
+		baseRoot:       baseRoot,
+		matcher:        matcher,
+		includeGlobs:   options.IncludeGlobs,
+		excludeGlobs:   options.ExcludeGlobs,
+		contextLines:   options.ContextLines,
+		skipHidden:     options.SkipHidden,
+		skipped:        skipped,
+		filesOnly:      options.OutputMode == "files",
+		includeIgnored: options.IncludeIgnored,
+		page:           page,
 	}, maxResults)
 	if err != nil {
 		return TextFileSearchResult{}, err
 	}
 	result := TextFileSearchResult{
-		CaseSensitive: options.CaseSensitive,
-		ContextLines:  options.ContextLines,
-		ExcludeGlobs:  options.ExcludeGlobs,
-		FilesScanned:  filesScanned,
-		IncludeGlobs:  options.IncludeGlobs,
-		Matches:       make([]TextFileSearchMatch, 0, len(matches)),
-		Mode:          mode,
-		Query:         options.Query,
-		ResultsCapped: capped,
+		CaseSensitive:  options.CaseSensitive,
+		ContextLines:   options.ContextLines,
+		ExcludeGlobs:   options.ExcludeGlobs,
+		FilesScanned:   filesScanned,
+		IncludeGlobs:   options.IncludeGlobs,
+		Matches:        make([]TextFileSearchMatch, 0, len(matches)),
+		Mode:           mode,
+		Query:          options.Query,
+		ResultsCapped:  capped,
+		Complete:       !capped && len(skipped) == 0,
+		Skipped:        skipped,
+		OutputMode:     options.OutputMode,
+		IncludeIgnored: options.IncludeIgnored,
+	}
+	if capped {
+		result.NextCursor = page.next()
 	}
 	for _, match := range matches {
+		// Keep the caller's path representation (e.g. /var vs /private/var),
+		// while traversal and ignore matching use the canonical root.
+		if root != requestedRoot {
+			rel, err := filepath.Rel(root, match.path)
+			if err != nil {
+				return TextFileSearchResult{}, err
+			}
+			match.path = filepath.Join(requestedRoot, rel)
+		}
 		result.Matches = append(result.Matches, TextFileSearchMatch{
 			Path: match.path, Line: match.line, LineStart: match.lineStart, LineEnd: match.lineEnd,
 			Text: match.text, Excerpt: match.excerpt, Truncated: match.truncated,
@@ -1286,34 +1443,63 @@ func searchTextFiles(ctx context.Context, root string, options fileSearchOptions
 		return nil, 0, false, errors.New("symlink search is not supported")
 	}
 	if !info.IsDir() {
+		if options.page.skip(root, false) {
+			return nil, 0, false, nil
+		}
 		if !searchPathAllowed(root, options) {
 			return nil, 0, false, nil
 		}
-		matches, scanned, err := searchTextFile(root, options, maxResults)
-		return matches, scanned, len(matches) >= maxResults, err
+		if info.Size() > maxFileSearchDirectBytes {
+			return nil, 0, false, &TextFileSearchError{Code: "file_too_large", Detail: "Direct file searches support files up to 16 MiB. Use file_slice for bounded reads or narrow the source output."}
+		}
+		matches, scanned, err := searchTextFile(ctx, root, options, maxResults+1)
+		capped := len(matches) > maxResults
+		if capped {
+			matches = matches[:maxResults]
+			options.page.last = options.page.position(root, matches[len(matches)-1].line)
+		}
+		return matches, scanned, capped, err
 	}
 	var matches []fileSearchMatch
 	filesScanned := 0
 	capped := false
+	filter, err := newFileDiscoveryFilter(options.baseRoot, options.includeIgnored, options.skipHidden)
+	if err != nil {
+		return nil, 0, false, err
+	}
+	defer filter.close()
 	err = filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
 		if walkErr != nil {
+			options.skipped["read_error"]++
 			return nil
 		}
-		if entry.IsDir() {
-			if path != root {
-				if options.skipHidden && strings.HasPrefix(entry.Name(), ".") {
-					return filepath.SkipDir
-				}
-				if _, skip := fileSearchSkipDirs[entry.Name()]; skip {
-					return filepath.SkipDir
-				}
+		if path == root {
+			return nil
+		}
+		if options.page.skip(path, entry.IsDir()) {
+			if entry.IsDir() {
+				return filepath.SkipDir
 			}
 			return nil
 		}
-		if options.skipHidden && strings.HasPrefix(entry.Name(), ".") {
+		if !options.page.visit(path) {
+			capped = true
+			return filepath.SkipAll
+		}
+		allowed, err := filter.accept(path, entry)
+		if err != nil {
+			return err
+		}
+		if !allowed {
+			if entry.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if entry.IsDir() {
 			return nil
 		}
 		if !searchPathAllowed(path, options) {
@@ -1324,19 +1510,38 @@ func searchTextFiles(ctx context.Context, root string, options fileSearchOptions
 			return filepath.SkipAll
 		}
 		info, err := entry.Info()
-		if err != nil || info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() || info.Size() > maxFileSearchBytes {
+		if err != nil {
+			options.skipped["read_error"]++
+			return nil
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			options.skipped["symlink"]++
+			return nil
+		}
+		if !info.Mode().IsRegular() {
 			return nil
 		}
 		if isKnownBinaryExt(path) {
 			return nil
 		}
-		fileMatches, scanned, err := searchTextFile(path, options, maxResults-len(matches))
+		if info.Size() > maxFileSearchBytes {
+			options.skipped["file_too_large"]++
+			return nil
+		}
+		fileMatches, scanned, err := searchTextFile(ctx, path, options, maxResults+1-len(matches))
 		filesScanned += scanned
 		if err != nil {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			options.skipped["read_error"]++
 			return nil
 		}
 		matches = append(matches, fileMatches...)
-		if len(matches) >= maxResults {
+		if len(matches) > maxResults {
+			matches = matches[:maxResults]
+			last := matches[len(matches)-1]
+			options.page.last = options.page.position(last.path, last.line)
 			capped = true
 			return filepath.SkipAll
 		}
@@ -1404,7 +1609,7 @@ func matchSearchGlob(pattern, value []string) bool {
 	return match(0, 0)
 }
 
-func searchTextFile(filePath string, options fileSearchOptions, remaining int) ([]fileSearchMatch, int, error) {
+func searchTextFile(ctx context.Context, filePath string, options fileSearchOptions, remaining int) ([]fileSearchMatch, int, error) {
 	if remaining <= 0 {
 		return nil, 0, nil
 	}
@@ -1418,8 +1623,22 @@ func searchTextFile(filePath string, options fileSearchOptions, remaining int) (
 	defer file.Close()
 	scanner := bufio.NewScanner(file)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	if options.filesOnly {
+		for scanner.Scan() {
+			if err := ctx.Err(); err != nil {
+				return nil, 1, err
+			}
+			if options.matcher.matches(scanner.Text()) {
+				return []fileSearchMatch{{path: filePath}}, 1, nil
+			}
+		}
+		return nil, 1, scanner.Err()
+	}
 	lines := make([]string, 0, 256)
 	for scanner.Scan() {
+		if err := ctx.Err(); err != nil {
+			return nil, 1, err
+		}
 		lines = append(lines, scanner.Text())
 	}
 	if err := scanner.Err(); err != nil {
@@ -1427,6 +1646,9 @@ func searchTextFile(filePath string, options fileSearchOptions, remaining int) (
 	}
 	matches := make([]fileSearchMatch, 0)
 	for index, line := range lines {
+		if options.page != nil && index+1 <= options.page.startLine(filePath) {
+			continue
+		}
 		if !options.matcher.matches(line) {
 			continue
 		}

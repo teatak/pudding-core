@@ -95,7 +95,7 @@ func TestFilePatchRelocationOverlapRejectsWholeBatch(t *testing.T) {
 	runner := NewBuiltinRunner()
 	defer runner.Close()
 	result := patchTestCall(runner, "relocation", root, FilePatch, map[string]any{"scope": "project", "files": []map[string]any{
-		{"path": "other.txt", "action": "replace", "content": "changed\n"},
+		{"path": "other.txt", "action": "replace", "expected_hash": patchContentHash([]byte("untouched\n")), "content": "changed\n"},
 		{"path": "note.txt", "action": "edit", "hunks": []map[string]any{
 			{"start_line": 1, "old_lines": []string{"old", "tail"}, "new_lines": []string{"new"}, "relocate": true},
 			{"start_line": 3, "old_lines": []string{"tail"}, "new_lines": []string{"end"}},

@@ -123,6 +123,112 @@ to clear a field. Type/select read back the field and reject mismatches. Action
 results distinguish `delivered:true` from `effect:"unverified"`; verify business
 outcomes through a subsequent observation. Core and Desktop must be updated together.
 
+Form observations additionally expose `accessibleName` (resolved from ARIA label
+references, ARIA labels, native labels, then control text/title/placeholder),
+`placeholder`, and live `checked`, `indeterminate`, `expanded`, and `readOnly`
+states when applicable. Explicit false and empty values survive the Electron/Core
+boundary. Non-secret native input, textarea and select `value` previews are bounded
+to 160 characters; `valueTruncated:true` means the preview is not a complete value.
+Password and file values are omitted. Name resolution follows the element's own
+document/shadow root; this is DOM metadata, not a complete accessibility-tree dump.
+
+`builtin_browser_wait` supports `enabled`/`disabled`, `checked`/`unchecked`,
+`expanded`/`collapsed`, `value`, and `valueChanged` in addition to existing conditions.
+These require `selector`; value waits also require `value`, including an empty
+string. `value` compares the exact current value, while `valueChanged` compares
+against the complete previous value supplied by the caller, never a truncated
+observation. Unsupported/password/file targets reject value waits. Missing targets
+do not satisfy form-state conditions, and mixed checkboxes satisfy neither checked
+nor unchecked. `enabled` also requires visibility; it does not imply editability.
+
+Text waits traverse rendered content in open Shadow DOM, assigned slots and
+same-origin frames, with whitespace normalized on both sides and hidden content
+excluded. Use `frameID` for cross-origin documents. `textAbsent` cannot succeed
+merely because the matching text is inside an open shadow root. Timeouts and
+cancellation retain the existing no-input/no-replay behavior. These are additive
+browser tool/bridge changes without a database migration; update Core and Desktop
+together. Local integration uses Desktop's `make desktop-dev-local` until the new
+Core revision is pinned for release.
+
+Renderer loss or unresponsiveness invalidates both running and queued browser
+operations. The private bridge reports `browser_renderer_crashed`,
+`browser_renderer_unresponsive`, `browser_debugger_detached`, or
+`browser_page_closed` as non-retryable errors. If input was already dispatched,
+the result is `browser_action_outcome_unknown`: never replay the action.
+After recovery or a debugger disconnect, obtain fresh element refs and coordinate
+observation IDs. Explicit page recovery starts a fresh navigation instead of
+resubmitting a previous POST; other pages sharing a terminated renderer require
+their own explicit recovery.
+
+`builtin_browser_upload` selects files through native Chromium file input handling,
+including hidden inputs, open Shadow DOM and explicit iframe/popup targets. Sources
+are session-owned attachments (`source:attachment`, `attachmentKey`) or authorized
+project files (`source:project`, `path`), never arbitrary host paths. Core snapshots
+regular files privately before dispatch: at most 10 files, 20 MiB each and 100 MiB
+total, retaining attachment display names when present in session metadata.
+These snapshots follow session-artifact retention so later source edits do
+not change the selected data. Directory upload is unsupported. Observe includes
+file-input `multiple`, `hidden`, `accept`, `directory` and selected file metadata;
+file contents and native input paths remain omitted. Selection may immediately
+trigger a website upload. `delivered:true,effect:unverified` confirms selection only;
+verify the website result separately, and never replay uncertain delivery.
+
+`builtin_browser_downloads` supports `list`, `wait` and `cancel`, scoped to the caller's
+session and optionally `tabID`/`windowID`. Capture IDs with `list` before triggering
+an export, then `wait` with `knownIDs`, or wait for an exact `downloadID`. Waiting
+ends on a matching terminal state (`completed`, `failed`, `cancelled`), not necessarily
+success; timeout/cancellation stops the wait without cancelling the transfer.
+Explicit `cancel` requires a download ID. Progress exposes received/total bytes;
+only completed downloads expose a saved `path`. Managed-browser downloads save
+automatically under the OS Downloads/Pudding directory, in unique subdirectories
+so same-name files cannot overwrite each other. Closing a source tab/popup cancels
+active transfers. Failed/cancelled partial files are removed; cleanup errors remain
+visible in the record. Interrupted downloads fail without automatic resume/retry.
+Desktop persists download history across restarts, retaining the latest 500 ended
+records across sessions plus all active transfers. Evicting a record never deletes
+completed files. After an unexpected stop, unfinished transfers are marked failed,
+their known partial files are cleaned up, and no transfer is automatically replayed.
+The desktop download panel shows records for the current conversation, including
+closed source tabs/popups, and checks saved-file availability before revealing it.
+Saved paths do not bypass normal directory authorization for file reads.
+This adds authenticated private bridge routes `/browser/tabs/upload` and
+`/browser/downloads`, without a database migration. Update Core and Desktop together.
+
+Adjacent built-in file read/slice/list/search calls execute in batches of at most
+four, retaining authorization/resource checks and canonical result order. Other
+calls remain sequential barriers. Cancellation retains dispatched results and
+prevents later batches. Four identical failed batches stop the turn with
+`repeated_tool_failure:`; a model reminder follows the third. Successful calls,
+changed arguments/outcomes and new user/child input reset the counter; commentary
+alone does not. Foreground nonzero exits count when their output is not truncated;
+background process starts and process polling do not. The counter exists only in
+the current turn.
+
+`builtin_command_run` adds optional `mutation_paths` for up to 256 exact project
+files expected to change during a foreground command. Relative paths use the
+initial cwd; absolute paths may name another authorized root. Directories, globs
+and background use are rejected. Approval and execution validate the declarations;
+`mutationPaths` in their results contains resolved file paths, not a list of changes.
+The existing tracker takes before/after snapshots of these exact files, without
+expanding a missing path into a directory scan. Net changes survive process failure
+and reuse existing turn diff/undo/redo, with command-observed attribution. The
+metadata neither grants access nor restricts writes and does not alter reusable
+command approval identity. Static targets and already-tracked files remain observed.
+No database migration is required.
+
+Coding-result completeness is an additive extension. Project search responses and
+`builtin_file_search` expose `complete` and `skipped` reason counts; clients must not
+treat an incomplete zero-match result as proof that no match exists. Foreground
+`builtin_command_run` may return `outputFiles` descriptors for stdout/stderr when
+canonical output exceeds 64 KiB. Descriptors include temp-scope readback paths,
+saved/total byte counts, completeness and an optional failure/limit reason. Output
+files are capped at 8 MiB per stream and 64 MiB per session and removed on session
+deletion; scratch cleanup preserves them. Model previews retain these descriptors.
+Provider output-limit termination now emits `turn.failed` with the error prefix
+`output_limit_exceeded:` rather than `turn.completed`; saved partial content and
+completed tool results remain available to the existing retry continuation. No
+database migration or new turn status is required.
+
 Protocol 55 adds optional host-only `modelOutput` declarations and canonical
 `mcpResult` envelopes to tool-result content parts, plus `modelOutput` on widget
 notifications. Widget SDK 1.2.0 supports the declaration on `defineInterface`
@@ -561,3 +667,88 @@ SVG DOM; failed loads show the existing fallback. Size and corner shape belong
 to the Desktop presentation, not the icon definition.
 
 Browser observations include optional `ref` per element, usable as the `selector` argument. Refs bind to the current document and node identity; stale refs must be refreshed with observe. `unavailableFrames` identifies embedded documents not included in DOM observation. Core browser automation requires the Electron bridge; standalone Chrome launch/attachment has been removed.
+
+Foreground `builtin_command_run` now supports `yield_ms` (default 10000 ms),
+independent of the execution `timeout_ms` (default 600000 ms). Pending results
+contain `processID`, `running=true` and `yielded=true`, with no fabricated exit
+status; `builtin_command_session` polls the original execution and returns its
+completion diagnostics and output descriptors. Foreground processes remain owned
+by the turn and are stopped before its final diff is collected. Explicit
+background processes retain their existing lifetime.
+
+`builtin_file_read` and successful `builtin_file_write` return `contentHash`.
+Replacing an existing project file with `file_write` requires `expected_hash`;
+without it, only creation is allowed. Missing versions report
+`file_version_required`; changed or deleted files report `file_conflict` without
+writing. Skill and temp writes remain compatible and accept the optional check.
+
+`builtin_file_patch` accepts either the existing `files` array or a `diff` string
+containing standard unified text headers and hunks. Optional top-level `relocate`
+applies only to `diff`; structured hunks retain their own option. Both forms use
+the same permission checks, approval snapshot, atomic writer and turn-file replay.
+Line endings and no-final-newline markers participate in exact matching. Whole
+file deletion must match the entire source. Malformed text reports
+`invalid_arguments` with `errorKind=invalid_diff` and the offending diff line;
+no file is written. Text input is capped at 2 MiB, 16 files and 64 hunks per file.
+Binary/rename/mode changes, executable creation and empty-file creation/deletion
+are unsupported in this format. Existing result and approval shapes are unchanged.
+
+Project `builtin_file_patch` operations with `action=replace` require an
+`expected_hash` matching the source `file_read.contentHash`. Missing versions
+return `file_version_required`; changed or deleted source files return
+`file_conflict` before approval, with no partial batch writes. Widget replacement
+continues to use `expectedDraftHash`; code rename binds its existing read snapshot.
+
+`builtin_file_list` adds `recursive`, `include_globs`, `exclude_globs` and
+`include_ignored`. Recursive results contain file entries and `returnedCount`,
+`complete`, `skipped`, and `truncated`. `builtin_file_search.output_mode=files`
+returns unique `files`/`fileCount` without snippets; default `content` retains
+`matches`/`matchCount`. Directory discovery shares bounded local `.gitignore`
+handling; explicit file searches are unaffected. Ignored paths can be requested
+with `include_ignored=true`, without widening authorization or scope visibility.
+Search and recursive listing accept `cursor` and return `nextCursor` for result
+or traversal limits, including empty pages. Cursors bind the root/query/filters;
+authorization is rechecked on every page. Pagination observes live files, so
+restart after edits and retain skipped-file evidence from earlier pages.
+
+Recognized foreground build/test commands collect bounded diagnostics from both
+streams before log preview truncation, including yielded commands. The optional
+`diagnosticsTruncated` is independent of stdout/stderr truncation; diagnostic
+counts describe captured entries, not a guarantee of all errors. Model previews
+retain up to three diagnostic locations/messages with `shown_diagnostics`; full
+results and saved output remain available through existing readback paths.
+Static package-manager directory flags also select the diagnostic base directory.
+Unresolved locations preserve `rawPath`/`unresolved` without source access or a
+clickable `path`. Go JSON and Node TAP add bounded `testFailures`,
+`testFailureCount` and `testFailuresTruncated`; counts are observed test/package
+failures rather than suite totals. Model previews include at most three failures
+with `shown_test_failures`. Reporter extraction never overrides process status.
+
+Test commands also expose `testExecutionStatus` (`ran`, `no_tests`, `all_skipped`,
+`collected`, `unknown`). Successful process exits use verification status `passed`
+only with execution evidence; unknown reporter output uses `completed`, while
+confirmed no-execution outcomes use their matching status. Process failures,
+cancellation and timeout keep precedence. These additive tool-result fields are
+shared by foreground completion, yielded command polling and model previews.
+
+`builtin_git_diff` adds literal repository-relative `paths` (up to 512),
+`context_lines` (0–100, default 3), and `summary_only`. Patch and statistics use
+the same filter; summary-only omits patch generation. Omitted filters preserve
+staged/unstaged tracked-file semantics and the existing bounded patch output.
+Unknown parameters and out-of-repository/metadata paths are rejected.
+
+`builtin_command_session` polling returns immediately when its offset has unread
+output. Otherwise `wait_ms` waits for newly readable stdout/stderr, completion,
+cancellation or the deadline; new output may still have `running=true`. Continue
+with `nextOffset` until the intended readiness evidence or final status arrives.
+Initial foreground `yield_ms` still waits for completion or its own deadline.
+
+Verification extraction also recognizes a literal `cd directory && check`
+prefix, applying package-manager directory flags relative to that directory.
+Other compound/ambiguous shell forms remain unclassified; execution, approvals
+and authorized source-read boundaries are unchanged.
+
+File reads and semantic code tools now share the strict JSON argument validator
+used by writes and patches. Unknown keys return `allowedFields` and a correction
+hint; `field` uses the full JSON path for nested input. Optional-field defaults
+are unchanged, while null, wrong types and case aliases are rejected explicitly.

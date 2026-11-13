@@ -28,9 +28,12 @@ type gitBaseArgs struct {
 }
 
 type gitDiffArgs struct {
-	Scope  string `json:"scope"`
-	CWD    string `json:"cwd,omitempty"`
-	Staged bool   `json:"staged,omitempty"`
+	Scope        string   `json:"scope"`
+	CWD          string   `json:"cwd,omitempty"`
+	Staged       bool     `json:"staged,omitempty"`
+	Paths        []string `json:"paths,omitempty"`
+	ContextLines *int     `json:"context_lines,omitempty"`
+	SummaryOnly  bool     `json:"summary_only,omitempty"`
 }
 
 type gitLogArgs struct {
@@ -103,28 +106,42 @@ func (r *BuiltinRunner) gitStatus(ctx context.Context, call Call) Result {
 func (r *BuiltinRunner) gitDiff(ctx context.Context, call Call) Result {
 	out := Result{CallID: call.CallID, Name: call.Name}
 	var args gitDiffArgs
-	if len(call.Args) == 0 || json.Unmarshal(call.Args, &args) != nil {
-		return toolJSONError(out, "invalid_arguments", "git diff arguments must be a JSON object")
+	if err := decodeToolArgumentObject(call.Args, &args, toolArgumentField{"scope", "string"}); err != nil {
+		return toolArgumentFailure(out, err)
+	}
+	contextLines := 3
+	if args.ContextLines != nil {
+		contextLines = *args.ContextLines
+	}
+	if contextLines < 0 || contextLines > 100 {
+		return toolJSONError(out, "invalid_arguments", "context_lines must be between 0 and 100")
+	}
+	paths, err := projectgit.NormalizeDiffPaths(args.Paths)
+	if err != nil {
+		return projectGitFailure(out, err, "invalid_arguments")
 	}
 	repo, failed := resolveGitRepository(ctx, call, args.Scope, args.CWD)
 	if failed != nil {
 		return gitRepositoryFailure(out, args.Scope, failed)
 	}
-	diff, err := projectgit.ReadPatchDiff(ctx, projectgit.Repository{ProjectRoot: repo.ProjectRoot, Root: repo.Root}, args.Staged, gitDiffOutputLimitBytes)
+	diff, err := projectgit.ReadPatchDiffWithOptions(ctx, projectgit.Repository{ProjectRoot: repo.ProjectRoot, Root: repo.Root}, args.Staged, gitDiffOutputLimitBytes, projectgit.PatchDiffOptions{Paths: paths, ContextLines: contextLines, SummaryOnly: args.SummaryOnly})
 	if err != nil {
 		return projectGitFailure(out, err, "git_diff_failed")
 	}
 	payload := map[string]any{
-		"ok":        true,
-		"cwd":       repo.CWD,
-		"repoRoot":  repo.Root,
-		"staged":    args.Staged,
-		"diff":      diff.Patch,
-		"truncated": diff.Truncated,
-		"files":     diff.Files,
-		"fileCount": len(diff.Files),
-		"additions": diff.Additions,
-		"deletions": diff.Deletions,
+		"ok":           true,
+		"cwd":          repo.CWD,
+		"repoRoot":     repo.Root,
+		"staged":       args.Staged,
+		"diff":         diff.Patch,
+		"truncated":    diff.Truncated,
+		"files":        diff.Files,
+		"fileCount":    len(diff.Files),
+		"additions":    diff.Additions,
+		"deletions":    diff.Deletions,
+		"paths":        paths,
+		"contextLines": contextLines,
+		"summaryOnly":  args.SummaryOnly,
 	}
 	return withResultSummary(toolJSON(out, true, payload), SummaryChangedLines, diff.Additions+diff.Deletions)
 }

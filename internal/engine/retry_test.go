@@ -18,6 +18,7 @@ import (
 )
 
 type retryClient struct {
+	failure  string
 	mu       sync.Mutex
 	requests []provider.Request
 }
@@ -61,7 +62,14 @@ func (c *retryClient) Stream(_ context.Context, req provider.Request) (<-chan pr
 		out <- provider.Chunk{Done: true, Finish: provider.FinishToolCalls}
 	case 2:
 		out <- provider.Chunk{Delta: "partial output"}
-		out <- provider.Chunk{Err: errors.New("status 503")}
+		switch c.failure {
+		case "length":
+			out <- provider.Chunk{Done: true, Finish: provider.FinishLength}
+		case "output_error":
+			out <- provider.Chunk{Err: &provider.OutputLimitError{Message: "max_output_tokens"}}
+		default:
+			out <- provider.Chunk{Err: errors.New("status 503")}
+		}
 	default:
 		out <- provider.Chunk{Delta: "finished"}
 		out <- provider.Chunk{Done: true, Finish: provider.FinishStop}
@@ -71,9 +79,15 @@ func (c *retryClient) Stream(_ context.Context, req provider.Request) (<-chan pr
 }
 
 func TestRetryUsesCanonicalHistoryWithoutReplayingTools(t *testing.T) {
+	for _, failure := range []string{"provider_error", "length", "output_error"} {
+		t.Run(failure, func(t *testing.T) { testRetryUsesCanonicalHistory(t, failure) })
+	}
+}
+
+func testRetryUsesCanonicalHistory(t *testing.T, failure string) {
 	ctx := context.Background()
 	st := storetest.New(t)
-	client := &retryClient{}
+	client := &retryClient{failure: failure}
 	runner := &recordingToolRunner{defs: []provider.ToolDef{{Name: tool.TimeGetCurrent, InputSchema: json.RawMessage(`{"type":"object"}`), Capability: store.ModeChat}}, result: tool.Result{Ok: true, Content: "completed exactly once"}}
 	eng := New(st, event.NewHub(), mapResolver{"retry": client}, st, WithTools(runner))
 	defer eng.Stop()

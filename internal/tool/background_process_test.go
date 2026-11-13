@@ -36,6 +36,33 @@ type backgroundProcessPayload struct {
 	BytesWritten  int                            `json:"bytesWritten"`
 }
 
+// Follow the public cursor contract: new output can precede process exit.
+// Return the unmodified final result plus all chunks observed by this reader.
+func pollCommandUntilFinished(t *testing.T, ctx context.Context, runner *BuiltinRunner, sessionID, processID string) (Result, []backgroundProcessOutputChunk) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	var offset int64
+	var chunks []backgroundProcessOutputChunk
+	for {
+		result := runner.Call(ctx, Call{SessionID: sessionID, Name: CommandSession, Args: resultJSON(map[string]any{
+			"action": "poll", "process_id": processID, "offset": offset, "wait_ms": 5000,
+		})})
+		payload := decodeBackgroundProcessPayload(t, result)
+		if !result.Ok {
+			t.Fatalf("poll failed: %s", result.Content)
+		}
+		chunks = append(chunks, payload.Output...)
+		offset = payload.NextOffset
+		if !payload.Running {
+			return result, chunks
+		}
+		if ctx.Err() != nil {
+			t.Fatalf("process %s did not finish: %v", processID, ctx.Err())
+		}
+	}
+}
+
 func TestBackgroundProcessListFindsProcessesForPollAndStop(t *testing.T) {
 	runner := NewBuiltinRunner()
 	defer runner.Close() // Release child CWD handles before TempDir cleanup.
@@ -211,11 +238,9 @@ func TestBackgroundProcessPipeAcceptsInput(t *testing.T) {
 	if !write.Ok || written.BytesWritten != len("hello-pipe\n") {
 		t.Fatalf("write pipe input: result=%+v payload=%+v", write, written)
 	}
-	poll := decodeBackgroundProcessPayload(t, backgroundToolCall(runner, "sess_input", root, CommandSession, map[string]any{
-		"action":     "poll",
-		"process_id": started.ProcessID,
-		"wait_ms":    2000,
-	}))
+	result, chunks := pollCommandUntilFinished(t, context.Background(), runner, "sess_input", started.ProcessID)
+	poll := decodeBackgroundProcessPayload(t, result)
+	poll.Output = chunks
 	if poll.Running || !strings.Contains(backgroundOutputText(poll.Output), "received:hello-pipe") {
 		t.Fatalf("pipe input was not observed: %+v", poll)
 	}

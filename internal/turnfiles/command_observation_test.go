@@ -8,6 +8,43 @@ import (
 	"github.com/teatak/pudding-core/internal/store"
 )
 
+func TestTrackerDeclaredFilesNeverExpandDirectories(t *testing.T) {
+	root := t.TempDir()
+	writeTestFile(t, root, "replaced", "existing user content\n")
+	tracker := New()
+	files := []string{filepath.Join(root, "replaced"), filepath.Join(root, "new"), filepath.Join(root, "new/selected.txt")}
+	if err := tracker.BeginCallWithOrigin("turn", "command", []string{root}, nil, store.FileChangeOriginCommandObserved, files...); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(root, "replaced")); err != nil {
+		t.Fatal(err)
+	}
+	writeTestFile(t, root, "replaced/ignored.txt", "unlisted child")
+	writeTestFile(t, root, "new/ignored.txt", "unlisted child")
+	writeTestFile(t, root, "new/selected.txt", "explicit child")
+	if err := tracker.EndCall("turn", "command"); err != nil {
+		t.Fatal(err)
+	}
+	changes, err := tracker.Finish("turn")
+	if err != nil || len(changes) != 2 {
+		t.Fatalf("changes=%+v err=%v", changes, err)
+	}
+	for _, change := range changes {
+		switch change.Path {
+		case "replaced":
+			if change.Kind != store.FileChangeDeleted || change.OldContent != "existing user content\n" {
+				t.Fatalf("baseline lost: %+v", change)
+			}
+		case "new/selected.txt":
+			if change.Kind != store.FileChangeAdded || change.NewContent != "explicit child" {
+				t.Fatalf("explicit nested file lost: %+v", change)
+			}
+		default:
+			t.Fatalf("undeclared child attributed: %+v", change)
+		}
+	}
+}
+
 func TestTrackerCommandReconcilesOnlyExistingTrackedFiles(t *testing.T) {
 	for _, action := range []string{"delete", "restore", "modify", "replace-with-directory"} {
 		t.Run(action, func(t *testing.T) {

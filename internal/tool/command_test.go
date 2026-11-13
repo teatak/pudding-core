@@ -213,7 +213,7 @@ func TestCommandRunExecutesGoTest(t *testing.T) {
 	}
 	res := commandTestCall(context.Background(), root, map[string]any{
 		"scope":      "project",
-		"command":    "go test ./...",
+		"command":    "go test -json ./...",
 		"timeout_ms": 30000,
 	})
 	payload := decodeCommandPayload(t, res)
@@ -229,6 +229,25 @@ func TestCommandRunExecutesGoTest(t *testing.T) {
 	if payload.VerificationKind != "test" || payload.VerificationStatus != "passed" || payload.DiagnosticCount != 0 {
 		t.Fatalf("go test verification metadata missing: %+v", payload)
 	}
+	t.Run("unmatched filter does not claim tests passed", func(t *testing.T) {
+		result := commandTestCall(context.Background(), root, map[string]any{"scope": "project", "command": "go test -json -run '^DoesNotExist$' ./...", "timeout_ms": 30000})
+		fields := decodeToolResult(t, result)
+		if !result.Ok || fields["exitCode"] != float64(0) || fields["verificationStatus"] != "no_tests" || fields["testExecutionStatus"] != "no_tests" {
+			t.Fatalf("unmatched real Go test: %s", result.Content)
+		}
+	})
+	t.Run("directory prefix preserves test evidence and source locations", func(t *testing.T) {
+		writeCommandTestFile(t, root, "nested/broken_test.go", "package nested\nimport \"testing\"\nfunc TestFails(t *testing.T) { t.Fatal(\"observed failure\") }\n")
+		result := commandTestCall(context.Background(), root, map[string]any{"scope": "project", "command": "cd nested && go test -json ./...", "timeout_ms": 30000})
+		fields := decodeToolResult(t, result)
+		if !result.Ok || fields["exitCode"] == float64(0) || fields["verificationStatus"] != "failed" || fields["testExecutionStatus"] != "ran" {
+			t.Fatalf("real chained Go test result: %s", result.Content)
+		}
+		failures := fields["testFailures"].([]any)
+		if len(failures) == 0 || failures[0].(map[string]any)["relativePath"] != "nested/broken_test.go" {
+			t.Fatalf("chained Go test lost failure location: %s", result.Content)
+		}
+	})
 }
 
 func TestCommandRunParsesFailedGoDiagnostics(t *testing.T) {
@@ -367,9 +386,28 @@ func TestCommandHelperProcess(t *testing.T) {
 		size, _ := strconv.Atoi(args[1])
 		fmt.Fprint(os.Stdout, "stdout-head"+strings.Repeat("o", size)+"stdout-tail")
 		fmt.Fprint(os.Stderr, "stderr-head"+strings.Repeat("e", size)+"stderr-tail")
+	case "recoverable-output", "delayed-output":
+		if args[0] == "delayed-output" {
+			time.Sleep(100 * time.Millisecond)
+		}
+		for _, stream := range []*os.File{os.Stdout, os.Stderr} {
+			fmt.Fprint(stream, strings.Repeat("before\n", 10000)+"middle failure: 文件错误\n"+strings.Repeat("after\n", 12000))
+		}
+		os.Exit(1)
 	case "sleep":
 		ms, _ := strconv.Atoi(args[1])
 		time.Sleep(time.Duration(ms) * time.Millisecond)
+	case "foreground-once":
+		f, err := os.OpenFile("runs.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
+		if err != nil {
+			panic(err)
+		}
+		fmt.Fprintln(f, "started")
+		f.Close()
+		fmt.Fprintln(os.Stdout, "before wait")
+		time.Sleep(250 * time.Millisecond)
+		fmt.Fprintln(os.Stdout, "after wait")
+		os.Exit(7)
 	case "background-stream":
 		fmt.Fprintln(os.Stdout, "ready")
 		fmt.Fprintln(os.Stderr, "warning")
@@ -451,4 +489,143 @@ func decodeCommandPayload(t *testing.T, res Result) commandPayload {
 		t.Fatalf("decode command payload: %v content=%q", err, res.Content)
 	}
 	return payload
+}
+
+func TestForegroundCommandYieldAndCompletion(t *testing.T) {
+	root := t.TempDir()
+	runner := NewBuiltinRunner(WithHomeDir(t.TempDir()))
+	t.Cleanup(func() { _ = runner.Close() })
+	call := Call{SessionID: "foreground", TurnID: "turn", CallID: "run", Name: CommandRun, ProjectDirs: []string{root}, Args: resultJSON(map[string]any{"scope": "project", "command": commandHelperCommand("foreground-once"), "yield_ms": 0})}
+	started := runner.Call(context.Background(), call)
+	payload := decodeToolResult(t, started)
+	id, _ := payload["processID"].(string)
+	if !started.Ok || id == "" || payload["yielded"] != true || payload["running"] != true {
+		t.Fatalf("expected running handle: %s", started.Content)
+	}
+	if _, exists := payload["exitCode"]; exists {
+		t.Fatal("running command claimed an exit code")
+	}
+	foreign := runner.Call(context.Background(), Call{SessionID: "other", Name: CommandSession, Args: resultJSON(map[string]any{"action": "poll", "process_id": id})})
+	if foreign.Ok {
+		t.Fatal("cross-session process access")
+	}
+	polled, _ := pollCommandUntilFinished(t, context.Background(), runner, call.SessionID, id)
+	final := decodeToolResult(t, polled)
+	if !polled.Ok || final["running"] != false || final["exitCode"] != float64(7) || final["reason"] != "non_zero_exit" || !strings.Contains(final["stdout"].(string), "after wait") {
+		t.Fatalf("lost completion: %s", polled.Content)
+	}
+	data, err := os.ReadFile(filepath.Join(root, "runs.log"))
+	if err != nil || string(data) != "started\n" {
+		t.Fatalf("command restarted: %q %v", data, err)
+	}
+	if runner.BackgroundProcessCount(call.SessionID) != 0 {
+		t.Fatal("completion retained running quota")
+	}
+}
+
+func TestForegroundCommandDeadlineCancelAndTurnFinish(t *testing.T) {
+	for _, mode := range []string{"deadline", "cancel", "turn_finish"} {
+		t.Run(mode, func(t *testing.T) {
+			runner := NewBuiltinRunner(WithHomeDir(t.TempDir()))
+			t.Cleanup(func() { _ = runner.Close() })
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			input := map[string]any{"scope": "project", "command": commandHelperCommand("sleep", "30000"), "yield_ms": 0}
+			if mode == "deadline" {
+				input["timeout_ms"] = 100
+			}
+			call := Call{SessionID: "foreground", TurnID: "turn", Name: CommandRun, ProjectDirs: []string{t.TempDir()}, Args: resultJSON(input)}
+			started := runner.Call(ctx, call)
+			payload := decodeToolResult(t, started)
+			id, _ := payload["processID"].(string)
+			if id == "" {
+				t.Fatalf("no handle: %s", started.Content)
+			}
+			if mode == "cancel" {
+				cancel()
+			}
+			if mode == "turn_finish" {
+				if err := runner.FinishForegroundCommands(call.SessionID, call.TurnID); err != nil {
+					t.Fatal(err)
+				}
+			}
+			polled, _ := pollCommandUntilFinished(t, context.Background(), runner, call.SessionID, id)
+			final := decodeToolResult(t, polled)
+			expected := map[string]string{"deadline": "timed_out", "cancel": "cancelled", "turn_finish": "turn_finished"}[mode]
+			if final["running"] != false || final["reason"] != expected || final["timedOut"] != (mode == "deadline") || final["cancelled"] != (mode != "deadline") {
+				t.Fatalf("wrong stop state: %s", polled.Content)
+			}
+		})
+	}
+}
+
+func TestForegroundCommandFinishedResultAndYieldValidation(t *testing.T) {
+	runner := NewBuiltinRunner(WithHomeDir(t.TempDir()))
+	t.Cleanup(func() { _ = runner.Close() })
+	call := Call{SessionID: "short", Name: CommandRun, ProjectDirs: []string{t.TempDir()}, Args: resultJSON(map[string]any{"scope": "project", "command": commandHelperCommand("exit", "3"), "yield_ms": 5000})}
+	result := runner.Call(context.Background(), call)
+	payload := decodeCommandPayload(t, result)
+	if !result.Ok || payload.ExitCode != 3 || payload.Reason != "non_zero_exit" {
+		t.Fatalf("short result contract changed: %s", result.Content)
+	}
+	for _, raw := range []string{`{"scope":"project","command":"echo x","yield_ms":-1}`, `{"scope":"project","command":"echo x","yield_ms":60001}`, `{"scope":"project","command":"echo x","yield_ms":0,"background":true}`} {
+		if _, err := decodeCommandRunArgs(json.RawMessage(raw)); err == nil {
+			t.Fatalf("accepted invalid wait: %s", raw)
+		}
+	}
+	timeout, err := commandTimeout(0)
+	if err != nil || timeout != 10*time.Minute {
+		t.Fatalf("unexpected execution deadline %s %v", timeout, err)
+	}
+}
+
+func TestForegroundCommandFinalOutputAndBackgroundLifetime(t *testing.T) {
+	runner := NewBuiltinRunner(WithHomeDir(t.TempDir()))
+	t.Cleanup(func() { _ = runner.Close() })
+	root := t.TempDir()
+	call := Call{SessionID: "output", TurnID: "turn", CallID: "run", Name: CommandRun, ProjectDirs: []string{root}, Args: resultJSON(map[string]any{"scope": "project", "command": commandHelperCommand("delayed-output"), "yield_ms": 0})}
+	pending := runner.Call(context.Background(), call)
+	id, _ := decodeToolResult(t, pending)["processID"].(string)
+	if id == "" {
+		t.Fatalf("not yielded: %s", pending.Content)
+	}
+	final, _ := pollCommandUntilFinished(t, context.Background(), runner, call.SessionID, id)
+	files := outputFilesForTest(t, final)
+	if len(files) != 2 || !files["stdout"].Complete || !files["stderr"].Complete {
+		t.Fatalf("lost final output artifacts: %s", final.Content)
+	}
+	bg := backgroundToolCall(runner, call.SessionID, root, CommandRun, map[string]any{"scope": "project", "command": commandHelperCommand("sleep", "30000")})
+	bgID := decodeBackgroundProcessPayload(t, bg).ProcessID
+	if err := runner.FinishForegroundCommands(call.SessionID, call.TurnID); err != nil {
+		t.Fatal(err)
+	}
+	process := runner.processes.Get(call.SessionID, bgID)
+	if process == nil || !process.snapshot().Running {
+		t.Fatal("turn finish stopped explicit background process")
+	}
+}
+
+func TestForegroundCommandCompletionCanInspectProcess(t *testing.T) {
+	runner := NewBuiltinRunner(WithHomeDir(t.TempDir()))
+	t.Cleanup(func() { _ = runner.Close() })
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	observed := make(chan int, 1)
+	ctx = WithCommandCompletion(ctx, func() { observed <- len(runner.ListBackgroundProcesses("completion")) })
+	result := runner.Call(ctx, Call{SessionID: "completion", Name: CommandRun, ProjectDirs: []string{t.TempDir()}, Args: resultJSON(map[string]any{"scope": "project", "command": commandHelperCommand("report"), "yield_ms": 0})})
+	payload := decodeToolResult(t, result)
+	if id, _ := payload["processID"].(string); id != "" {
+		result, _ = pollCommandUntilFinished(t, ctx, runner, "completion", id)
+	}
+	if !result.Ok || decodeToolResult(t, result)["exitCode"] != float64(0) {
+		t.Fatalf("completion callback blocked exit: %s", result.Content)
+	}
+	select {
+	case count := <-observed:
+		if count != 1 {
+			t.Fatalf("completion lost process: %d", count)
+		}
+	default:
+		t.Fatal("completion published before callback")
+	}
 }

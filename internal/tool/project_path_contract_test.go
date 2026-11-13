@@ -69,7 +69,8 @@ func TestProjectPathContractRejectsRelativeMultiRootTargetsWithoutWrites(t *test
 	if entries, err := os.ReadDir(first); err != nil || len(entries) != 0 {
 		t.Fatalf("rejected calls wrote into the first root: entries=%v err=%v", entries, err)
 	}
-	write := runner.Call(context.Background(), projectContractCall(FileWrite, []string{first, second}, map[string]any{"scope": " project ", "path": secondFile, "content": "explicit second"}))
+	before := runner.Call(context.Background(), projectContractCall(FileRead, []string{first, second}, map[string]any{"scope": "project", "path": secondFile}))
+	write := runner.Call(context.Background(), projectContractCall(FileWrite, []string{first, second}, map[string]any{"scope": " project ", "path": secondFile, "content": "explicit second", "expected_hash": decodeToolResult(t, before)["contentHash"]}))
 	if !write.Ok || decodeToolResult(t, write)["scope"] != "project" {
 		t.Fatalf("explicit second-root write failed: %+v", write)
 	}

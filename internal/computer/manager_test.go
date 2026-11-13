@@ -225,6 +225,31 @@ func TestManagerRunsSemanticAndPointerActionsThroughOneArray(t *testing.T) {
 	}
 }
 
+func TestManagerInsertsTextWithoutObservationOrActivation(t *testing.T) {
+	service := &fakeService{}
+	manager := NewManager(service)
+	for _, value := range []string{"你好🙂", ""} {
+		result, err := manager.Act(context.Background(), "session_a", "com.example.App", 42, []ActionInput{
+			{Type: ActionInsertText, ElementID: "text", Value: &value},
+		})
+		if err != nil || result.Failure != nil || result.CompletedCount != 1 || result.Actions[0].Action != ActionInsertText {
+			t.Fatalf("insert_text result=%+v err=%v", result, err)
+		}
+	}
+	if service.actions != 2 || service.uses != 0 || service.observes != 0 || service.pointers != 0 {
+		t.Fatalf("unexpected background insert side effects: %+v", service)
+	}
+	for _, action := range []ActionInput{
+		{Type: ActionInsertText, ElementID: "text"},
+		{Type: ActionInsertText, Value: new(string)},
+		{Type: ActionInsertText, ElementID: "text", Value: new(string), Delivery: "background"},
+	} {
+		if _, err := NormalizeActions([]ActionInput{action}); err == nil {
+			t.Fatalf("invalid insert_text accepted: %+v", action)
+		}
+	}
+}
+
 func TestManagerPointerUsesCurrentWindowCoordinatesWithoutObservation(t *testing.T) {
 	service := &fakeService{}
 	manager := NewManager(service)

@@ -62,9 +62,8 @@ func TestMacOSCommandAutonomyStillEnforcesSandbox(t *testing.T) {
 	if started.Execution != "sandbox" || started.ProcessID == "" {
 		t.Fatalf("background escaped sandbox: %+v", started)
 	}
-	finished := decodeBackgroundProcessPayload(t, backgroundToolCall(runner, "autonomy", project, CommandSession, map[string]any{
-		"action": "poll", "process_id": started.ProcessID, "wait_ms": 2000,
-	}))
+	final, _ := pollCommandUntilFinished(t, context.Background(), runner, "autonomy", started.ProcessID)
+	finished := decodeBackgroundProcessPayload(t, final)
 	if finished.Running || finished.ExitCode == nil || *finished.ExitCode == 0 || finished.Reason != "non_zero_exit" {
 		t.Fatalf("background outside read was not denied: %+v", finished)
 	}

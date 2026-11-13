@@ -445,6 +445,20 @@ func TestBuiltinBrowserKeyAndWait(t *testing.T) {
 	if !wait.Ok || fake.waitInput.Condition != "text" || fake.waitInput.Text != "Saved" || fake.waitInput.TimeoutMS == nil || *fake.waitInput.TimeoutMS != 500 {
 		t.Fatalf("wait input lost: %+v %+v", wait, fake.waitInput)
 	}
+	for _, condition := range []string{"enabled", "disabled", "checked", "unchecked", "expanded", "collapsed", "value", "valueChanged"} {
+		args := map[string]any{"tabID": "tab", "selector": "#field", "condition": condition}
+		if condition == "value" || condition == "valueChanged" {
+			args["value"] = ""
+		}
+		raw, _ := json.Marshal(args)
+		res := runner.Call(context.Background(), Call{SessionID: "session", Name: BrowserWait, Args: raw})
+		if !res.Ok || fake.waitInput.Condition != condition || fake.waitInput.Selector != "#field" {
+			t.Fatalf("new condition rejected or lost: %+v %+v", res, fake.waitInput)
+		}
+		if _, exists := args["value"]; exists && (fake.waitInput.Value == nil || *fake.waitInput.Value != "") {
+			t.Fatalf("empty value lost: %+v", fake.waitInput)
+		}
+	}
 	fake.actionError = context.Canceled
 	cancelled := runner.Call(context.Background(), Call{SessionID: "session", Name: BrowserPressKey, Args: json.RawMessage(`{"tabID":"tab","key":"Enter"}`)})
 	if cancelled.Ok || !strings.Contains(cancelled.Content, "browser_operation_cancelled") || !strings.Contains(cancelled.Content, "observe before retrying") {

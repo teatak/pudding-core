@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -14,7 +15,8 @@ import (
 )
 
 const (
-	commandDefaultTimeout   = 60 * time.Second
+	commandDefaultTimeout   = 10 * time.Minute
+	commandDefaultYield     = 10 * time.Second
 	commandMaxTimeout       = 10 * time.Minute
 	commandMinTimeout       = 100 * time.Millisecond
 	commandOutputLimitBytes = 64 << 10
@@ -37,8 +39,10 @@ type commandRunArgs struct {
 	Execution        CommandExecutionMode `json:"execution,omitempty"`
 	HostAccessReason string               `json:"host_access_reason,omitempty"`
 	CWD              string               `json:"cwd,omitempty"`
+	MutationPaths    []string             `json:"mutation_paths,omitempty"`
 	Env              map[string]string    `json:"env,omitempty"`
 	TimeoutMS        int                  `json:"timeout_ms,omitempty"`
+	YieldMS          *int                 `json:"yield_ms,omitempty"`
 	Background       bool                 `json:"background,omitempty"`
 	TTY              bool                 `json:"tty,omitempty"`
 }
@@ -56,10 +60,17 @@ func (r *BuiltinRunner) commandRun(ctx context.Context, call Call) Result {
 	if args.Background {
 		return r.commandStart(ctx, call, args)
 	}
+	if call.SessionID == "" && args.YieldMS != nil {
+		return toolJSONError(out, "session_required", "yield_ms requires a session for continued process access")
+	}
 
 	resolvedCWD, err := resolveCommandCWD(call.ProjectDirs, args.CWD)
 	if err != nil {
 		return commandCWDFailure(out, err)
+	}
+	args.MutationPaths, err = resolveCommandMutationFiles(call.ProjectDirs, resolvedCWD, args.MutationPaths)
+	if err != nil {
+		return filePathErrorWithReason(out, managedScopeProject, "invalid_mutation_paths", err)
 	}
 
 	timeout, err := commandTimeout(args.TimeoutMS)
@@ -94,9 +105,15 @@ func (r *BuiltinRunner) commandRun(ctx context.Context, call Call) Result {
 	if err != nil {
 		return toolJSONError(out, "command_prepare_failed", err.Error())
 	}
+	if call.SessionID != "" {
+		return r.commandRunManaged(ctx, call, args, shell, resolvedCWD, execution, timeout)
+	}
 	cmd := execution.Cmd
-	stdout := newTruncatingBuffer(commandOutputLimitBytes)
-	stderr := newTruncatingBuffer(commandOutputLimitBytes)
+	stdout, stderr := newCommandOutputBuffers(args, resolvedCWD, call.ProjectDirs)
+	capture := &commandOutputCapture{homeDir: r.homeDir, sessionID: call.SessionID}
+	defer capture.close()
+	stdout.artifact = &commandOutputArtifact{capture: capture, stream: "stdout"}
+	stderr.artifact = &commandOutputArtifact{capture: capture, stream: "stderr"}
 	stdoutWriter := newCommandProgressWriter(ctx, ProgressStdout, stdout)
 	stderrWriter := newCommandProgressWriter(ctx, ProgressStderr, stderr)
 	cmd.Stdout = stdoutWriter
@@ -231,10 +248,17 @@ func commandApprovalDetails(ctx context.Context, call Call) (map[string]any, err
 	if err != nil {
 		return nil, err
 	}
+	files, err := resolveCommandMutationFiles(call.ProjectDirs, cwd, args.MutationPaths)
+	if err != nil {
+		return nil, err
+	}
 	details := map[string]any{
 		"command":   args.Command,
 		"execution": string(args.Execution),
 		"cwd":       cwd,
+	}
+	if len(files) > 0 {
+		details["mutationPaths"] = files
 	}
 	if runtime.GOOS == "windows" {
 		details["shell"] = "PowerShell 7 (x64 or ARM64)"
@@ -264,6 +288,9 @@ func commandApprovalDetails(ctx context.Context, call Call) (map[string]any, err
 	}
 	if args.TimeoutMS > 0 {
 		details["timeoutMS"] = args.TimeoutMS
+	}
+	if args.YieldMS != nil {
+		details["yieldMS"] = *args.YieldMS
 	}
 	return details, nil
 }
@@ -295,6 +322,20 @@ func validateCommandInput(args commandRunArgs) error {
 }
 
 func validateCommandInputForOS(args commandRunArgs, goos string) error {
+	if args.YieldMS != nil && (*args.YieldMS < 0 || *args.YieldMS > 60000 || args.Background) {
+		return errors.New("yield_ms must be between 0 and 60000 and is unavailable for background commands")
+	}
+	if len(args.MutationPaths) > maxCommandMutationTargets {
+		return fmt.Errorf("mutation_paths supports at most %d files", maxCommandMutationTargets)
+	}
+	if args.Background && len(args.MutationPaths) > 0 {
+		return errors.New("mutation_paths is available only for foreground commands")
+	}
+	for _, path := range args.MutationPaths {
+		if strings.TrimSpace(path) == "" || strings.ContainsRune(path, 0) || strings.ContainsAny(path, "*?[]") {
+			return errors.New("mutation_paths must contain exact non-empty file paths, without NUL bytes or globs")
+		}
+	}
 	if strings.TrimSpace(args.Command) == "" {
 		return errors.New("command is required")
 	}
@@ -368,6 +409,18 @@ func commandResult(out Result, args commandRunArgs, shell, cwd string, projectDi
 		"durationMs":      duration.Milliseconds(),
 		"execution":       commandActualExecution(execution),
 	}
+	outputFiles := make(map[string]commandOutputFile)
+	for stream, buffer := range map[string]*truncatingBuffer{"stdout": stdout, "stderr": stderr} {
+		if buffer.Truncated() && buffer.artifact != nil {
+			outputFiles[stream] = buffer.artifact.finish(buffer.total)
+		}
+	}
+	if len(outputFiles) > 0 {
+		payload["outputFiles"] = outputFiles
+	}
+	if len(args.MutationPaths) > 0 {
+		payload["mutationPaths"] = args.MutationPaths
+	}
 	if execution != nil && execution.SandboxKind != "" {
 		payload["sandboxKind"] = execution.SandboxKind
 	}
@@ -390,14 +443,40 @@ func commandResult(out Result, args commandRunArgs, shell, cwd string, projectDi
 	if warning := commandPipelineWarning(args.Command); warning != nil {
 		payload["verificationWarning"] = warning
 	}
-	verificationKind := commandVerificationKind(commandVerificationArgv(args.Command))
+	verificationArgv, _ := commandVerificationDetails(args, cwd)
+	verificationKind := commandVerificationKind(verificationArgv)
 	if verificationKind != "" {
 		verificationStatus := commandVerificationStatus(verificationKind, exitCode, timedOut, cancelled, reason)
-		diagnostics := parseCommandDiagnostics(stdoutText, stderrText, cwd, projectDirs, verificationStatus != "passed")
+		first, second := stdout.diagnostics, stderr.diagnostics
+		fallbackOut, fallbackErr := newCommandOutputBuffers(args, cwd, projectDirs)
+		if first == nil {
+			first = fallbackOut.diagnostics
+			first.write([]byte(stdoutText))
+		}
+		if second == nil {
+			second = fallbackErr.diagnostics
+			second.write([]byte(stderrText))
+		}
+		diagnostics, truncated := finishCommandDiagnostics(first, second, verificationStatus != "passed")
 		payload["verificationKind"] = verificationKind
 		payload["verificationStatus"] = verificationStatus
 		payload["diagnostics"] = diagnostics
 		payload["diagnosticCount"] = len(diagnostics)
+		payload["diagnosticsTruncated"] = truncated
+		if first.tests != nil {
+			first.tests.finishTAP()
+			testExecutionStatus := first.tests.execution.status()
+			payload["testExecutionStatus"] = testExecutionStatus
+			if verificationStatus == "passed" && (testExecutionStatus == "no_tests" || testExecutionStatus == "all_skipped" || testExecutionStatus == "collected") {
+				payload["verificationStatus"] = testExecutionStatus
+			}
+			if verificationStatus == "passed" && testExecutionStatus == "unknown" {
+				payload["verificationStatus"] = "completed"
+			}
+			payload["testFailures"] = first.tests.failures
+			payload["testFailureCount"] = len(first.tests.failures)
+			payload["testFailuresTruncated"] = first.tests.truncated || first.droppingLine
+		}
 	}
 	out = toolJSON(out, ok, payload)
 	if ok {
@@ -558,11 +637,13 @@ func (w *commandProgressWriter) flushLocked() {
 }
 
 type truncatingBuffer struct {
-	head      []byte
-	tail      []byte
-	headLimit int
-	tailLimit int
-	total     int
+	diagnostics *commandDiagnosticCollector
+	artifact    *commandOutputArtifact
+	head        []byte
+	tail        []byte
+	headLimit   int
+	tailLimit   int
+	total       int
 }
 
 func newTruncatingBuffer(limit int) *truncatingBuffer {
@@ -574,6 +655,12 @@ func newTruncatingBuffer(limit int) *truncatingBuffer {
 
 func (b *truncatingBuffer) Write(p []byte) (int, error) {
 	written := len(p)
+	if b.diagnostics != nil {
+		b.diagnostics.write(p)
+	}
+	if b.artifact != nil && b.total+written > b.headLimit+b.tailLimit {
+		b.artifact.write(b.head, b.tail, p)
+	}
 	b.total += written
 	if len(b.head) < b.headLimit {
 		count := min(len(p), b.headLimit-len(b.head))

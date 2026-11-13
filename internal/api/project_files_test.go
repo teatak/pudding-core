@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/teatak/pudding-core/internal/home"
@@ -207,6 +208,7 @@ func TestProjectBrowserSearchReusesBuiltinTextSearch(t *testing.T) {
 		"src/main.go":               "package main\n// SearchNeedle\n",
 		".claude/instructions.md":   "searchneedle in hidden project config\n",
 		"node_modules/pkg/index.js": "searchneedle must stay ignored\n",
+		"large.txt":                 strings.Repeat("padding\n", 160000) + "searchneedle\n",
 	} {
 		if err := os.WriteFile(filepath.Join(root, path), []byte(content), 0o600); err != nil {
 			t.Fatal(err)
@@ -218,10 +220,15 @@ func TestProjectBrowserSearchReusesBuiltinTextSearch(t *testing.T) {
 	result := decodeJSON[struct {
 		CaseSensitive bool                     `json:"caseSensitive"`
 		FilesScanned  int                      `json:"filesScanned"`
+		Complete      bool                     `json:"complete"`
+		Skipped       map[string]int           `json:"skipped"`
 		Matches       []projectSearchMatchView `json:"matches"`
 	}](t, req(t, http.MethodGet, srv.URL+"/sessions/sess_search/project/search?"+query.Encode(), nil))
 	if result.CaseSensitive || result.FilesScanned != 2 || len(result.Matches) != 2 {
 		t.Fatalf("unexpected search result: %+v", result)
+	}
+	if result.Complete || result.Skipped["file_too_large"] != 1 {
+		t.Fatalf("API lost incomplete coverage: %+v", result)
 	}
 	if result.Matches[0].Path != ".claude/instructions.md" || result.Matches[1].Path != "src/main.go" {
 		t.Fatalf("unexpected search matches: %+v", result.Matches)

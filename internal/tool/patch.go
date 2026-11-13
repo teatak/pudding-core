@@ -36,20 +36,26 @@ type filePatchArgs struct {
 	ItemID            string         `json:"widget_id,omitempty"`
 	ExpectedDraftHash string         `json:"expectedDraftHash,omitempty"`
 	Files             []patchFileArg `json:"files"`
+	Diff              *string        `json:"diff,omitempty"`
+	Relocate          *bool          `json:"relocate,omitempty"`
 }
 
 type patchFileArg struct {
-	Path    string         `json:"path"`
-	Action  string         `json:"action"`
-	Content *string        `json:"content,omitempty"`
-	Hunks   []patchHunkArg `json:"hunks,omitempty"`
+	Path          string         `json:"path"`
+	Action        string         `json:"action"`
+	Content       *string        `json:"content,omitempty"`
+	ExpectedHash  string         `json:"expected_hash,omitempty"`
+	Hunks         []patchHunkArg `json:"hunks,omitempty"`
+	deleteContent *string        // Unified deletions must match the entire source.
 }
 
 type patchHunkArg struct {
-	StartLine int       `json:"start_line"`
-	Relocate  bool      `json:"relocate,omitempty"`
-	OldLines  *[]string `json:"old_lines"`
-	NewLines  *[]string `json:"new_lines"`
+	StartLine  int       `json:"start_line"`
+	Relocate   bool      `json:"relocate,omitempty"`
+	OldLines   *[]string `json:"old_lines"`
+	NewLines   *[]string `json:"new_lines"`
+	oldEndings []string  // Non-nil only for unified diff; JSON hunks preserve existing endings.
+	newEndings []string
 }
 
 type preparedPatch struct {
@@ -143,7 +149,23 @@ func newPatchLimitError(reason, detail, metric, unit string, actual, limit int64
 
 func decodeFilePatchArgs(raw json.RawMessage) (filePatchArgs, *toolArgumentError) {
 	var args filePatchArgs
-	err := decodeToolArgumentObject(raw, &args, toolArgumentField{"scope", "string"}, toolArgumentField{"files", "array"})
+	if err := decodeToolArgumentObject(raw, &args, toolArgumentField{"scope", "string"}); err != nil {
+		return args, err
+	}
+	var err *toolArgumentError
+	switch {
+	case args.Diff != nil && args.Files != nil:
+		err = &toolArgumentError{kind: "conflicting_fields", field: "diff", detail: "files and diff are mutually exclusive", hint: "Provide either files or diff, not both."}
+	case args.Diff != nil:
+		args.Files, err = parseUnifiedPatch(*args.Diff, args.Relocate != nil && *args.Relocate)
+	case args.Relocate != nil:
+		err = &toolArgumentError{kind: "invalid_value", field: "relocate", detail: "top-level relocate applies only to diff input", hint: "For files input, set relocate on individual hunks."}
+	case args.Files == nil:
+		err = &toolArgumentError{kind: "missing_field", field: "files", expected: "array", detail: "files or diff is required", hint: "Provide a files array or a unified diff string."}
+	}
+	if err != nil {
+		err.receivedBytes = len(raw)
+	}
 	return args, err
 }
 
@@ -175,6 +197,9 @@ func validateFilePatchArgs(args filePatchArgs) *toolArgumentError {
 			return &toolArgumentError{kind: "path_required", detail: "patch file path is required", hint: "Set a project file path and retry.", field: fieldPrefix + ".path", expected: "non-empty string"}
 		}
 		action := strings.TrimSpace(file.Action)
+		if file.ExpectedHash != "" && (action != "replace" || len(file.ExpectedHash) != 64 || strings.Trim(file.ExpectedHash, "0123456789abcdef") != "") {
+			return &toolArgumentError{kind: "invalid_value", field: fieldPrefix + ".expected_hash", detail: "expected_hash is supported only for replace and must be the SHA-256 contentHash returned by file_read", hint: "Read the file and pass its contentHash for a whole-file replacement."}
+		}
 		switch action {
 		case "create", "replace":
 			if file.Content == nil || len(file.Hunks) > 0 {
@@ -199,7 +224,7 @@ func validateFilePatchArgs(args filePatchArgs) *toolArgumentError {
 					return &toolArgumentError{kind: "empty_hunk", detail: "hunk old_lines and new_lines cannot both be empty", hint: "Provide old lines to remove or new lines to insert.", field: hunkField, expected: "a non-empty old_lines or new_lines array"}
 				}
 				for _, line := range append(append([]string(nil), (*hunk.OldLines)...), (*hunk.NewLines)...) {
-					if strings.ContainsAny(line, "\r\n") {
+					if strings.Contains(line, "\n") || (hunk.newEndings == nil && strings.Contains(line, "\r")) {
 						return &toolArgumentError{kind: "hunk_line_contains_newline", detail: "hunk line entries must not contain newline characters", hint: "Put each logical line in a separate array element.", field: hunkField, expected: "line arrays without newline characters"}
 					}
 					if !isToolText([]byte(line)) {
@@ -327,10 +352,21 @@ func preparePatchFile(projectDirs []string, requested patchFileArg) (preparedPat
 		file.OldText = string(data)
 		file.OldHash = patchContentHash(data)
 		file.Mode = info.Mode().Perm()
+		if action == "replace" {
+			if requested.ExpectedHash == "" {
+				return preparedPatchFile{}, "", newPatchError("file_version_required", "Read the file and pass its contentHash as expected_hash before replacing: "+file.Path)
+			}
+			if file.OldHash != requested.ExpectedHash {
+				return preparedPatchFile{}, "", newPatchError("file_conflict", "The file changed since it was read; reread and merge your changes before retrying: "+file.Path)
+			}
+		}
 		if action == "create" {
 			return preparedPatchFile{}, "", newPatchError("file_exists", "cannot create an existing file: "+file.Path)
 		}
 	case errors.Is(statErr, os.ErrNotExist):
+		if action == "replace" && requested.ExpectedHash != "" {
+			return preparedPatchFile{}, "", newPatchError("file_conflict", "The file was removed since it was read: "+file.Path)
+		}
 		if action == "delete" {
 			return preparedPatchFile{}, "", newPatchError("file_not_found", "cannot delete a missing file: "+file.Path)
 		}
@@ -342,6 +378,9 @@ func preparePatchFile(projectDirs []string, requested patchFileArg) (preparedPat
 		return preparedPatchFile{}, "", newPatchError("stat_failed", statErr.Error())
 	}
 	if action == "delete" {
+		if requested.deleteContent != nil && file.OldText != *requested.deleteContent {
+			return preparedPatchFile{}, "", newPatchError("hunk_lines_mismatch", "delete diff does not match the complete current file: "+file.Path)
+		}
 		file.Operation = "delete"
 	} else if action == "edit" {
 		next, relocations, err := applyPatchHunks(file.OldText, file.Path, requested.Hunks)
@@ -378,10 +417,11 @@ func applyPatchHunks(content, filePath string, hunks []patchHunkArg) (string, []
 		return "", nil, newPatchError("invalid_hunks", "patch hunks must contain between 1 and 64 entries: "+filePath)
 	}
 	type resolvedHunk struct {
-		index    int
-		start    int
-		end      int
-		newLines []string
+		index      int
+		start      int
+		end        int
+		newLines   []string
+		newEndings []string
 	}
 	lines := splitPatchTextLines(content)
 	resolved := make([]resolvedHunk, 0, len(hunks))
@@ -394,7 +434,7 @@ func applyPatchHunks(content, filePath string, hunks []patchHunkArg) (string, []
 			matchErr = newPatchHunkError("hunk_line_out_of_range", "hunk "+strconv.Itoa(index+1)+" range is outside the original file: "+filePath, filePath, index, hunk, lines, -1)
 		} else {
 			for offset, expected := range oldLines {
-				if lines[start+offset].text != expected {
+				if lines[start+offset].text != expected || (hunk.oldEndings != nil && lines[start+offset].ending != hunk.oldEndings[offset]) {
 					matchErr = newPatchHunkError("hunk_lines_mismatch", "hunk "+strconv.Itoa(index+1)+" old_lines do not match at start_line "+strconv.Itoa(hunk.StartLine)+": "+filePath, filePath, index, hunk, lines, offset)
 					break
 				}
@@ -408,7 +448,7 @@ func applyPatchHunks(content, filePath string, hunks []patchHunkArg) (string, []
 			relocations = append(relocations, patchHunkRelocation{Hunk: index + 1, RequestedStartLine: hunk.StartLine, StartLine: start + 1})
 		}
 		end := start + len(oldLines)
-		resolved = append(resolved, resolvedHunk{index: index, start: start, end: end, newLines: *hunk.NewLines})
+		resolved = append(resolved, resolvedHunk{index: index, start: start, end: end, newLines: *hunk.NewLines, newEndings: hunk.newEndings})
 	}
 	sort.Slice(resolved, func(i, j int) bool {
 		if resolved[i].start == resolved[j].start {
@@ -430,7 +470,7 @@ func applyPatchHunks(content, filePath string, hunks []patchHunkArg) (string, []
 		terminalEnding := defaultEnding
 		if hunk.end > hunk.start {
 			terminalEnding = lines[hunk.end-1].ending
-		} else if hunk.start == len(lines) {
+		} else if hunk.start == len(lines) && hunk.newEndings == nil {
 			terminalEnding = ""
 			if len(lines) > 0 {
 				last := len(lines) - 1
@@ -446,6 +486,9 @@ func applyPatchHunks(content, filePath string, hunks []patchHunkArg) (string, []
 			if lineIndex == len(hunk.newLines)-1 {
 				ending = terminalEnding
 			}
+			if hunk.newEndings != nil {
+				ending = hunk.newEndings[lineIndex]
+			}
 			replacement[lineIndex] = patchTextLine{text: line, ending: ending}
 		}
 		next := make([]patchTextLine, 0, len(lines)-(hunk.end-hunk.start)+len(replacement))
@@ -455,7 +498,10 @@ func applyPatchHunks(content, filePath string, hunks []patchHunkArg) (string, []
 		lines = next
 	}
 	var nextBytes int64
-	for _, line := range lines {
+	for index, line := range lines {
+		if line.ending == "" && index != len(lines)-1 {
+			return "", nil, newPatchError("invalid_diff", "an unterminated line would occur before the end of the file: "+filePath)
+		}
 		nextBytes += int64(len(line.text)) + int64(len(line.ending))
 	}
 	if nextBytes > patchMaxFileBytes {
@@ -722,6 +768,14 @@ func (r *BuiltinRunner) prepareWidgetPatch(call Call, args filePatchArgs) (*prep
 	projectCall.ProjectDirs = []string{root}
 	projectArgs := args
 	projectArgs.Scope = managedScopeProject
+	projectArgs.Files = append([]patchFileArg(nil), args.Files...)
+	if file := &projectArgs.Files[0]; file.Action == "replace" && file.ExpectedHash == "" {
+		// The caller already supplied the whole-draft version. Bind replacement
+		// to that verified snapshot without requiring a second widget version.
+		if content, exists := draft.Files[filepath.ToSlash(filepath.Clean(file.Path))]; exists {
+			file.ExpectedHash = patchContentHash([]byte(content))
+		}
+	}
 	patch, err := preparePatch(projectCall, projectArgs)
 	if err != nil {
 		return nil, err

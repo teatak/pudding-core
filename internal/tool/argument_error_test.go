@@ -1,10 +1,68 @@
 package tool
 
 import (
+	"context"
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 )
+
+func TestReadAndCodeToolsRejectMalformedArguments(t *testing.T) {
+	runner := NewBuiltinRunner()
+	t.Cleanup(func() { _ = runner.Close() })
+	root := t.TempDir()
+	for _, name := range []string{FileList, FileStat, FileRead, FileSlice, FileSearch, CodeSymbols, CodeDefinition, CodeReferences, CodeDiagnostics, CodeRename} {
+		for _, tc := range []struct{ raw, kind, field string }{
+			{`{"scope":"project","start_line":100}`, "unknown_field", "start_line"},
+			{`{"Scope":"project"}`, "unknown_field", "Scope"},
+			{`{"scope":null}`, "invalid_type", "scope"},
+			{`{"scope":17}`, "invalid_type", "scope"},
+			{`[]`, "expected_object", ""},
+			{`{"scope":"project"}{}`, "invalid_json", ""},
+			{`{"scope":"project`, "truncated_json", ""},
+		} {
+			t.Run(name+"/"+tc.kind+"/"+tc.field, func(t *testing.T) {
+				result := runner.Call(context.Background(), Call{Name: name, SessionID: "argument-check", ProjectDirs: []string{root}, Args: json.RawMessage(tc.raw)})
+				fields := decodeToolResult(t, result)
+				if result.Ok || fields["reason"] != "invalid_arguments" || fields["errorKind"] != tc.kind || fields["hint"] == nil {
+					t.Fatalf("%s accepted or misreported malformed args: %s", name, result.Content)
+				}
+				if tc.field != "" && fields["field"] != tc.field {
+					t.Fatalf("incorrect field: %s", result.Content)
+				}
+				if tc.kind == "unknown_field" {
+					allowed := fields["allowedFields"].([]any)
+					found := false
+					for _, field := range allowed {
+						found = found || field == "scope"
+					}
+					if !found {
+						t.Fatalf("missing legal parameters: %s", result.Content)
+					}
+				}
+			})
+		}
+	}
+}
+
+func TestToolArgumentObjectValidatesPromotedAndNestedFields(t *testing.T) {
+	var references codeReferencesArgs
+	if err := decodeToolArgumentObject(json.RawMessage(`{"scope":"project","path":"main.go","line":1,"column":2,"include_declaration":false,"max_results":10}`), &references); err != nil || references.Path != "main.go" || references.Line != 1 || references.IncludeDeclaration == nil || *references.IncludeDeclaration {
+		t.Fatalf("valid embedded code arguments rejected: %+v, %v", references, err)
+	}
+	var rename codeRenameArgs
+	if err := decodeToolArgumentObject(json.RawMessage(`{"scope":"project","path":"main.go","line":1,"column":2,"new_name":"renamed"}`), &rename); err != nil || rename.NewName != "renamed" || rename.Column != 2 {
+		t.Fatalf("valid rename arguments rejected: %+v, %v", rename, err)
+	}
+	var batch struct {
+		Items []codePositionArgs `json:"items"`
+	}
+	err := decodeToolArgumentObject(json.RawMessage(`{"items":[{"scope":"project","line_number":12}]}`), &batch)
+	if err == nil || err.field != "items[0].line_number" || !reflect.DeepEqual(err.allowedFields, []string{"column", "language", "line", "path", "scope"}) {
+		t.Fatalf("nested error lost field path or legal names: %+v", err)
+	}
+}
 
 func TestToolArgumentObjectErrorsAreSpecificAndDoNotRetainInput(t *testing.T) {
 	for _, test := range []struct {

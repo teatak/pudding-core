@@ -224,6 +224,8 @@ export const projectSearchResponse = z.object({
   matchCount: z.number().int().nonnegative(),
   filesScanned: z.number().int().nonnegative(),
   resultsCapped: z.boolean(),
+  complete: z.boolean().optional(),
+  skipped: z.record(z.string(), z.number().int().nonnegative()).optional(),
   caseSensitive: z.boolean(),
 });
 export type ProjectSearchResponse = z.infer<typeof projectSearchResponse>;

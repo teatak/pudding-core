@@ -250,9 +250,51 @@ func resultJSON(value any) json.RawMessage {
 }
 
 func copyResultMetadata(out map[string]any, fields map[string]json.RawMessage) {
+	// Log truncation must not hide the bounded diagnostics extracted before it.
+	var diagnostics []map[string]json.RawMessage
+	if json.Unmarshal(fields["diagnostics"], &diagnostics) == nil && len(diagnostics) > 0 {
+		shown := make([]map[string]json.RawMessage, 0, min(3, len(diagnostics)))
+		for _, diagnostic := range diagnostics[:min(3, len(diagnostics))] {
+			item := make(map[string]json.RawMessage)
+			for _, key := range []string{"path", "relativePath", "rawPath", "unresolved", "line", "column", "severity", "code", "source", "message"} {
+				if value := diagnostic[key]; len(value) > 0 && len(value) <= 1024 {
+					item[key] = value
+				}
+			}
+			if raw := diagnostic["message"]; len(raw) > 1024 {
+				var message string
+				if json.Unmarshal(raw, &message) == nil {
+					short, _ := truncateUTF8Bytes(message, 1000)
+					item["message"] = resultJSON(short)
+					item["messageTruncated"] = resultJSON(true)
+				}
+			}
+			shown = append(shown, item)
+		}
+		out["diagnostics"] = shown
+		out["shown_diagnostics"] = len(shown)
+	}
+	var failures []commandTestFailure
+	if json.Unmarshal(fields["testFailures"], &failures) == nil && len(failures) > 0 {
+		failures = failures[:min(3, len(failures))]
+		for i := range failures {
+			failures[i].Excerpt = ""
+			failures[i].Message = truncateDiagnosticText(failures[i].Message, 300)
+		}
+		out["testFailures"], out["shown_test_failures"] = failures, len(failures)
+	}
+	if value := fields["nextCursor"]; len(value) > 0 && len(value) <= 8194 {
+		out["nextCursor"] = value
+	}
+	// Two bounded artifact descriptors must survive the model's log preview.
+	if value := fields["outputFiles"]; len(value) > 0 && len(value) <= 8192 {
+		out["outputFiles"] = value
+	}
 	for _, key := range []string{
 		"scope", "path", "root", "projectRoot", "relativePath", "cwd", "start", "end", "lines", "origin", "order",
-		"reason", "error", "detail", "hint", "errorKind", "field", "expected", "offset", "receivedBytes", "metric", "actual", "limit", "unit", "count", "allowedScopes", "projectRoots",
+		"complete", "skipped", "mutationPaths", "contentHash", "processID", "running", "status", "yielded", "nextOffset", "oldestOffset", "hasMore", "background",
+		"outputMode", "includeIgnored", "recursive", "returnedCount", "fileCount", "diagnosticsTruncated", "testFailureCount", "testFailuresTruncated", "testExecutionStatus", "contextLines", "summaryOnly",
+		"reason", "error", "detail", "hint", "errorKind", "field", "expected", "allowedFields", "offset", "receivedBytes", "metric", "actual", "limit", "unit", "count", "allowedScopes", "projectRoots",
 		"command", "exitCode", "signal", "timedOut", "cancelled", "execution", "sandboxKind", "sandboxDenied", "shell", "durationMs", "truncated", "stdoutTruncated", "stderrTruncated", "verificationKind", "verificationStatus", "verificationWarning", "diagnosticCount", "matchCount", "resultsCapped", "shown_matches",
 	} {
 		if value, exists := fields[key]; exists && len(value) <= 1024 {

@@ -153,11 +153,7 @@ func TestCommandResultsExposeSandboxMetadata(t *testing.T) {
 		"background": true,
 	})
 	deniedStarted := decodeBackgroundProcessPayload(t, deniedBackground)
-	deniedPoll := backgroundToolCall(runner, "sess_sandbox_metadata", root, CommandSession, map[string]any{
-		"action":     "poll",
-		"process_id": deniedStarted.ProcessID,
-		"wait_ms":    10000, // Includes PowerShell startup under x64 emulation.
-	})
+	deniedPoll, _ := pollCommandUntilFinished(t, context.Background(), runner, "sess_sandbox_metadata", deniedStarted.ProcessID)
 	deniedFinished := decodeBackgroundProcessPayload(t, deniedPoll)
 	if deniedFinished.Running || !deniedFinished.SandboxDenied || deniedFinished.Reason != "non_zero_exit" {
 		t.Fatalf("background sandbox denial metadata missing: %+v", deniedFinished)

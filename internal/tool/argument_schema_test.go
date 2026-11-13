@@ -60,9 +60,9 @@ func TestFilePatchRejectsNullLineElementsWithoutChangingBatch(t *testing.T) {
 
 func TestFilePatchRejectsNestedCaseAliasesBeforeApproval(t *testing.T) {
 	for _, tc := range []struct{ field, file string }{
-		{"Path", `{"Path":"notes.txt","action":"delete"}`},
-		{"Action", `{"path":"notes.txt","Action":"delete"}`},
-		{"New_Lines", `{"path":"notes.txt","action":"edit","hunks":[{"start_line":1,"old_lines":["original"],"New_Lines":["replacement"]}]}`},
+		{"files[0].Path", `{"Path":"notes.txt","action":"delete"}`},
+		{"files[0].Action", `{"path":"notes.txt","Action":"delete"}`},
+		{"files[0].hunks[0].New_Lines", `{"path":"notes.txt","action":"edit","hunks":[{"start_line":1,"old_lines":["original"],"New_Lines":["replacement"]}]}`},
 	} {
 		t.Run(tc.field, func(t *testing.T) {
 			root := t.TempDir()

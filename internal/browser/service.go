@@ -160,21 +160,39 @@ type SelectOption struct {
 }
 
 type ObservedElement struct {
-	Selected    *bool          `json:"selected,omitempty"`
-	Value       *string        `json:"value,omitempty"`
-	Options     []SelectOption `json:"options,omitempty"`
-	OptionCount *int           `json:"optionCount,omitempty"`
-	Ref         string         `json:"ref,omitempty"`
-	Index       int            `json:"index"`
-	Tag         string         `json:"tag"`
-	Text        string         `json:"text,omitempty"`
-	Href        string         `json:"href,omitempty"`
-	Role        string         `json:"role,omitempty"`
-	AriaLabel   string         `json:"ariaLabel,omitempty"`
-	Selector    string         `json:"selector,omitempty"`
-	InputType   string         `json:"inputType,omitempty"`
-	Disabled    bool           `json:"disabled,omitempty"`
-	Bounds      Bounds         `json:"bounds"`
+	Multiple       *bool          `json:"multiple,omitempty"`
+	Hidden         bool           `json:"hidden,omitempty"`
+	Accept         string         `json:"accept,omitempty"`
+	Directory      bool           `json:"directory,omitempty"`
+	Files          []UploadedFile `json:"files,omitempty"`
+	AccessibleName string         `json:"accessibleName,omitempty"`
+	Placeholder    string         `json:"placeholder,omitempty"`
+	Checked        *bool          `json:"checked,omitempty"`
+	Indeterminate  bool           `json:"indeterminate,omitempty"`
+	Expanded       *bool          `json:"expanded,omitempty"`
+	ReadOnly       *bool          `json:"readOnly,omitempty"`
+	ValueTruncated bool           `json:"valueTruncated,omitempty"`
+	Selected       *bool          `json:"selected,omitempty"`
+	Value          *string        `json:"value,omitempty"`
+	Options        []SelectOption `json:"options,omitempty"`
+	OptionCount    *int           `json:"optionCount,omitempty"`
+	Ref            string         `json:"ref,omitempty"`
+	Index          int            `json:"index"`
+	Tag            string         `json:"tag"`
+	Text           string         `json:"text,omitempty"`
+	Href           string         `json:"href,omitempty"`
+	Role           string         `json:"role,omitempty"`
+	AriaLabel      string         `json:"ariaLabel,omitempty"`
+	Selector       string         `json:"selector,omitempty"`
+	InputType      string         `json:"inputType,omitempty"`
+	Disabled       bool           `json:"disabled,omitempty"`
+	Bounds         Bounds         `json:"bounds"`
+}
+
+type UploadedFile struct {
+	Name string `json:"name"`
+	Size int64  `json:"size"`
+	Type string `json:"type"`
 }
 
 type ScreenshotResult struct {
@@ -267,6 +285,7 @@ type HoverInput struct {
 }
 
 type WaitInput struct {
+	Value     *string   `json:"value,omitempty"`
 	KnownIDs  *[]string `json:"knownIDs,omitempty"`
 	FrameID   string    `json:"frameID,omitempty"`
 	WindowID  string    `json:"windowID,omitempty"`
@@ -276,4 +295,49 @@ type WaitInput struct {
 	Text      string    `json:"text,omitempty"`
 	URL       string    `json:"url,omitempty"`
 	TimeoutMS *int      `json:"timeoutMs,omitempty"`
+}
+
+// FileTransferService is the native browser file capability. Upload paths are
+// private snapshots resolved by Core; they are not public tool arguments.
+type FileTransferService interface {
+	Upload(context.Context, string, string, UploadInput) (ActionResult, error)
+	Downloads(context.Context, string, DownloadInput) (DownloadResult, error)
+}
+
+type UploadInput struct {
+	TabID    string   `json:"tabID"`
+	WindowID string   `json:"windowID,omitempty"`
+	FrameID  string   `json:"frameID,omitempty"`
+	Selector string   `json:"selector"`
+	Files    []string `json:"files"`
+}
+
+type DownloadInput struct {
+	Action     string    `json:"action"`
+	TabID      string    `json:"tabID,omitempty"`
+	WindowID   *string   `json:"windowID,omitempty"`
+	DownloadID string    `json:"downloadID,omitempty"`
+	KnownIDs   *[]string `json:"knownIDs,omitempty"`
+	TimeoutMS  *int      `json:"timeoutMs,omitempty"`
+}
+
+type Download struct {
+	ID            string `json:"id"`
+	SessionID     string `json:"sessionID"`
+	TabID         string `json:"tabID"`
+	WindowID      string `json:"windowID"`
+	URL           string `json:"url"`
+	Filename      string `json:"filename"`
+	State         string `json:"state"`
+	ReceivedBytes int64  `json:"receivedBytes"`
+	TotalBytes    int64  `json:"totalBytes"`
+	Interrupted   bool   `json:"interrupted,omitempty"`
+	Path          string `json:"path,omitempty"`
+	Error         string `json:"error,omitempty"`
+	StartedAt     string `json:"startedAt"`
+	FinishedAt    string `json:"finishedAt,omitempty"`
+}
+
+type DownloadResult struct {
+	Downloads []Download `json:"downloads"`
 }

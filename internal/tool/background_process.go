@@ -108,6 +108,8 @@ type backgroundProcessManager struct {
 }
 
 type backgroundProcess struct {
+	foreground  *foregroundCommand
+	finalResult *Result // set before publishing completion; guarded by mu
 	manager     *backgroundProcessManager
 	id          string
 	sessionID   string
@@ -142,6 +144,7 @@ type backgroundProcess struct {
 	expiryTimer          *time.Timer
 	requestedStopReason  string
 	output               backgroundProcessOutputBuffer
+	outputChanged        chan struct{} // guarded by mu; broadcasts newly readable output
 
 	counted bool // guarded by manager.mu
 }
@@ -232,7 +235,7 @@ func (r *BuiltinRunner) commandSession(ctx context.Context, call Call) Result {
 	var payload map[string]any
 	switch args.Action {
 	case "poll":
-		process.waitForPoll(ctx, time.Duration(args.WaitMS)*time.Millisecond)
+		process.waitForPoll(ctx, args.Offset, time.Duration(args.WaitMS)*time.Millisecond)
 		payload = process.pollPayload(args.Offset, args.MaxBytes)
 		out.SummaryKind = SummaryReturnedItems
 		if chunks, ok := payload["output"].([]backgroundProcessOutputChunk); ok {
@@ -341,6 +344,11 @@ func (m *backgroundProcessManager) Start(sessionID, turnID, callID, cwd string, 
 	if err != nil {
 		return nil, err
 	}
+	return m.startPrepared(sessionID, turnID, callID, cwd, command, shell, tty, execution, nil)
+}
+
+func (m *backgroundProcessManager) startPrepared(sessionID, turnID, callID, cwd, command, shell string, tty bool, execution *commandExecution, foreground *foregroundCommand) (*backgroundProcess, error) {
+	var err error
 	cmd := execution.Cmd
 	process := &backgroundProcess{
 		manager:     m,
@@ -358,6 +366,7 @@ func (m *backgroundProcessManager) Start(sessionID, turnID, callID, cwd string, 
 		tty:         tty,
 		running:     true,
 		startedAt:   time.Now(),
+		foreground:  foreground,
 	}
 	m.mu.Lock()
 	if m.closed {
@@ -377,7 +386,7 @@ func (m *backgroundProcessManager) Start(sessionID, turnID, callID, cwd string, 
 	}
 	// Rejected commands never reach exec.Cmd.Start, which owns closing the
 	// child side of StdinPipe. Allocate it only after admission succeeds.
-	if !tty {
+	if !tty && foreground == nil {
 		stdin, stdinErr := cmd.StdinPipe()
 		if stdinErr != nil {
 			m.mu.Unlock()
@@ -386,6 +395,10 @@ func (m *backgroundProcessManager) Start(sessionID, turnID, callID, cwd string, 
 		process.stdin = stdin
 		cmd.Stdout = backgroundProcessWriter{process: process, stream: ProgressStdout}
 		cmd.Stderr = backgroundProcessWriter{process: process, stream: ProgressStderr}
+	}
+	if foreground != nil {
+		cmd.Stdout = io.MultiWriter(backgroundProcessWriter{process: process, stream: ProgressStdout}, foreground.stdout)
+		cmd.Stderr = io.MultiWriter(backgroundProcessWriter{process: process, stream: ProgressStderr}, foreground.stderr)
 	}
 	evicted := m.evictFinishedLocked()
 	process.counted = true
@@ -665,26 +678,36 @@ func (p *backgroundProcess) wait() {
 	// Both exec's pipe writers and our PTY reader have reached EOF (or the
 	// bounded drain deadline); incomplete final runes can now be replaced.
 	p.output.Finish()
-	p.running = false
+	reason := "exited"
+	stopped := p.requestedStopReason != ""
+	switch {
+	case stopped:
+		reason = p.requestedStopReason
+	case waitErr != nil:
+		reason = "non_zero_exit"
+	}
+	p.mu.Unlock()
+	// Output delivery and mutation callbacks may themselves inspect processes.
+	// Complete them without holding the state lock, before publishing exit.
+	var finalResult *Result
+	if p.foreground != nil {
+		result := p.foreground.complete(exitCode, reason, waitErr, now.Sub(p.startedAt))
+		finalResult = &result
+	}
+	p.mu.Lock()
 	p.exitCode = &exitCode
 	p.signal = commandProcessSignal(p.cmd)
 	p.finishedAt = now
-	switch {
-	case p.requestedStopReason != "":
-		p.reason = p.requestedStopReason
-	case waitErr != nil:
-		p.reason = "non_zero_exit"
-	default:
-		p.reason = "exited"
-	}
+	p.reason = reason
 	if waitErr != nil {
 		p.errorText = waitErr.Error()
 	}
 	if p.sandboxed && (commandSandboxDenied(p.sandboxDetectionTail+"\n"+p.errorText, waitErr) || (waitErr != nil && p.sandboxDenialOutput)) {
 		p.sandboxDenied = true
 	}
+	p.finalResult = finalResult
+	p.running = false
 	p.scheduleRetentionLocked()
-	stopped := p.requestedStopReason != ""
 	p.mu.Unlock()
 	p.manager.markFinished(p)
 	close(p.done)
@@ -793,20 +816,33 @@ func (p *backgroundProcess) signalStop(force bool) {
 	}
 }
 
-func (p *backgroundProcess) waitForPoll(ctx context.Context, wait time.Duration) {
+func (p *backgroundProcess) waitForPoll(ctx context.Context, offset int64, wait time.Duration) {
 	if wait <= 0 {
 		return
 	}
 	p.mu.Lock()
-	running := p.running
-	done := p.done
+	// Return unread output immediately. Stale or future cursors also return
+	// immediately so Read can report truncation or correct the cursor.
+	if !p.running || offset != p.output.nextOffset {
+		p.mu.Unlock()
+		return
+	}
+	if p.outputChanged == nil {
+		p.outputChanged = make(chan struct{})
+	}
+	changed, done := p.outputChanged, p.done
 	p.mu.Unlock()
-	if !running {
+	waitForCommandUpdate(ctx, wait, done, changed)
+}
+
+func waitForCommandUpdate(ctx context.Context, wait time.Duration, done, changed <-chan struct{}) {
+	if wait <= 0 {
 		return
 	}
 	timer := time.NewTimer(wait)
 	defer timer.Stop()
 	select {
+	case <-changed:
 	case <-done:
 	case <-ctx.Done():
 	case <-timer.C:
@@ -899,6 +935,18 @@ func (p *backgroundProcess) statePayloadLocked() map[string]any {
 	if p.errorText != "" {
 		payload["error"] = p.errorText
 	}
+	if p.foreground != nil {
+		payload["background"] = false
+		if p.finalResult != nil {
+			var final map[string]any
+			_ = json.Unmarshal([]byte(p.finalResult.Content), &final)
+			for key, value := range final {
+				if key != "ok" {
+					payload[key] = value
+				}
+			}
+		}
+	}
 	return payload
 }
 
@@ -967,7 +1015,12 @@ func (p *backgroundProcess) cancelExpiry() {
 
 func (w backgroundProcessWriter) Write(data []byte) (int, error) {
 	w.process.mu.Lock()
+	previousOffset := w.process.output.nextOffset
 	w.process.output.Append(w.stream, data)
+	if w.process.output.nextOffset != previousOffset && w.process.outputChanged != nil {
+		close(w.process.outputChanged)
+		w.process.outputChanged = nil
+	}
 	if w.process.sandboxed {
 		const detectionTailLimit = 256
 		scan := w.process.sandboxDetectionTail + string(data)

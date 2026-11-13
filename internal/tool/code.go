@@ -86,8 +86,8 @@ type codeDiagnostic struct {
 func (r *BuiltinRunner) codeSymbols(ctx context.Context, call Call) Result {
 	out := Result{CallID: call.CallID, Name: call.Name}
 	var args codeSymbolsArgs
-	if len(call.Args) == 0 || json.Unmarshal(call.Args, &args) != nil {
-		return toolJSONError(out, "invalid_arguments", "code symbol arguments must be a JSON object")
+	if err := decodeToolArgumentObject(call.Args, &args); err != nil {
+		return toolArgumentFailure(out, err)
 	}
 	if strings.TrimSpace(args.Scope) != managedScopeProject {
 		return toolJSONError(out, "invalid_scope", "code tools require project scope")
@@ -264,8 +264,8 @@ func (r *BuiltinRunner) codeDefinition(ctx context.Context, call Call) Result {
 func (r *BuiltinRunner) codeReferences(ctx context.Context, call Call) Result {
 	out := Result{CallID: call.CallID, Name: call.Name}
 	var args codeReferencesArgs
-	if len(call.Args) == 0 || json.Unmarshal(call.Args, &args) != nil {
-		return toolJSONError(out, "invalid_arguments", "code reference arguments must be a JSON object")
+	if err := decodeToolArgumentObject(call.Args, &args); err != nil {
+		return toolArgumentFailure(out, err)
 	}
 	if result := validateCodePositionArgs(out, args.codePositionArgs); result != nil {
 		return *result
@@ -309,8 +309,8 @@ func (r *BuiltinRunner) codeReferences(ctx context.Context, call Call) Result {
 func (r *BuiltinRunner) codeDiagnostics(ctx context.Context, call Call) Result {
 	out := Result{CallID: call.CallID, Name: call.Name}
 	var args codeDiagnosticsArgs
-	if len(call.Args) == 0 || json.Unmarshal(call.Args, &args) != nil {
-		return toolJSONError(out, "invalid_arguments", "code diagnostic arguments must be a JSON object")
+	if err := decodeToolArgumentObject(call.Args, &args); err != nil {
+		return toolArgumentFailure(out, err)
 	}
 	if strings.TrimSpace(args.Scope) != managedScopeProject {
 		return toolJSONError(out, "invalid_scope", "code tools require project scope")
@@ -458,8 +458,8 @@ func (r *BuiltinRunner) codeDocumentDiagnostics(ctx context.Context, target reso
 
 func decodeCodePositionArgs(out Result, raw json.RawMessage) (codePositionArgs, *Result) {
 	var args codePositionArgs
-	if len(raw) == 0 || json.Unmarshal(raw, &args) != nil {
-		result := toolJSONError(out, "invalid_arguments", "code position arguments must be a JSON object")
+	if err := decodeToolArgumentObject(raw, &args); err != nil {
+		result := toolArgumentFailure(out, err)
 		return args, &result
 	}
 	return args, validateCodePositionArgs(out, args)

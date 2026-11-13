@@ -114,3 +114,37 @@ func TestCommandVerificationArgvRequiresOneStaticCommand(t *testing.T) {
 		}
 	}
 }
+
+func TestCommandVerificationInvocationRecognizesLiteralDirectoryPrefix(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		if argv, _ := commandVerificationInvocation("cd web && npm test"); argv != nil {
+			t.Fatal("POSIX command analysis used on Windows")
+		}
+		return
+	}
+	for _, tc := range []struct {
+		command, directory string
+		argv               []string
+	}{
+		{"cd web && npm test", "web", []string{"npm", "test"}},
+		{`cd "web app" && go test -json ./...`, "web app", []string{"go", "test", "-json", "./..."}},
+		{"cd -- -web && tsc --noEmit", "-web", []string{"tsc", "--noEmit"}},
+		{"cd /tmp/project && npm --prefix web test", "/tmp/project", []string{"npm", "--prefix", "web", "test"}},
+	} {
+		argv, directory := commandVerificationInvocation(tc.command)
+		if !reflect.DeepEqual(argv, tc.argv) || directory != tc.directory {
+			t.Fatalf("%q: argv=%v directory=%q", tc.command, argv, directory)
+		}
+	}
+	for _, command := range []string{
+		"cd web; npm test", "cd web || npm test", "cd web && npm test || true", "cd web && npm test | tee log",
+		"cd web && npm test && true", "cd web && ! npm test", "! cd web && npm test", "cd web && (npm test)",
+		"cd web && cd src && npm test", "cd && npm test", "cd - && npm test", "cd -P web && npm test",
+		`cd "$HOME" && npm test`, "cd web* && npm test", "cd ~/web && npm test", "cd $(pwd) && npm test",
+		"CDPATH=/elsewhere cd web && npm test", "cd web > result && npm test", "cd web && npm test &",
+	} {
+		if argv, _ := commandVerificationInvocation(command); argv != nil {
+			t.Fatalf("ambiguous compound command classified: %q => %v", command, argv)
+		}
+	}
+}

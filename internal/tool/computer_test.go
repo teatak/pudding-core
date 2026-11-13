@@ -80,7 +80,10 @@ func TestComputerActionSchemaUsesOneActionsArrayContract(t *testing.T) {
 			MinItems int `json:"minItems"`
 			MaxItems int `json:"maxItems"`
 			Items    struct {
-				Required []string `json:"required"`
+				Required   []string `json:"required"`
+				Properties map[string]struct {
+					Enum []string `json:"enum"`
+				} `json:"properties"`
 			} `json:"items"`
 		}
 		if err := json.Unmarshal(schema.Properties["actions"], &actions); err != nil {
@@ -88,6 +91,13 @@ func TestComputerActionSchemaUsesOneActionsArrayContract(t *testing.T) {
 		}
 		if actions.MinItems != 1 || actions.MaxItems != computer.MaxActionsPerCall || len(actions.Items.Required) != 1 || actions.Items.Required[0] != "type" {
 			t.Fatalf("unexpected actions schema: %s", schema.Properties["actions"])
+		}
+		insertionExposed := false
+		for _, action := range actions.Items.Properties["type"].Enum {
+			insertionExposed = insertionExposed || action == computer.ActionInsertText
+		}
+		if !insertionExposed {
+			t.Fatal("background text insertion is absent from the public tool schema")
 		}
 		return
 	}

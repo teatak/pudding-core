@@ -1,6 +1,7 @@
 package tool
 
 import (
+	"context"
 	"errors"
 	"os"
 	"os/exec"
@@ -9,6 +10,84 @@ import (
 	"time"
 	"unicode/utf8"
 )
+
+func TestBackgroundProcessPollWakesAllReadersOnNewOutput(t *testing.T) {
+	process := &backgroundProcess{running: true, done: make(chan struct{})}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	returned := make(chan struct{}, 2)
+	for range 2 {
+		go func() {
+			process.waitForPoll(ctx, 0, 5*time.Second)
+			returned <- struct{}{}
+		}()
+	}
+	writer := backgroundProcessWriter{process: process, stream: ProgressStderr}
+	encoded := []byte("中")
+	_, _ = writer.Write(encoded[:1])
+	select {
+	case <-returned:
+		t.Fatal("poll returned before a complete output rune was readable")
+	case <-time.After(30 * time.Millisecond):
+	}
+	_, _ = writer.Write(encoded[1:])
+	for range 2 {
+		select {
+		case <-returned:
+		case <-time.After(time.Second):
+			t.Fatal("poll did not wake on output from a still-running process")
+		}
+	}
+	snapshot := process.pollPayload(0, backgroundProcessPollDefault)
+	if snapshot["running"] != true || snapshot["nextOffset"] != int64(len(encoded)) {
+		t.Fatalf("output wake changed execution state or offsets: %+v", snapshot)
+	}
+	chunks := snapshot["output"].([]backgroundProcessOutputChunk)
+	if len(chunks) != 1 || chunks[0].Stream != ProgressStderr || chunks[0].Content != "中" {
+		t.Fatalf("output was not preserved: %+v", chunks)
+	}
+	// Reading does not consume logs for another caller, but the returned cursor
+	// must wait for new output rather than repeatedly replaying the same chunk.
+	ctxNext, stop := context.WithCancel(context.Background())
+	defer stop()
+	nextReturned := make(chan struct{})
+	go func() {
+		process.waitForPoll(ctxNext, int64(len(encoded)), 5*time.Second)
+		close(nextReturned)
+	}()
+	select {
+	case <-nextReturned:
+		t.Fatal("next cursor woke on already-read output")
+	case <-time.After(30 * time.Millisecond):
+	}
+	_, _ = (backgroundProcessWriter{process: process, stream: ProgressStdout}).Write([]byte("ready"))
+	select {
+	case <-nextReturned:
+	case <-time.After(time.Second):
+		t.Fatal("new poll did not wake after the previous broadcast")
+	}
+}
+
+func TestBackgroundProcessPollReturnsUnreadAndInvalidCursorsImmediately(t *testing.T) {
+	process := &backgroundProcess{running: true, done: make(chan struct{})}
+	process.output.Append(ProgressStdout, []byte(strings.Repeat("x", backgroundProcessOutputLimit+1)))
+	for _, offset := range []int64{0, process.output.baseOffset, process.output.nextOffset + 1} {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		process.waitForPoll(ctx, offset, 5*time.Second)
+		if ctx.Err() != nil {
+			cancel()
+			t.Fatalf("poll waited for existing output or cursor correction: %d", offset)
+		}
+		cancel()
+		payload := process.pollPayload(offset, backgroundProcessPollDefault)
+		if offset == 0 && payload["truncated"] != true {
+			t.Fatal("stale cursor lost truncation indicator")
+		}
+		if offset > process.output.nextOffset && payload["nextOffset"] != process.output.nextOffset {
+			t.Fatal("future cursor was not corrected")
+		}
+	}
+}
 
 func TestBackgroundProcessOutputPreservesSplitUTF8(t *testing.T) {
 	var buffer backgroundProcessOutputBuffer

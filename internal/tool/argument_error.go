@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"reflect"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -17,6 +18,7 @@ type toolArgumentError struct {
 	expected      string
 	offset        int64
 	receivedBytes int
+	allowedFields []string
 }
 
 func (e *toolArgumentError) Error() string { return e.detail }
@@ -94,23 +96,31 @@ func validateToolArgumentValue(decoder *json.Decoder, valueType reflect.Type, fi
 		if valueType.Kind() != reflect.Struct {
 			return typeError("object")
 		}
+		fields := make(map[string]reflect.Type)
+		for _, declared := range reflect.VisibleFields(valueType) {
+			jsonName, _, _ := strings.Cut(declared.Tag.Get("json"), ",")
+			if declared.IsExported() && jsonName != "" && jsonName != "-" {
+				fields[jsonName] = declared.Type
+			}
+		}
 		for decoder.More() {
 			key, err := decoder.Token()
 			if err != nil {
 				return classifyToolArgumentError(err)
 			}
 			name := key.(string)
-			var fieldType reflect.Type
-			for index := 0; index < valueType.NumField(); index++ {
-				declared := valueType.Field(index)
-				jsonName, _, _ := strings.Cut(declared.Tag.Get("json"), ",")
-				if declared.IsExported() && jsonName != "-" && jsonName == name {
-					fieldType = declared.Type
-					break
-				}
-			}
+			fieldType := fields[name]
 			if fieldType == nil {
-				return classifyToolArgumentError(errors.New("json: unknown field " + strconv.Quote(name)))
+				argumentErr := classifyToolArgumentError(errors.New("json: unknown field " + strconv.Quote(name)))
+				if field != "" {
+					argumentErr.field = field + "." + name
+				}
+				for allowed := range fields {
+					argumentErr.allowedFields = append(argumentErr.allowedFields, allowed)
+				}
+				sort.Strings(argumentErr.allowedFields)
+				argumentErr.hint = "Replace or remove the unsupported field. Allowed fields in this object: " + strings.Join(argumentErr.allowedFields, ", ") + "."
+				return argumentErr
 			}
 			childField := name
 			if field != "" {
@@ -131,6 +141,33 @@ func validateToolArgumentValue(decoder *json.Decoder, valueType reflect.Type, fi
 			}
 		}
 		_, err = decoder.Token()
+	}
+	// Validate scalar types here too, so errors name JSON fields rather than
+	// encoding/json's internal Go embedding path (e.g. codePositionArgs.scope).
+	switch value := token.(type) {
+	case string:
+		if valueType.Kind() != reflect.String {
+			return typeError("string")
+		}
+	case bool:
+		if valueType.Kind() != reflect.Bool {
+			return typeError("bool")
+		}
+	case json.Number:
+		var numberErr error
+		switch valueType.Kind() {
+		case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+			_, numberErr = strconv.ParseInt(string(value), 10, valueType.Bits())
+		case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+			_, numberErr = strconv.ParseUint(string(value), 10, valueType.Bits())
+		case reflect.Float32, reflect.Float64:
+			_, numberErr = strconv.ParseFloat(string(value), valueType.Bits())
+		default:
+			return typeError("number")
+		}
+		if numberErr != nil {
+			return typeError("number")
+		}
 	}
 	if err != nil {
 		return classifyToolArgumentError(err)
@@ -199,6 +236,9 @@ func toolArgumentFailure(out Result, argumentErr *toolArgumentError) Result {
 	}
 	if argumentErr.expected != "" {
 		payload["expected"] = argumentErr.expected
+	}
+	if len(argumentErr.allowedFields) != 0 {
+		payload["allowedFields"] = argumentErr.allowedFields
 	}
 	if argumentErr.offset > 0 {
 		payload["offset"] = argumentErr.offset

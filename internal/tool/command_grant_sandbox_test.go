@@ -34,6 +34,25 @@ func TestSandboxCommandGrantBoundaries(t *testing.T) {
 	if diagnosticGrant == nil || diagnosticGrant.Key != grant.Key || diagnosticGrant.Identity().Program == "" {
 		t.Fatal("diagnostics changed authorization or failed to generate fingerprints")
 	}
+	declared := base
+	var declaredArgs map[string]any
+	if err := json.Unmarshal(base.Args, &declaredArgs); err != nil {
+		t.Fatal(err)
+	}
+	declaredArgs["mutation_paths"] = []string{"generated.txt"}
+	declaredArgs["yield_ms"] = 0
+	declaredArgs["timeout_ms"] = 120000
+	declared.Args, _ = json.Marshal(declaredArgs)
+	declaredGrant := CommandSessionGrantForCall(declared)
+	if declaredGrant == nil || declaredGrant.Key != grant.Key {
+		t.Fatal("diff metadata invalidated reusable command approval")
+	}
+	if _, _, _, err := declaredGrant.invocation(declared); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, err := grant.invocation(declared); err == nil {
+		t.Fatal("in-flight call arguments were not bound")
+	}
 	risk, _ := ClassifyToolCallForProject(base.Name, base.Args, base.ProjectDirs)
 	if !risk.LowRisk || slices.Contains(risk.ApprovalReasons, "custom_environment") {
 		t.Fatalf("risk=%+v", risk)

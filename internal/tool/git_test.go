@@ -25,14 +25,83 @@ type gitStatusPayload struct {
 }
 
 type gitDiffPayload struct {
-	OK        bool          `json:"ok"`
-	Staged    bool          `json:"staged"`
-	Diff      string        `json:"diff"`
-	Truncated bool          `json:"truncated"`
-	Files     []gitDiffFile `json:"files"`
-	FileCount int           `json:"fileCount"`
-	Additions int           `json:"additions"`
-	Deletions int           `json:"deletions"`
+	OK           bool          `json:"ok"`
+	Staged       bool          `json:"staged"`
+	Diff         string        `json:"diff"`
+	Truncated    bool          `json:"truncated"`
+	Files        []gitDiffFile `json:"files"`
+	FileCount    int           `json:"fileCount"`
+	Additions    int           `json:"additions"`
+	Deletions    int           `json:"deletions"`
+	Paths        []string      `json:"paths"`
+	ContextLines int           `json:"contextLines"`
+	SummaryOnly  bool          `json:"summaryOnly"`
+}
+
+func TestGitDiffScopesLiteralPathsAndContext(t *testing.T) {
+	root := newGitTestRepository(t, true)
+	names := []string{"nested/selected.txt", "a[1].txt", "a1.txt", ":(glob)*.txt", " leading trailing ", "--option.txt"}
+	if runtime.GOOS == "windows" {
+		names = []string{"nested/selected.txt", "a[1].txt", "a1.txt", "--option.txt"}
+	}
+	base := "before-one\nbefore-two\nold\nafter-one\nafter-two\n"
+	for _, name := range names {
+		writePatchTestFile(t, filepath.Join(root, name), base)
+	}
+	runGitTest(t, root, "add", ".")
+	runGitTest(t, root, "commit", "-m", "fixtures")
+	for _, name := range names {
+		writePatchTestFile(t, filepath.Join(root, name), strings.Replace(base, "old", "new", 1))
+	}
+	for _, name := range names {
+		result := gitTestCall(root, GitDiff, map[string]any{"scope": "project", "cwd": filepath.Join(root, "nested"), "paths": []string{name, name}, "context_lines": 0})
+		got := decodeGitPayload[gitDiffPayload](t, result)
+		if !got.OK || got.FileCount != 1 || got.Files[0].Path != name || len(got.Paths) != 1 || got.ContextLines != 0 || got.Additions != 1 || got.Deletions != 1 || strings.Contains(got.Diff, "\n before-two\n") || !strings.Contains(got.Diff, "+new") {
+			t.Fatalf("%q: %s", name, result.Content)
+		}
+	}
+	context := decodeGitPayload[gitDiffPayload](t, gitTestCall(root, GitDiff, map[string]any{"scope": "project", "paths": []string{names[0]}, "context_lines": 2}))
+	if !strings.Contains(context.Diff, "\n before-two\n") || !strings.Contains(context.Diff, "\n after-two\n") {
+		t.Fatalf("missing context: %+v", context)
+	}
+	summary := decodeGitPayload[gitDiffPayload](t, gitTestCall(root, GitDiff, map[string]any{"scope": "project", "summary_only": true}))
+	if !summary.SummaryOnly || summary.FileCount != len(names) || summary.Diff != "" || summary.Truncated {
+		t.Fatalf("summary: %+v", summary)
+	}
+	runGitTest(t, root, "--literal-pathspecs", "add", "--", names[0])
+	staged := decodeGitPayload[gitDiffPayload](t, gitTestCall(root, GitDiff, map[string]any{"scope": "project", "paths": []string{names[0]}, "staged": true}))
+	if !staged.Staged || staged.FileCount != 1 || !strings.Contains(staged.Diff, "+new") {
+		t.Fatalf("staged: %+v", staged)
+	}
+	unstaged := decodeGitPayload[gitDiffPayload](t, gitTestCall(root, GitDiff, map[string]any{"scope": "project", "paths": []string{names[0]}}))
+	if unstaged.FileCount != 0 || unstaged.Diff != "" {
+		t.Fatalf("staged change leaked into unstaged: %+v", unstaged)
+	}
+}
+
+func TestGitDiffFilteringAvoidsUnrelatedTruncation(t *testing.T) {
+	root := newGitTestRepository(t, true)
+	writePatchTestFile(t, filepath.Join(root, "large.txt"), "base\n")
+	runGitTest(t, root, "add", "large.txt")
+	runGitTest(t, root, "commit", "-m", "large baseline")
+	writePatchTestFile(t, filepath.Join(root, "large.txt"), strings.Repeat("large changed line\n", gitDiffOutputLimitBytes/8))
+	writePatchTestFile(t, filepath.Join(root, "tracked.txt"), "small change\n")
+	all := decodeGitPayload[gitDiffPayload](t, gitTestCall(root, GitDiff, map[string]any{"scope": "project"}))
+	if !all.Truncated {
+		t.Fatal("fixture did not exercise truncation")
+	}
+	focused := decodeGitPayload[gitDiffPayload](t, gitTestCall(root, GitDiff, map[string]any{"scope": "project", "paths": []string{"tracked.txt"}}))
+	if focused.Truncated || focused.FileCount != 1 || strings.Contains(focused.Diff, "large changed") || !strings.Contains(focused.Diff, "small change") {
+		t.Fatalf("focused diff: %+v", focused)
+	}
+	for _, args := range []map[string]any{
+		{"paths": []string{"../outside"}}, {"paths": []string{root}}, {"paths": []string{".git/config"}}, {"paths": []string{""}}, {"paths": []string{"."}}, {"paths": []string{"bad\x00name"}}, {"paths": make([]string, 513)}, {"context_lines": -1}, {"context_lines": 101}, {"path": "tracked.txt"}, {"summary_only": "true"},
+	} {
+		args["scope"] = "project"
+		if result := gitTestCall(root, GitDiff, args); result.Ok {
+			t.Fatalf("invalid args accepted: %+v", args)
+		}
+	}
 }
 
 type gitLogPayload struct {

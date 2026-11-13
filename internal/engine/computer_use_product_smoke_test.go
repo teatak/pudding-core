@@ -726,6 +726,10 @@ func TestComputerUseElectronSmoke(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := "你好🙂"
+	appID := os.Getenv("PUDDING_CU_FIXTURE_APP_ID")
+	if appID == "" {
+		appID = "com.github.Electron"
+	}
 	selected := "你好"
 	replacement := "布丁"
 	paste := "剪贴板🙂"
@@ -744,7 +748,7 @@ func TestComputerUseElectronSmoke(t *testing.T) {
 		return computerUseSmokeAction{callID: id, action: computer.ActionPressKey, input: &computer.ActionInput{Type: computer.ActionPressKey, Key: key, Modifiers: mods}}
 	}
 	scenario := computerUseSmokeScenario{
-		name: "electron", appID: "com.github.Electron", foreground: true, selection: computer.AppSelection{PID: int32(pid), AppPath: os.Getenv("PUDDING_CU_FIXTURE_PATH")},
+		name: "electron", appID: appID, foreground: true, selection: computer.AppSelection{PID: int32(pid), AppPath: os.Getenv("PUDDING_CU_FIXTURE_PATH")},
 		windowMatches: func(w computer.CapturableWindow) bool { return w.Title != nil && *w.Title == "CU first" },
 		actions: []computerUseSmokeAction{
 			{callID: "focus", action: computer.ActionFocus, matches: field},

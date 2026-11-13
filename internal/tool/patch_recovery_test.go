@@ -193,7 +193,7 @@ func TestFilePatchHunkRecovery(t *testing.T) {
 			result := patchTestCall(NewBuiltinRunner(), "session_recovery", root, FilePatch, map[string]any{
 				"scope": "project",
 				"files": []map[string]any{
-					{"path": "other.txt", "action": "replace", "content": "must not apply\n"},
+					{"path": "other.txt", "action": "replace", "expected_hash": patchContentHash([]byte("unchanged\n")), "content": "must not apply\n"},
 					{"path": "notes.txt", "action": "edit", "hunks": []map[string]any{
 						{"start_line": tc.start, "old_lines": tc.old, "new_lines": []string{"replacement"}},
 					}},

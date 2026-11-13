@@ -3,6 +3,7 @@ package engine
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -27,6 +28,7 @@ import (
 	"github.com/teatak/pudding-core/internal/store"
 	"github.com/teatak/pudding-core/internal/store/storetest"
 	"github.com/teatak/pudding-core/internal/tool"
+	"github.com/teatak/pudding-core/internal/turnfiles"
 )
 
 func newTestEngine(t *testing.T, opts ...mock.Option) (*Engine, *storetest.Store, *event.Hub, string) {
@@ -2932,6 +2934,14 @@ func TestProjectAskApprovalRequiresFileWriteApproval(t *testing.T) {
 }
 
 func TestPatchApprovalCarriesDiffAndAppliesAfterApproval(t *testing.T) {
+	for _, unified := range []bool{false, true} {
+		t.Run(fmt.Sprintf("unified=%t", unified), func(t *testing.T) {
+			testPatchApprovalCarriesDiffAndAppliesAfterApproval(t, unified)
+		})
+	}
+}
+
+func testPatchApprovalCarriesDiffAndAppliesAfterApproval(t *testing.T, unified bool) {
 	ctx := context.Background()
 	ms := storetest.New(t)
 	hub := event.NewHub()
@@ -2949,8 +2959,9 @@ func TestPatchApprovalCarriesDiffAndAppliesAfterApproval(t *testing.T) {
 	if err := ms.CreateProject(ctx, project); err != nil {
 		t.Fatal(err)
 	}
-	client := &patchApprovalClient{}
+	client := &patchApprovalClient{unified: unified}
 	eng := New(ms, hub, mapResolver{"patch": client}, ms, WithTools(tool.NewBuiltinRunner()), WithPlugins(&mutablePluginSource{defs: plugin.BuiltinDefinitions()}))
+	defer eng.Stop()
 	sid := "sess_patch_approval"
 	if err := ms.CreateSession(ctx, &store.Session{
 		ID: sid, Title: "patch", Provider: "patch", Model: "patch-model",
@@ -2969,7 +2980,8 @@ func TestPatchApprovalCarriesDiffAndAppliesAfterApproval(t *testing.T) {
 	sub, unsub := hub.Subscribe(sid)
 	defer unsub()
 
-	if _, err := eng.Submit(ctx, SubmitInput{SessionID: sid, ClientMessageID: "c_patch", Text: "更新 notes"}); err != nil {
+	submitted, err := eng.Submit(ctx, SubmitInput{SessionID: sid, ClientMessageID: "c_patch", Text: "更新 notes"})
+	if err != nil {
 		t.Fatal(err)
 	}
 	var approval event.Event
@@ -3000,6 +3012,24 @@ func TestPatchApprovalCarriesDiffAndAppliesAfterApproval(t *testing.T) {
 	waitTurnDone(t, ms, sid)
 	if data, err := os.ReadFile(target); err != nil || string(data) != "new text\n" {
 		t.Fatalf("approved patch was not applied: data=%q err=%v", data, err)
+	}
+	stored, err := ms.GetConversationTurn(ctx, sid, submitted.TurnID)
+	if err != nil || len(stored.FileChanges) != 1 || stored.FileChanges[0].Path != "notes.txt" {
+		t.Fatalf("turn diff missing: %+v %v", stored, err)
+	}
+	replayer := turnfiles.NewReplayer(ms)
+	undo, err := replayer.Apply(ctx, sid, submitted.TurnID, turnfiles.ReplayUndo, []string{dir}, stored.FileChangeRevision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if data, err := os.ReadFile(target); err != nil || string(data) != "old text\n" {
+		t.Fatalf("undo: data=%q err=%v", data, err)
+	}
+	if _, err := replayer.Apply(ctx, sid, submitted.TurnID, turnfiles.ReplayRedo, []string{dir}, undo.Revision); err != nil {
+		t.Fatal(err)
+	}
+	if data, err := os.ReadFile(target); err != nil || string(data) != "new text\n" {
+		t.Fatalf("redo: data=%q err=%v", data, err)
 	}
 }
 
@@ -4915,6 +4945,7 @@ type fileWriteApprovalClient struct {
 
 type patchApprovalClient struct {
 	requests []provider.Request
+	unified  bool
 }
 
 type gitCommitApprovalClient struct {
@@ -4970,8 +5001,11 @@ func (c *patchApprovalClient) Stream(_ context.Context, req provider.Request) (<
 	case 1:
 		args, _ := json.Marshal(map[string]any{
 			"scope": "project",
-			"files": []map[string]any{{"path": "notes.txt", "action": "replace", "content": "new text\n"}},
+			"files": []map[string]any{{"path": "notes.txt", "action": "replace", "content": "new text\n", "expected_hash": fmt.Sprintf("%x", sha256.Sum256([]byte("old text\n")))}},
 		})
+		if c.unified {
+			args, _ = json.Marshal(map[string]any{"scope": "project", "diff": "--- a/notes.txt\n+++ b/notes.txt\n@@ -1 +1 @@\n-old text\n+new text\n"})
+		}
 		out <- provider.Chunk{Tool: &provider.ToolCallChunk{Index: 0, CallID: "call_file_patch", Name: tool.FilePatch, ArgsDelta: string(args)}}
 		out <- provider.Chunk{Done: true, Finish: provider.FinishToolCalls}
 	default:
@@ -5005,6 +5039,7 @@ func (c *fileWriteApprovalClient) Stream(_ context.Context, req provider.Request
 }
 
 type recordingToolRunner struct {
+	callMu              sync.Mutex
 	definitionMu        sync.Mutex
 	defs                []provider.ToolDef
 	result              tool.Result
@@ -5076,7 +5111,9 @@ func (r *recordingToolRunner) lastDefinitionPluginIDs() []string {
 }
 
 func (r *recordingToolRunner) Call(ctx context.Context, call tool.Call) tool.Result {
+	r.callMu.Lock()
 	r.calls = append(r.calls, call)
+	r.callMu.Unlock()
 	if r.callFunc != nil {
 		r.callFunc(call)
 	}

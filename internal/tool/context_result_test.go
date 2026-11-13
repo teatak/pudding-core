@@ -360,3 +360,25 @@ func TestAppliedPatchPreviewBoundsFileMetadataWithoutTruncatingPaths(t *testing.
 		t.Fatal("patch preview requires an available canonical reader")
 	}
 }
+
+func TestModelPreviewPreservesFileVersionAndRunningHandle(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		metadata map[string]any
+	}{
+		{FileRead, map[string]any{"contentHash": patchContentHash([]byte("body"))}},
+		{CommandRun, map[string]any{"processID": "proc_1", "running": true, "yielded": true, "nextOffset": float64(10)}},
+	} {
+		fields := map[string]any{"ok": true, "content": strings.Repeat("long body\n", 10000)}
+		for key, value := range tc.metadata {
+			fields[key] = value
+		}
+		got := ModelResultContent(tc.name, true, jsonString(fields), "turn", "call", true)
+		preview := decodeToolResult(t, Result{Content: got})
+		for key, value := range tc.metadata {
+			if preview[key] != value {
+				t.Fatalf("lost %s: %s", key, got)
+			}
+		}
+	}
+}

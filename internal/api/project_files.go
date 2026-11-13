@@ -99,10 +99,13 @@ func (s *Server) searchProjectFiles(c *cart.Context) error {
 	matches := make([]projectSearchMatchView, 0, min(limit, 64))
 	filesScanned := 0
 	resultsCapped := false
+	complete := true
+	skipped := make(map[string]int)
 	for _, root := range roots {
 		remaining := limit - len(matches)
 		if remaining <= 0 {
 			resultsCapped = true
+			complete = false
 			break
 		}
 		result, err := tool.SearchTextFiles(c.Request.Context(), root.Path, tool.TextFileSearchOptions{
@@ -120,6 +123,10 @@ func (s *Server) searchProjectFiles(c *cart.Context) error {
 		}
 		filesScanned += result.FilesScanned
 		resultsCapped = resultsCapped || result.ResultsCapped
+		complete = complete && result.Complete
+		for reason, count := range result.Skipped {
+			skipped[reason] += count
+		}
 		for _, match := range result.Matches {
 			rel, err := filepath.Rel(root.Path, match.Path)
 			if err != nil {
@@ -138,6 +145,8 @@ func (s *Server) searchProjectFiles(c *cart.Context) error {
 		"matchCount":    len(matches),
 		"filesScanned":  filesScanned,
 		"resultsCapped": resultsCapped,
+		"complete":      complete,
+		"skipped":       skipped,
 		"caseSensitive": caseSensitive,
 	})
 	return nil

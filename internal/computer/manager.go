@@ -281,11 +281,12 @@ func normalizeAction(action ActionInput) (ActionInput, error) {
 		if hasPointerFields(action) {
 			return action, invalid("pointer fields are allowed only for click, drag, and scroll")
 		}
-		if (action.Type == ActionSetValue || action.Type == ActionSelectText) && action.Value == nil {
-			return action, invalid("value is required for set_value/select_text")
+		requiresValue := action.Type == ActionSetValue || action.Type == ActionSelectText || action.Type == ActionInsertText
+		if requiresValue && action.Value == nil {
+			return action, invalid("value is required for set_value/select_text/insert_text")
 		}
-		if action.Type != ActionSetValue && action.Type != ActionSelectText && action.Value != nil {
-			return action, invalid("value is allowed only for set_value/select_text")
+		if !requiresValue && action.Value != nil {
+			return action, invalid("value is allowed only for set_value/select_text/insert_text")
 		}
 		if action.Value != nil && utf8.RuneCountInString(*action.Value) > MaxActionValueCharacters {
 			return action, invalid("value is too long")
@@ -293,7 +294,7 @@ func normalizeAction(action ActionInput) (ActionInput, error) {
 		return action, nil
 	}
 	if action.Type != ActionClick && action.Type != ActionDrag && action.Type != ActionScroll {
-		return action, invalid("type must be press, set_value, select, submit, click, drag, or scroll")
+		return action, invalid("type must be press, set_value, select, submit, focus, select_text, insert_text, press_key, type_text, paste, click, drag, or scroll")
 	}
 	if action.Delivery != "" && action.Delivery != "foreground" && action.Delivery != "background" {
 		return action, invalid("delivery must be foreground or background")
@@ -352,7 +353,7 @@ func normalizeAction(action ActionInput) (ActionInput, error) {
 }
 
 func isSemanticAction(actionType string) bool {
-	return actionType == ActionPress || actionType == ActionSetValue || actionType == ActionSelect || actionType == ActionSubmit || actionType == ActionFocus || actionType == ActionSelectText
+	return actionType == ActionPress || actionType == ActionSetValue || actionType == ActionSelect || actionType == ActionSubmit || actionType == ActionFocus || actionType == ActionSelectText || actionType == ActionInsertText
 }
 
 func hasPointerFields(action ActionInput) bool {
@@ -513,7 +514,7 @@ func validateObservation(appID string, windowID uint32, snapshot Observation) (O
 
 func validAction(action string) bool {
 	switch action {
-	case ActionPress, ActionSetValue, ActionSelect, ActionSubmit, ActionFocus, ActionSelectText:
+	case ActionPress, ActionSetValue, ActionSelect, ActionSubmit, ActionFocus, ActionSelectText, ActionInsertText:
 		return true
 	default:
 		return false

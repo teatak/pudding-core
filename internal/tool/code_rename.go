@@ -80,8 +80,8 @@ func (r *BuiltinRunner) codeRename(ctx context.Context, call Call) Result {
 		return toolJSONError(out, "session_required", "session id is required for semantic rename")
 	}
 	var args codeRenameArgs
-	if len(call.Args) == 0 || json.Unmarshal(call.Args, &args) != nil {
-		return toolJSONError(out, "invalid_arguments", "code rename arguments must be a JSON object")
+	if err := decodeToolArgumentObject(call.Args, &args); err != nil {
+		return toolArgumentFailure(out, err)
 	}
 	if result := validateCodePositionArgs(out, args.codePositionArgs); result != nil {
 		return *result
@@ -514,7 +514,7 @@ func buildCodeRenamePatchFiles(encoding string, edits map[string]codeRenameFileE
 			return nil, 0, newCodeRenameError("rename_too_large", "rename source and destination text exceeds 2 MiB")
 		}
 		newText := next
-		files = append(files, patchFileArg{Path: snapshot.Path, Action: "replace", Content: &newText})
+		files = append(files, patchFileArg{Path: snapshot.Path, Action: "replace", Content: &newText, ExpectedHash: patchContentHash([]byte(snapshot.Text))})
 	}
 	if len(files) == 0 {
 		return nil, 0, newCodeRenameError("rename_no_changes", "the language server returned no effective rename edits")

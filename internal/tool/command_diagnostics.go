@@ -16,17 +16,20 @@ const (
 )
 
 type commandDiagnostic struct {
-	Path         string `json:"path"`
-	RelativePath string `json:"relativePath"`
-	Line         int    `json:"line"`
-	Column       int    `json:"column,omitempty"`
-	LineStart    int    `json:"lineStart"`
-	LineEnd      int    `json:"lineEnd"`
-	Severity     string `json:"severity"`
-	Message      string `json:"message"`
-	Code         string `json:"code,omitempty"`
-	Source       string `json:"source,omitempty"`
-	Excerpt      string `json:"excerpt,omitempty"`
+	Path          string `json:"path"`
+	RelativePath  string `json:"relativePath"`
+	Line          int    `json:"line"`
+	Column        int    `json:"column,omitempty"`
+	LineStart     int    `json:"lineStart"`
+	LineEnd       int    `json:"lineEnd"`
+	Severity      string `json:"severity"`
+	Message       string `json:"message"`
+	Code          string `json:"code,omitempty"`
+	Source        string `json:"source,omitempty"`
+	Excerpt       string `json:"excerpt,omitempty"`
+	RawPath       string `json:"rawPath,omitempty"`
+	Unresolved    bool   `json:"unresolved,omitempty"`
+	inferSeverity bool
 }
 
 var (
@@ -192,63 +195,10 @@ func commandVerificationStatus(kind string, exitCode int, timedOut, cancelled bo
 }
 
 func parseCommandDiagnostics(stdout, stderr, cwd string, projectDirs []string, failed bool) []commandDiagnostic {
-	combined := stdout
-	if combined != "" && stderr != "" {
-		combined += "\n"
-	}
-	combined += stderr
-	lines := strings.Split(strings.ReplaceAll(combined, "\r\n", "\n"), "\n")
-	diagnostics := make([]commandDiagnostic, 0)
-	seen := make(map[string]bool)
-	currentESLintPath := ""
-	for _, line := range lines {
-		if len(diagnostics) >= commandMaxDiagnostics {
-			break
-		}
-		trimmed := strings.TrimSpace(line)
-		if trimmed == "" {
-			continue
-		}
-		if match := typeScriptDiagnosticPattern.FindStringSubmatch(trimmed); match != nil {
-			appendCommandDiagnostic(&diagnostics, seen, cwd, projectDirs, match[1], match[2], match[3], match[4], match[6], match[5], "typescript")
-			continue
-		}
-		if currentESLintPath != "" {
-			if match := eslintDetailPattern.FindStringSubmatch(line); match != nil {
-				appendCommandDiagnostic(&diagnostics, seen, cwd, projectDirs, currentESLintPath, match[1], match[2], match[3], match[4], match[5], "eslint")
-				continue
-			}
-		}
-		if match := pathColumnDiagnosticPattern.FindStringSubmatch(trimmed); match != nil {
-			severity := match[4]
-			if severity == "" {
-				if failed {
-					severity = "error"
-				} else {
-					severity = "warning"
-				}
-			}
-			appendCommandDiagnostic(&diagnostics, seen, cwd, projectDirs, match[1], match[2], match[3], severity, match[6], match[5], "compiler")
-			continue
-		}
-		if match := pathLineDiagnosticPattern.FindStringSubmatch(trimmed); match != nil {
-			severity := match[3]
-			if severity == "" {
-				if failed {
-					severity = "error"
-				} else {
-					severity = "warning"
-				}
-			}
-			appendCommandDiagnostic(&diagnostics, seen, cwd, projectDirs, match[1], match[2], "", severity, match[5], match[4], "compiler")
-			continue
-		}
-		if _, _, _, ok := resolveCommandDiagnosticPath(trimmed, cwd, projectDirs); ok {
-			currentESLintPath = trimmed
-		} else if !strings.HasPrefix(line, " ") && !strings.HasPrefix(line, "\t") {
-			currentESLintPath = ""
-		}
-	}
+	first, second := newCommandDiagnosticCollector(cwd, projectDirs), newCommandDiagnosticCollector(cwd, projectDirs)
+	first.write([]byte(stdout))
+	second.write([]byte(stderr))
+	diagnostics, _ := finishCommandDiagnostics(first, second, failed)
 	return diagnostics
 }
 
@@ -259,32 +209,89 @@ func appendCommandDiagnostic(out *[]commandDiagnostic, seen map[string]bool, cwd
 	}
 	column, _ := strconv.Atoi(rawColumn)
 	target, rel, _, ok := resolveCommandDiagnosticPath(rawPath, cwd, projectDirs)
-	if !ok {
-		return
-	}
 	message = truncateDiagnosticText(strings.TrimSpace(message), commandDiagnosticMaxRunes)
 	if message == "" {
 		return
 	}
-	key := target + "\x00" + strconv.Itoa(line) + "\x00" + strconv.Itoa(column) + "\x00" + message
+	key := rawPath + "\x00" + strconv.Itoa(line) + "\x00" + strconv.Itoa(column) + "\x00" + message
 	if seen[key] {
 		return
 	}
 	seen[key] = true
-	excerpt, lineStart, lineEnd := commandDiagnosticExcerpt(target, line)
+	excerpt, lineStart, lineEnd := "", line, line
+	if ok {
+		excerpt, lineStart, lineEnd = commandDiagnosticExcerpt(target, line)
+	}
+	unresolvedPath := ""
+	if !ok {
+		unresolvedPath = truncateDiagnosticText(rawPath, commandDiagnosticMaxRunes)
+	}
 	*out = append(*out, commandDiagnostic{
-		Path:         target,
-		RelativePath: rel,
-		Line:         line,
-		Column:       column,
-		LineStart:    lineStart,
-		LineEnd:      lineEnd,
-		Severity:     normalizeDiagnosticSeverity(severity),
-		Message:      message,
-		Code:         strings.TrimSpace(code),
-		Source:       source,
-		Excerpt:      excerpt,
+		Path:          target,
+		RelativePath:  rel,
+		Line:          line,
+		Column:        column,
+		LineStart:     lineStart,
+		LineEnd:       lineEnd,
+		Severity:      normalizeDiagnosticSeverity(severity),
+		inferSeverity: severity == "",
+		Message:       message,
+		Code:          strings.TrimSpace(code),
+		Source:        source,
+		Excerpt:       excerpt,
+		RawPath:       unresolvedPath,
+		Unresolved:    !ok,
 	})
+}
+
+// Directory flags change the script's working directory, not the command's
+// authorization roots. Only statically known package-manager flags are used.
+func commandVerificationDetails(args commandRunArgs, cwd string) ([]string, string) {
+	argv, directory := commandVerificationInvocation(args.Command)
+	if directory != "" {
+		if !filepath.IsAbs(directory) {
+			// CDPATH can redirect a relative cd to a different directory. It is
+			// not inherited by our shell, but may be explicitly supplied.
+			if args.Env["CDPATH"] != "" {
+				return nil, cwd
+			}
+			directory = filepath.Join(cwd, directory)
+		}
+		cwd = filepath.Clean(directory)
+	}
+	return argv, commandDiagnosticCWD(argv, cwd)
+}
+
+func commandDiagnosticCWD(argv []string, cwd string) string {
+	if len(argv) == 0 {
+		return cwd
+	}
+	op := commandOperation(argv[0])
+	args := argv[1:]
+	result := cwd
+	for len(args) > 0 && strings.HasPrefix(args[0], "-") {
+		flag, value, inline := strings.Cut(args[0], "=")
+		known := (op == "npm" && flag == "--prefix") ||
+			(op == "pnpm" && (flag == "--dir" || flag == "-C")) ||
+			((op == "yarn" || op == "bun") && flag == "--cwd")
+		if !known {
+			break
+		}
+		args = args[1:]
+		if !inline {
+			if len(args) == 0 {
+				break
+			}
+			value, args = args[0], args[1:]
+		}
+		if value != "" {
+			if !filepath.IsAbs(value) {
+				value = filepath.Join(cwd, value)
+			}
+			result = filepath.Clean(value)
+		}
+	}
+	return result
 }
 
 func resolveCommandDiagnosticPath(rawPath, cwd string, projectDirs []string) (string, string, string, bool) {

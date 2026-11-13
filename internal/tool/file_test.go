@@ -3,12 +3,360 @@ package tool
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"mime"
 	"os"
 	"path/filepath"
+	"reflect"
+	"sort"
 	"strings"
 	"testing"
 )
+
+func TestFileDiscoveryPagination(t *testing.T) {
+	root := t.TempDir()
+	for name, content := range map[string]string{"a/one.txt": "hit\nhit\nhit\n", "a/z.txt": "hit\n", "a-.txt": "hit\n", "b.txt": "hit\n", "ignored.txt": "hit\n", ".gitignore": "ignored.txt\n"} {
+		writePatchTestFile(t, filepath.Join(root, name), content)
+	}
+	for _, mode := range []string{"content", "files"} {
+		options := TextFileSearchOptions{Query: "hit", OutputMode: mode, MaxResults: 2, CaseSensitive: true}
+		var got []string
+		for n := 0; ; n++ {
+			if n > 10 {
+				t.Fatal("cursor did not advance")
+			}
+			result, err := SearchTextFiles(context.Background(), root, options)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, m := range result.Matches {
+				rel, _ := filepath.Rel(root, m.Path)
+				got = append(got, fmt.Sprintf("%s:%d", filepath.ToSlash(rel), m.Line))
+			}
+			if result.NextCursor == "" {
+				if !result.Complete {
+					t.Fatal("final page incomplete")
+				}
+				break
+			}
+			if result.Complete || !result.ResultsCapped {
+				t.Fatal("paged result claims completion")
+			}
+			options.Cursor = result.NextCursor
+			wrong := options
+			wrong.Query = "other"
+			if _, err := SearchTextFiles(context.Background(), root, wrong); err == nil {
+				t.Fatal("cursor reused with a different query")
+			}
+		}
+		want := []string{"a/one.txt:1", "a/one.txt:2", "a/one.txt:3", "a/z.txt:1", "a-.txt:1", "b.txt:1"}
+		if mode == "files" {
+			want = []string{"a/one.txt:0", "a/z.txt:0", "a-.txt:0", "b.txt:0"}
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("%s pages: %v", mode, got)
+		}
+	}
+	options := TextFileSearchOptions{Query: "hit", MaxResults: 1}
+	for line := 1; line <= 3; line++ {
+		page, err := SearchTextFiles(context.Background(), filepath.Join(root, "a/one.txt"), options)
+		if err != nil || len(page.Matches) != 1 || page.Matches[0].Line != line {
+			t.Fatalf("direct page %d: %+v %v", line, page, err)
+		}
+		options.Cursor = page.NextCursor
+		if (line == 3) != (options.Cursor == "") {
+			t.Fatalf("wrong EOF: %+v", page)
+		}
+	}
+	runner := NewBuiltinRunner()
+	defer runner.Close()
+	var paths []string
+	cursor := ""
+	for n := 0; ; n++ {
+		if n > 10 {
+			t.Fatal("list cursor did not advance")
+		}
+		result := runner.Call(context.Background(), Call{Name: FileList, ProjectDirs: []string{root}, Args: resultJSON(map[string]any{"scope": "project", "path": ".", "recursive": true, "include_globs": []string{"**/*.txt"}, "max_entries": 1, "cursor": cursor})})
+		if !result.Ok {
+			t.Fatal(result.Content)
+		}
+		var page struct {
+			Entries    []struct{ Path string }
+			NextCursor string
+			Complete   bool
+		}
+		if err := json.Unmarshal([]byte(result.Content), &page); err != nil {
+			t.Fatal(err)
+		}
+		for _, e := range page.Entries {
+			paths = append(paths, filepath.Base(e.Path))
+		}
+		cursor = page.NextCursor
+		if cursor == "" {
+			if !page.Complete {
+				t.Fatal(result.Content)
+			}
+			break
+		}
+	}
+	if !reflect.DeepEqual(paths, []string{"one.txt", "z.txt", "a-.txt", "b.txt"}) {
+		t.Fatalf("list pages: %v", paths)
+	}
+}
+
+func TestFileSearchCursorAdvancesAcrossTraversalLimit(t *testing.T) {
+	root := t.TempDir()
+	// This lower-level traversal receives canonical roots from SearchTextFiles.
+	root, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"a/a.txt", "a/b.txt", "b.txt", "c.txt"} {
+		writePatchTestFile(t, filepath.Join(root, name), "nothing\n")
+	}
+	matcher, _ := newFileSearchMatcher("literal", "hit", true)
+	cursor := ""
+	for n := 0; ; n++ {
+		if n > 5 {
+			t.Fatal("empty pages loop")
+		}
+		page, err := newFilePage(root, cursor, "test")
+		if err != nil {
+			t.Fatal(err)
+		}
+		page.limit = 1
+		_, _, capped, err := searchTextFiles(context.Background(), root, fileSearchOptions{baseRoot: root, matcher: matcher, skipped: map[string]int{}, page: page}, 10)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !capped {
+			if n == 0 {
+				t.Fatal("test did not exercise cap")
+			}
+			break
+		}
+		next := page.next()
+		if next == "" || next == cursor {
+			t.Fatal("cursor failed to advance")
+		}
+		cursor = next
+	}
+}
+
+func TestFileDiscoverySchemasExposePagingAndSearchModes(t *testing.T) {
+	for _, def := range BuiltinDefinitions() {
+		if def.Name != FileList && def.Name != FileSearch {
+			continue
+		}
+		var schema struct{ Properties map[string]json.RawMessage }
+		if err := json.Unmarshal(def.InputSchema, &schema); err != nil {
+			t.Fatal(err)
+		}
+		keys := []string{"cursor", "include_ignored"}
+		if def.Name == FileSearch {
+			keys = append(keys, "output_mode")
+		}
+		for _, key := range keys {
+			if len(schema.Properties[key]) == 0 {
+				t.Fatalf("%s missing %s", def.Name, key)
+			}
+		}
+	}
+}
+
+func TestFileDiscoverySharesIgnoreRulesAndSupportsExplicitOverride(t *testing.T) {
+	root := t.TempDir()
+	for path, content := range map[string]string{
+		".gitignore":     "*.gen.go\n!keep.gen.go\nignored/\n",
+		"src/.gitignore": "local.go\n",
+		"src/main.go":    "needle\nneedle\n", "src/local.go": "needle\n",
+		"src/nested/other.go": "needle\n", "src/generated.gen.go": "needle\n",
+		"keep.gen.go": "needle\n", "sibling/local.go": "needle\n",
+		"ignored/hidden.go": "needle\n", "dist/built.go": "needle\n",
+		".git/internal.go": "needle\n",
+	} {
+		writePatchTestFile(t, filepath.Join(root, path), content)
+	}
+	runner := NewBuiltinRunner()
+	defer runner.Close()
+	for _, includeIgnored := range []bool{false, true} {
+		want := []string{"keep.gen.go", "sibling/local.go", "src/main.go", "src/nested/other.go"}
+		if includeIgnored {
+			want = append(want, "dist/built.go", "ignored/hidden.go", "src/generated.gen.go", "src/local.go")
+		}
+		sort.Strings(want)
+		for _, name := range []string{FileList, FileSearch} {
+			args := map[string]any{"scope": "project", "path": ".", "include_globs": []string{"**/*.go"}, "include_ignored": includeIgnored}
+			if name == FileList {
+				args["recursive"] = true
+			} else {
+				args["query"], args["output_mode"] = "needle", "files"
+			}
+			result := runner.Call(context.Background(), Call{Name: name, ProjectDirs: []string{root}, Args: resultJSON(args)})
+			payload := decodeToolResult(t, result)
+			if !result.Ok || payload["complete"] != true {
+				t.Fatalf("%s: %s", name, result.Content)
+			}
+			paths := make([]string, 0)
+			if name == FileSearch {
+				for _, path := range payload["files"].([]any) {
+					paths = append(paths, path.(string))
+				}
+				if payload["matches"] != nil || payload["matchCount"] != nil || payload["fileCount"] != float64(len(want)) {
+					t.Fatalf("files mode returned snippets or line counts: %s", result.Content)
+				}
+				if model := ModelResultContent(name, true, result.Content, "turn", "call", true); strings.Contains(model, "numberedExcerpt") || !strings.Contains(model, "src/main.go") {
+					t.Fatalf("model lost path result: %s", model)
+				}
+			} else {
+				for _, entry := range payload["entries"].([]any) {
+					paths = append(paths, entry.(map[string]any)["path"].(string))
+				}
+			}
+			canonicalRoot, err := filepath.EvalSymlinks(payload["root"].(string))
+			if err != nil {
+				t.Fatal(err)
+			}
+			for i, path := range paths {
+				paths[i], _ = filepath.Rel(canonicalRoot, path)
+				paths[i] = filepath.ToSlash(paths[i])
+			}
+			sort.Strings(paths)
+			if !reflect.DeepEqual(paths, want) {
+				t.Fatalf("%s include=%t: %v, want %v", name, includeIgnored, paths, want)
+			}
+		}
+	}
+	// A focused subtree still inherits authorized-root rules; explicitly named
+	// files remain readable/searchable even when discovery ignores them.
+	subtree, err := SearchTextFiles(context.Background(), filepath.Join(root, "src"), TextFileSearchOptions{BaseRoot: root, Query: "needle", OutputMode: "files"})
+	if err != nil || len(subtree.Matches) != 2 {
+		t.Fatalf("subtree rules: %+v %v", subtree, err)
+	}
+	for _, match := range subtree.Matches {
+		rel, err := filepath.Rel(root, match.Path)
+		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			t.Fatalf("search changed caller path representation: %s", match.Path)
+		}
+	}
+	direct, err := SearchTextFiles(context.Background(), filepath.Join(root, "src/local.go"), TextFileSearchOptions{BaseRoot: root, Query: "needle"})
+	if err != nil || len(direct.Matches) != 1 {
+		t.Fatalf("explicit file was hidden: %+v %v", direct, err)
+	}
+}
+
+func TestFileDiscoveryBoundariesAndCaps(t *testing.T) {
+	root, outside := t.TempDir(), t.TempDir()
+	writePatchTestFile(t, filepath.Join(root, "a.bin"), "\x00binary")
+	writePatchTestFile(t, filepath.Join(root, "nested/b.txt"), "needle\n")
+	writePatchTestFile(t, filepath.Join(outside, "secret.txt"), "needle\n")
+	if err := os.Symlink(outside, filepath.Join(root, "escape")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := SearchTextFiles(context.Background(), filepath.Join(root, "escape"), TextFileSearchOptions{Query: "needle"}); err == nil {
+		t.Fatal("normalization followed a direct symlink target")
+	}
+	runner := NewBuiltinRunner()
+	defer runner.Close()
+	call := Call{Name: FileList, ProjectDirs: []string{root}, Args: resultJSON(map[string]any{"scope": "project", "path": ".", "recursive": true})}
+	result := runner.Call(context.Background(), call)
+	payload := decodeToolResult(t, result)
+	if !result.Ok || payload["returnedCount"] != float64(2) || payload["complete"] != false || strings.Contains(result.Content, "secret.txt") {
+		t.Fatalf("recursive path discovery: %s", result.Content)
+	}
+	call.Args = resultJSON(map[string]any{"scope": "project", "path": ".", "recursive": true, "max_entries": 1})
+	result = runner.Call(context.Background(), call)
+	if payload = decodeToolResult(t, result); !result.Ok || payload["returnedCount"] != float64(1) || payload["truncated"] != true || payload["complete"] != false {
+		t.Fatalf("cap: %s", result.Content)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if result := runner.Call(ctx, call); result.Ok {
+		t.Fatal("cancelled traversal succeeded")
+	}
+	call.ProjectDirs = []string{root, outside}
+	if result := runner.Call(context.Background(), call); result.Ok {
+		t.Fatal("ambiguous recursive root accepted")
+	}
+	if err := os.Symlink(filepath.Join(outside, "secret.txt"), filepath.Join(root, ".gitignore")); err != nil {
+		t.Fatal(err)
+	}
+	call.ProjectDirs = []string{root}
+	if result := runner.Call(context.Background(), call); result.Ok || !strings.Contains(result.Content, "ignore_rules_unavailable") || strings.Contains(result.Content, "needle") {
+		t.Fatalf("external ignore rules read or hidden: %s", result.Content)
+	}
+}
+
+func TestFileSearchFilesModeStopsAfterFirstMatch(t *testing.T) {
+	root := t.TempDir()
+	// The later line exceeds the scanner limit. A paths-only search should
+	// finish after finding the first match, without reading/retaining it.
+	writePatchTestFile(t, filepath.Join(root, "log.txt"), "needle\n"+strings.Repeat("x", (1<<20)+1))
+	result, err := SearchTextFiles(context.Background(), filepath.Join(root, "log.txt"), TextFileSearchOptions{Query: "needle", OutputMode: "files"})
+	if err != nil || len(result.Matches) != 1 || result.Matches[0].Text != "" || result.Matches[0].Line != 0 {
+		t.Fatalf("files mode: %+v %v", result, err)
+	}
+	if _, err := SearchTextFiles(context.Background(), root, TextFileSearchOptions{Query: "needle", OutputMode: "unknown"}); err == nil {
+		t.Fatal("unsupported output mode accepted")
+	}
+}
+
+func TestBuiltinFileSearchReportsIncompleteCoverage(t *testing.T) {
+	root := t.TempDir()
+	large := filepath.Join(root, "large.go")
+	content := strings.Repeat("// padding\n", maxFileSearchBytes/10+1) + "// needle\n"
+	if err := os.WriteFile(large, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	options := TextFileSearchOptions{Query: "needle", CaseSensitive: true}
+	result, err := SearchTextFiles(context.Background(), root, options)
+	if err != nil || result.Complete || result.ResultsCapped || len(result.Matches) != 0 || result.Skipped["file_too_large"] != 1 {
+		t.Fatalf("missing omission metadata: %+v %v", result, err)
+	}
+	result, err = SearchTextFiles(context.Background(), large, options)
+	if err != nil || !result.Complete || len(result.Matches) != 1 {
+		t.Fatalf("explicit search failed: %+v %v", result, err)
+	}
+	if err := os.Symlink(large, filepath.Join(root, "linked.go")); err != nil {
+		t.Fatal(err)
+	}
+	result, err = SearchTextFiles(context.Background(), root, options)
+	if err != nil || result.Skipped["symlink"] != 1 {
+		t.Fatalf("symlink omission missing: %+v %v", result, err)
+	}
+	file, err := os.OpenFile(large, os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := file.Truncate(maxFileSearchDirectBytes + 1); err != nil {
+		t.Fatal(err)
+	}
+	file.Close()
+	_, err = SearchTextFiles(context.Background(), large, options)
+	if searchErr, ok := err.(*TextFileSearchError); !ok || searchErr.Code != "file_too_large" {
+		t.Fatalf("unbounded explicit search: %v", err)
+	}
+}
+
+func TestBuiltinFileSearchReportsReadErrors(t *testing.T) {
+	root := t.TempDir()
+	// One oversized line exercises a read failure, without permission-dependent fixtures.
+	path := filepath.Join(root, "broken.txt")
+	if err := os.WriteFile(path, []byte(strings.Repeat("a", maxFileSearchBytes)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	result, err := SearchTextFiles(context.Background(), root, TextFileSearchOptions{Query: "needle"})
+	if err != nil || result.Complete || result.Skipped["read_error"] != 1 {
+		t.Fatalf("read error hidden: %+v %v", result, err)
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	result, err = SearchTextFiles(context.Background(), root, TextFileSearchOptions{Query: "needle"})
+	if err != nil || !result.Complete || len(result.Skipped) != 0 {
+		t.Fatalf("empty search not complete: %+v %v", result, err)
+	}
+}
 
 func TestBuiltinFileSkillWriteRead(t *testing.T) {
 	home := t.TempDir()

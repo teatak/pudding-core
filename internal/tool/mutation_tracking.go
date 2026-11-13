@@ -3,6 +3,9 @@ package tool
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"os"
 	"path/filepath"
 	"runtime"
 	"sort"
@@ -17,7 +20,9 @@ const maxCommandMutationTargets = 256
 // for mutation tracking.
 type ProjectMutationTracking struct {
 	Targets []string
-	Origin  store.FileChangeOrigin
+	// Explicit command declarations never expand into directory snapshots.
+	ExactFiles []string
+	Origin     store.FileChangeOrigin
 }
 
 type mutationTrackingSink func(targets []string)
@@ -53,7 +58,7 @@ type mutationMoveArgs struct {
 
 // MutationTrackingForCall resolves only explicit project paths. Foreground
 // commands report statically known targets and also observe already-tracked
-// files. Opaque commands never discover new targets; background effects are excluded.
+// files. Opaque commands can declare exact files; background effects are excluded.
 func MutationTrackingForCall(call Call) (ProjectMutationTracking, bool) {
 	switch call.Name {
 	case CommandRun:
@@ -134,14 +139,18 @@ func commandMutationTracking(call Call) (ProjectMutationTracking, bool) {
 		return ProjectMutationTracking{}, false
 	}
 	observation := ProjectMutationTracking{Origin: store.FileChangeOriginCommandObserved}
+	resolvedCWD, err := resolveCommandCWD(call.ProjectDirs, args.CWD)
+	if err != nil {
+		return ProjectMutationTracking{}, false
+	}
+	observation.ExactFiles, err = resolveCommandMutationFiles(call.ProjectDirs, resolvedCWD, args.MutationPaths)
+	if err != nil {
+		return ProjectMutationTracking{}, false
+	}
 	if runtime.GOOS == "windows" {
 		// command_run uses PowerShell on Windows, while the static analyzer is
 		// intentionally POSIX-shell based.
 		return observation, true
-	}
-	resolvedCWD, err := resolveCommandCWD(call.ProjectDirs, args.CWD)
-	if err != nil {
-		return ProjectMutationTracking{}, false
 	}
 	analysis, err := analyzeShellCommand(args.Command)
 	if err != nil || analysis.Background {
@@ -150,6 +159,9 @@ func commandMutationTracking(call Call) (ProjectMutationTracking, bool) {
 
 	var targets []string
 	seen := make(map[string]struct{})
+	for _, file := range observation.ExactFiles {
+		seen[file] = struct{}{}
+	}
 	overflow := false
 	collectShellMutationTargets(analysis.file, resolvedCWD, args.Env, func(cwd, raw string) {
 		if overflow {
@@ -170,10 +182,40 @@ func commandMutationTracking(call Call) (ProjectMutationTracking, bool) {
 		return observation, true
 	}
 	sort.Strings(targets)
-	return ProjectMutationTracking{
-		Targets: targets,
-		Origin:  store.FileChangeOriginCommandObserved,
-	}, true
+	observation.Targets = targets
+	return observation, true
+}
+
+// Declarations use the command's initial cwd, including with multiple roots.
+// They are snapshot metadata, never a source of additional project authority.
+func resolveCommandMutationFiles(roots []string, cwd string, paths []string) ([]string, error) {
+	files := make([]string, 0, len(paths))
+	seen := make(map[string]bool, len(paths))
+	for _, path := range paths {
+		if !filepath.IsAbs(path) {
+			path = filepath.Join(cwd, path)
+		}
+		_, target, relative, err := resolveProjectPath(roots, path, true, true)
+		if err != nil {
+			return nil, fmt.Errorf("mutation_paths: %w", err)
+		}
+		if relative == "." {
+			return nil, errors.New("mutation_paths must name files, not project roots")
+		}
+		info, err := os.Stat(target)
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			return nil, fmt.Errorf("mutation_paths: %w", err)
+		}
+		if err == nil && !info.Mode().IsRegular() {
+			return nil, fmt.Errorf("mutation_paths must name regular files: %s", path)
+		}
+		if !seen[target] {
+			files = append(files, target)
+			seen[target] = true
+		}
+	}
+	sort.Strings(files)
+	return files, nil
 }
 
 func resolveCommandMutationTarget(roots []string, cwd, raw string) (string, bool) {

@@ -115,9 +115,20 @@ func TestBuiltinPluginsMergeEnablementAndSkills(t *testing.T) {
 	if browser == nil || browser.Source != SourceBuiltin || !browser.Enabled || browser.CanUninstall || browser.RequiredMode != "work" || browser.DefaultSkillID != BuiltinBrowserID {
 		t.Fatalf("unexpected browser definition: %+v", browser)
 	}
-	if len(browser.Tools) != 16 || browser.Tools[0].Name != toolBrowserStatus || browser.Tools[10].Name != toolBrowserSelect || browser.Tools[12].Name != toolBrowserPressKey || browser.Tools[13].Name != toolBrowserWait || browser.Tools[14].Name != toolBrowserHover || browser.Tools[15].Name != toolBrowserDialog {
-		t.Fatalf("unexpected builtin tools: browser=%+v", browser.Tools)
+	expectedTools := map[string]bool{toolBrowserStatus: true, toolBrowserOpen: true, toolBrowserObserve: true, toolBrowserScreenshot: true,
+		toolBrowserBack: true, toolBrowserForward: true, toolBrowserReload: true, toolBrowserClose: true, toolBrowserClick: true,
+		toolBrowserType: true, toolBrowserSelect: true, toolBrowserScroll: true, toolBrowserPressKey: true, toolBrowserWait: true,
+		toolBrowserHover: true, toolBrowserDialog: true, toolBrowserUpload: true, toolBrowserDownloads: true}
+	for _, ref := range browser.Tools {
+		if !expectedTools[ref.Name] {
+			t.Fatalf("unexpected or duplicate browser tool: %s", ref.Name)
+		}
+		delete(expectedTools, ref.Name)
 	}
+	if len(expectedTools) != 0 {
+		t.Fatalf("missing browser tools: %+v", expectedTools)
+	}
+
 	for _, tc := range []struct {
 		pluginID, skillID, toolName string
 	}{

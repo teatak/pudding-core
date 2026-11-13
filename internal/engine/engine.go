@@ -1273,6 +1273,11 @@ func (e *Engine) finishTurnWithInterrupted(
 	interruptedOutputCommitted bool,
 ) {
 	in := store.FinishTurnInput{TurnID: turnID, Status: status, Mode: mode, Error: errMsg}
+	if runner, ok := e.tools.(interface{ FinishForegroundCommands(string, string) error }); ok {
+		if err := runner.FinishForegroundCommands(sessionID, turnID); err != nil {
+			slog.Warn("engine: finish foreground commands failed", "turnID", turnID, "err", err)
+		}
+	}
 	if e.turnFiles != nil {
 		changes, err := e.turnFiles.Finish(turnID)
 		if err != nil {
@@ -1413,6 +1418,7 @@ func (e *Engine) streamTurn(ctx context.Context, sessionID, turnID string, resol
 		maxLoops = v
 	}
 	consecutiveToolOnlyLoops := 0
+	var repeatedFailures repeatedToolFailures
 	var continuations []provider.Continuation
 	providerCallIndex := 0
 	coolingChecked := false
@@ -1420,6 +1426,7 @@ func (e *Engine) streamTurn(ctx context.Context, sessionID, turnID string, resol
 		// Inputs can arrive while the preceding context compaction is running.
 		// Apply them before rebuilding or issuing another provider request.
 		if steers := active.consumeSteers(); len(steers) > 0 {
+			repeatedFailures.reset()
 			if err := e.commitTurnParts(turnID, parts, true); err != nil {
 				return store.TurnFailed, fmt.Sprintf("append output before context check: %v", err), currentMode
 			}
@@ -1434,6 +1441,9 @@ func (e *Engine) streamTurn(ctx context.Context, sessionID, turnID string, resol
 			}
 		}
 		req := baseReq
+		if reminder := repeatedFailures.reminder(); reminder != "" {
+			req.System += "\n\n" + reminder
+		}
 		// Leases can be granted or revoked between tool calls without changing
 		// mode or canonical history. Refresh from execution authority each time.
 		if err := e.appendDirectoryAccess(ctx, sessionID, turnID, currentMode, &req); err != nil {
@@ -1520,7 +1530,12 @@ func (e *Engine) streamTurn(ctx context.Context, sessionID, turnID string, resol
 			providerState = nil // Already persisted with the native tool call.
 			finish = provider.FinishStop
 		}
-		if finish == "" || finish == provider.FinishStop || finish == provider.FinishLength {
+		if finish == provider.FinishLength {
+			// Let turn finalization save the partial output with Interrupted=true,
+			// just as it does for a provider OutputLimitError.
+			return failed("output_limit_exceeded: Model output was interrupted by the output limit. Saved output and completed tool results were kept. Retry to continue from them.")
+		}
+		if finish == "" || finish == provider.FinishStop {
 			if err := e.commitTurnPartsWithProviderState(turnID, parts, providerState); err != nil {
 				return store.TurnFailed, fmt.Sprintf("append output: %v", err), currentMode
 			}
@@ -1530,6 +1545,7 @@ func (e *Engine) streamTurn(ctx context.Context, sessionID, turnID string, resol
 			if collected, err := e.collectWorkResults(ctx, sessionID); err != nil {
 				return failed(collaborationContextError(err))
 			} else if collected {
+				repeatedFailures.reset()
 				parts.Reset()
 				continuations = nil
 				baseReq, err = e.buildProviderRequest(ctx, sessionID, resolved, currentMode)
@@ -1540,6 +1556,7 @@ func (e *Engine) streamTurn(ctx context.Context, sessionID, turnID string, resol
 				continue
 			}
 			if steers := active.consumeSteersOrSeal(); len(steers) > 0 {
+				repeatedFailures.reset()
 				if err := e.applyTurnSteers(turnID, steers); err != nil {
 					return store.TurnFailed, fmt.Sprintf("apply steer: %v", err), currentMode
 				}
@@ -1571,14 +1588,18 @@ func (e *Engine) streamTurn(ctx context.Context, sessionID, turnID string, resol
 		if err := e.commitTurnPartsWithProviderState(turnID, parts, providerState); err != nil {
 			return store.TurnFailed, fmt.Sprintf("append output: %v", err), currentMode
 		}
+		calls := parts.PendingToolCalls()
+		resultOffset := len(parts.parts)
 		status, msg, nextMode, changed := e.executePendingTools(ctx, sessionID, turnID, currentMode, baseReq.Tools, parts)
 		if status != store.TurnRunning {
 			return status, msg, currentMode
 		}
+		repeated := repeatedFailures.observe(calls, parts.parts[resultOffset:])
 		if changed {
 			currentMode = nextMode
 		}
 		if steers := active.consumeSteers(); len(steers) > 0 {
+			repeatedFailures.reset()
 			if err := e.commitTurnParts(turnID, parts, true); err != nil {
 				return store.TurnFailed, fmt.Sprintf("append output: %v", err), currentMode
 			}
@@ -1597,6 +1618,7 @@ func (e *Engine) streamTurn(ctx context.Context, sessionID, turnID string, resol
 		if collected, err := e.collectWorkResults(ctx, sessionID); err != nil {
 			return failed(collaborationContextError(err))
 		} else if collected {
+			repeatedFailures.reset()
 			parts.Reset()
 			continuations = nil
 			baseReq, err = e.buildProviderRequest(ctx, sessionID, resolved, currentMode)
@@ -1604,6 +1626,9 @@ func (e *Engine) streamTurn(ctx context.Context, sessionID, turnID string, resol
 				return failed(fmt.Sprintf("build context: %v", err))
 			}
 			continue
+		}
+		if repeated {
+			return failed("repeated_tool_failure: The same tool calls failed four times with unchanged inputs and results. Inspect the saved errors and change the approach before retrying.")
 		}
 		if changed {
 			messages := baseReq.Messages
@@ -1952,7 +1977,12 @@ func (e *Engine) consumeStream(
 				if usageSeen {
 					e.recordUsage(ctx, sessionID, providerName, model, estimatedInputTokens, usage, 1)
 				}
-				return "", store.TurnFailed, chunk.Err.Error(), assistantOutput, nil
+				errText := chunk.Err.Error()
+				var outputLimit *provider.OutputLimitError
+				if errors.As(chunk.Err, &outputLimit) {
+					errText = "output_limit_exceeded: " + errText
+				}
+				return "", store.TurnFailed, errText, assistantOutput, nil
 			case chunk.Usage != nil:
 				mergeUsageInfo(&usage, *chunk.Usage)
 				usageSeen = true
@@ -2151,7 +2181,23 @@ func (e *Engine) executePendingTools(ctx context.Context, sessionID, turnID stri
 	nextMode := currentMode
 	modeChanged := false
 	contextChanged := false
-	for _, call := range calls {
+	for index := 0; index < len(calls); {
+		if ctx.Err() != nil {
+			return store.TurnCancelled, "", nextMode, modeChanged
+		}
+		end := index
+		for end < len(calls) && end-index < maxParallelFileReads && parallelFileRead(calls[end], allowedTools) {
+			end++
+		}
+		if end-index > 1 {
+			if err := e.executeFileReads(ctx, sessionID, turnID, nextMode, allowedTools, parts, calls[index:end]); err != nil {
+				return store.TurnFailed, fmt.Sprintf("append output: %v", err), nextMode, modeChanged
+			}
+			index = end
+			continue
+		}
+		call := calls[index]
+		index++
 		call.SessionID = sessionID
 		call.TurnID = turnID
 		e.hub.Publish(event.Event{
@@ -2236,45 +2282,18 @@ func (e *Engine) executePendingTools(ctx context.Context, sessionID, turnID stri
 		// Cancellation stops subsequent work, but must not discard the result of
 		// an already dispatched tool (including completed prefixes/unknown effects).
 		// Persist and publish that result before the cancellation check below.
-		if result.CallID == "" {
-			result.CallID = call.CallID
-		}
 		if storedName != call.Name || result.Name == "" {
 			result.Name = storedName
 		}
-		if result.ModelOutput == nil {
-			for _, definition := range allowedTools {
-				if definition.Name == call.Name {
-					result.ModelOutput = definition.ModelOutput
-					break
-				}
-			}
-		}
-		parts.AppendToolResult(result)
-		parts.AppendAttachments(result.ContextAttachments)
-		if err := e.commitTurnParts(turnID, parts, true); err != nil {
+		if err := e.completeToolCall(sessionID, turnID, allowedTools, parts, call, result); err != nil {
 			return store.TurnFailed, fmt.Sprintf("append output: %v", err), nextMode, modeChanged
 		}
-		phase := "ok"
-		if !result.Ok {
-			phase = "error"
-		}
-		e.hub.Publish(event.Event{
-			SessionID:    sessionID,
-			Kind:         event.TurnTool,
-			TurnID:       turnID,
-			CallID:       result.CallID,
-			Name:         result.Name,
-			Phase:        phase,
-			Ok:           &result.Ok,
-			Content:      result.Content,
-			SummaryKind:  result.SummaryKind,
-			SummaryCount: result.SummaryCount,
-			Attachments:  eventAttachmentsFromStore(result.Attachments),
-		})
 		if ctx.Err() != nil {
 			return store.TurnCancelled, "", nextMode, modeChanged
 		}
+	}
+	if ctx.Err() != nil {
+		return store.TurnCancelled, "", nextMode, modeChanged
 	}
 	return store.TurnRunning, "", nextMode, modeChanged || contextChanged
 }
@@ -2728,18 +2747,30 @@ func (e *Engine) callTrackedTool(ctx context.Context, sessionID, turnID string, 
 			tracked = true
 		})
 		if mutation, ok := tool.MutationTrackingForCall(call); ok {
-			if err := e.turnFiles.BeginCallWithOrigin(turnID, call.CallID, call.ProjectDirs, mutation.Targets, mutation.Origin); err != nil {
+			if err := e.turnFiles.BeginCallWithOrigin(turnID, call.CallID, call.ProjectDirs, mutation.Targets, mutation.Origin, mutation.ExactFiles...); err != nil {
 				slog.Warn("engine: capture tool file baseline failed", "turnID", turnID, "callID", call.CallID, "tool", call.Name, "err", err)
 			} else {
 				tracked = true
 			}
 		}
 	}
-	result := e.callTool(ctx, sessionID, turnID, call)
-	if tracked {
+	endTrackedCall := func() {
 		if err := e.turnFiles.EndCall(turnID, call.CallID); err != nil {
 			slog.Warn("engine: capture tool file result failed", "turnID", turnID, "callID", call.CallID, "tool", call.Name, "err", err)
 		}
+	}
+	if tracked && call.Name == tool.CommandRun {
+		ctx = tool.WithCommandCompletion(ctx, endTrackedCall)
+	}
+	result := e.callTool(ctx, sessionID, turnID, call)
+	var state struct {
+		Yielded bool `json:"yielded"`
+	}
+	if call.Name == tool.CommandRun {
+		_ = json.Unmarshal([]byte(result.Content), &state)
+	}
+	if tracked && !state.Yielded {
+		endTrackedCall()
 	}
 	return result
 }

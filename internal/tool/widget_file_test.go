@@ -3,6 +3,7 @@ package tool
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -22,6 +23,14 @@ func (s widgetFileStore) GetStudioItem(_ context.Context, id string) (*store.Stu
 }
 
 func TestWidgetFileScopeReadsAndPatchesOneDraftFile(t *testing.T) {
+	for _, unified := range []bool{false, true} {
+		t.Run(fmt.Sprintf("unified=%t", unified), func(t *testing.T) {
+			testWidgetFileScopeReadsAndPatchesOneDraftFile(t, unified)
+		})
+	}
+}
+
+func testWidgetFileScopeReadsAndPatchesOneDraftFile(t *testing.T, unified bool) {
 	const id = "canvas_scope_test"
 	home := t.TempDir()
 	draft, err := widget.StartDraft(home, id, "")
@@ -72,6 +81,13 @@ func TestWidgetFileScopeReadsAndPatchesOneDraftFile(t *testing.T) {
 	if payload := decodeToolResult(t, read); payload["content"] != source || payload["draftHash"] != draft.DraftHash {
 		t.Fatalf("read payload: %v", payload)
 	}
+	for _, name := range []string{FileStat, FileSlice} {
+		result := runner.Call(context.Background(), call(name, name, map[string]any{"scope": "widget", "widget_id": id, "path": "src/App.tsx"}))
+		payload := decodeToolResult(t, result)
+		if !result.Ok || payload["draftHash"] != draft.DraftHash || payload["path"] != "src/App.tsx" {
+			t.Fatalf("widget context lost by %s: %s", name, result.Content)
+		}
+	}
 	for _, path := range []string{".base", "fixtures/old.json", "../draft/.base", "/etc/passwd"} {
 		res := runner.Call(context.Background(), call(FileRead, "blocked", map[string]any{"scope": "widget", "widget_id": id, "path": path}))
 		if res.Ok {
@@ -91,6 +107,11 @@ func TestWidgetFileScopeReadsAndPatchesOneDraftFile(t *testing.T) {
 		"files": []any{map[string]any{"path": "src/App.tsx", "action": "edit", "hunks": []any{map[string]any{"start_line": 1, "old_lines": []string{"export default 1;"}, "new_lines": []string{"export default 2;"}}}}},
 	}
 	patchCall := call(FilePatch, "patch", patchArgs)
+	if unified {
+		delete(patchArgs, "files")
+		patchArgs["diff"] = "--- a/src/App.tsx\n+++ b/src/App.tsx\n@@ -1 +1 @@\n-export default 1;\n+export default 2;\n"
+		patchCall = call(FilePatch, "patch", patchArgs)
+	}
 	approval, err := runner.ApprovalDetails(context.Background(), patchCall)
 	if err != nil {
 		t.Fatal(err)
@@ -118,7 +139,23 @@ func TestWidgetFileScopeReadsAndPatchesOneDraftFile(t *testing.T) {
 	} else if payload := decodeToolResult(t, ApprovalDetailsFailure(stale, err)); payload["currentDraftHash"] != updated.DraftHash {
 		t.Fatalf("conflict should return current draft hash: %v", payload)
 	}
+	// Whole-file widget replacements keep using the checked draft version.
+	replaceCall := call(FilePatch, "replace", map[string]any{
+		"scope": "widget", "widget_id": id, "expectedDraftHash": updated.DraftHash,
+		"files": []any{map[string]any{"path": "src/App.tsx", "action": "replace", "content": "export default 3;\n"}},
+	})
+	if _, err := runner.ApprovalDetails(context.Background(), replaceCall); err != nil {
+		t.Fatal(err)
+	}
+	if result := runner.Call(context.Background(), replaceCall); !result.Ok {
+		t.Fatal(result.Content)
+	}
+	updated, err = widget.ReadDraft(home, id)
+	if err != nil || updated.Files["src/App.tsx"] != "export default 3;\n" {
+		t.Fatalf("replace: %+v %v", updated, err)
+	}
 	patchArgs["expectedDraftHash"] = updated.DraftHash
+	delete(patchArgs, "diff")
 	patchArgs["files"] = []any{map[string]any{"path": ".base", "action": "delete"}}
 	if _, err := runner.ApprovalDetails(context.Background(), call(FilePatch, "hidden", patchArgs)); err == nil {
 		t.Fatal("metadata patch should fail")
