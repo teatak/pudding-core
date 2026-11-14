@@ -29,10 +29,15 @@ func (s *coolingCommitStore) AdvanceContextCooling(ctx context.Context, in store
 
 func coolingFixture(t *testing.T) (*Engine, *storetest.Store, *resolvedModel, provider.Request) {
 	t.Helper()
+	return coolingFixtureWithHistorySize(t, 6)
+}
+
+func coolingFixtureWithHistorySize(t *testing.T, turns int) (*Engine, *storetest.Store, *resolvedModel, provider.Request) {
+	t.Helper()
 	e, db, _, sid := newTestEngine(t, mock.WithScript([]string{"summary of old evidence"}), mock.WithDelay(0))
 	t.Cleanup(e.Stop)
 	ctx := context.Background()
-	for i := 0; i < 6; i++ {
+	for i := 0; i < turns; i++ {
 		id := fmt.Sprint(i)
 		if _, err := db.BeginTurn(ctx, store.BeginTurnInput{SessionID: sid, TurnID: id, UserMessageID: "input" + id, ClientMessageID: "client" + id, UserText: "inspect"}); err != nil {
 			t.Fatal(err)
@@ -382,7 +387,11 @@ func TestCoolingUsesCalibratedCandidate(t *testing.T) {
 }
 
 func TestCoolingStillChecksCanonicalSummaryBudget(t *testing.T) {
-	e, db, resolved, req := coolingFixture(t)
+	// Canonical history must dominate the fixed prompt/tool overhead so its
+	// summary reaches 90% while the cooled ordinary request stays below 80%.
+	// Small history made both requests exceed their thresholds as prompts grew,
+	// which no longer isolated the canonical-summary pressure path.
+	e, db, resolved, req := coolingFixtureWithHistorySize(t, 32)
 	ctx := context.Background()
 	if changed, err := e.prepareContextRequest(ctx, "sess_1", "current", resolved, store.ModeCode, &req, true); err != nil || !changed {
 		t.Fatalf("initial cooling: %v %v", changed, err)
@@ -407,7 +416,10 @@ func TestCoolingStillChecksCanonicalSummaryBudget(t *testing.T) {
 	}
 	cooled.Config, cooled.Tools = resolved.config, req.Tools
 	if requestInputTokens(cooled) >= compactTrigger(cooled.Config, 80) {
-		t.Fatal("fixture must fit ordinary request below threshold")
+		t.Fatalf("fixture must fit ordinary request below threshold: input=%d threshold=%d", requestInputTokens(cooled), compactTrigger(cooled.Config, 80))
+	}
+	if pressure, err := summaryInputPressure(resolved, all, 1); err != nil || !pressure {
+		t.Fatalf("fixture must independently reach canonical summary pressure: pressure=%v error=%v", pressure, err)
 	}
 	changed, err := e.prepareContextRequest(ctx, "sess_1", "current", resolved, store.ModeCode, &cooled, false)
 	if err != nil || !changed {
@@ -416,5 +428,12 @@ func TestCoolingStillChecksCanonicalSummaryBudget(t *testing.T) {
 	state, err := db.ContextCooling(ctx, "sess_1")
 	if err != nil || state.ThroughTurnID != "" {
 		t.Fatalf("Compact did not reset cooling: %+v %v", state, err)
+	}
+	all, err = db.ListMessages(ctx, "sess_1", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if all[len(all)-1].Role != store.RoleSummary {
+		t.Fatal("canonical summary pressure did not produce a summary")
 	}
 }

@@ -152,6 +152,13 @@ func TestBrowserTabsAreSessionScoped(t *testing.T) {
 			t.Fatalf("select %s status=%d result=%+v input=%+v", field, resp.StatusCode, selected, input)
 		}
 	}
+	for _, values := range [][]string{{"a", "c"}, {}} {
+		resp = req(t, http.MethodPost, selectURL, map[string]any{"selector": "#record", "values": values})
+		selected := decodeJSON[browser.ActionResult](t, resp)
+		if resp.StatusCode != http.StatusOK || selected.Action != "select" || browserSvc.selectInput.Values == nil || len(*browserSvc.selectInput.Values) != len(values) {
+			t.Fatalf("multi select lost: %+v %+v", selected, browserSvc.selectInput)
+		}
+	}
 	for _, input := range []map[string]string{{"selector": "#record"}, {"selector": "#record", "label": "Mail", "value": "MX"}, {"value": "MX"}} {
 		resp = req(t, http.MethodPost, selectURL, input)
 		resp.Body.Close()
@@ -1535,5 +1542,9 @@ func (f *fakeBrowserService) Hover(context.Context, string, string, browser.Hove
 }
 
 func (f *fakeBrowserService) Dialog(context.Context, string, string, browser.DialogInput) (browser.ActionResult, error) {
+	return browser.ActionResult{}, nil
+}
+
+func (f *fakeBrowserService) Drag(context.Context, string, string, browser.DragInput) (browser.ActionResult, error) {
 	return browser.ActionResult{}, nil
 }

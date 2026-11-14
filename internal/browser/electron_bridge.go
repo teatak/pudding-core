@@ -65,6 +65,9 @@ type electronBridgeClickRequest struct {
 	X             *float64 `json:"x,omitempty"`
 	Y             *float64 `json:"y,omitempty"`
 	Method        string   `json:"method,omitempty"`
+	Button        string   `json:"button,omitempty"`
+	ClickCount    *int     `json:"clickCount,omitempty"`
+	Modifiers     []string `json:"modifiers,omitempty"`
 }
 
 type electronBridgeTypeRequest struct {
@@ -434,6 +437,7 @@ func (s *ElectronBridgeService) Click(ctx context.Context, sessionID, tabID stri
 		X:             in.X,
 		Y:             in.Y,
 		Method:        in.Method,
+		Button:        in.Button, ClickCount: in.ClickCount, Modifiers: in.Modifiers,
 	}, &out); err != nil {
 		return ActionResult{}, err
 	}
@@ -467,8 +471,8 @@ func (s *ElectronBridgeService) Type(ctx context.Context, sessionID, tabID strin
 }
 
 func (s *ElectronBridgeService) Select(ctx context.Context, sessionID, tabID string, in SelectInput) (ActionResult, error) {
-	if strings.TrimSpace(in.Selector) == "" || (in.Label == nil) == (in.Value == nil) {
-		return ActionResult{}, errors.New("selector and exactly one of label or value are required")
+	if err := in.Validate(); err != nil {
+		return ActionResult{}, err
 	}
 	if tabID == "" {
 		tabID = in.TabID
@@ -556,6 +560,25 @@ func (s *ElectronBridgeService) Hover(ctx context.Context, sessionID, tabID stri
 		return ActionResult{}, err
 	}
 	return out.result("hover"), nil
+}
+func (s *ElectronBridgeService) Drag(ctx context.Context, sessionID, tabID string, in DragInput) (ActionResult, error) {
+	if tabID == "" {
+		tabID = in.TabID
+	}
+	tabID, err := s.resolveTabID(ctx, sessionID, tabID, false)
+	if err != nil {
+		return ActionResult{}, err
+	}
+	in.TabID = tabID
+	var out electronBridgeActionResponse
+	request := struct {
+		SessionID string `json:"sessionID"`
+		DragInput
+	}{sessionID, in}
+	if err := s.post(ctx, "/browser/tabs/drag", request, &out); err != nil {
+		return ActionResult{}, err
+	}
+	return out.result("drag"), nil
 }
 
 func (s *ElectronBridgeService) PressKey(ctx context.Context, sessionID, tabID string, in KeyInput) (ActionResult, error) {

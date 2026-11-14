@@ -1150,6 +1150,9 @@ export const browserClickRequest = z.object({
   x: z.number().optional(),
   y: z.number().optional(),
   method: z.enum(["auto", "pointer"]).optional(),
+  button: z.enum(["left", "right"]).optional(),
+  clickCount: z.union([z.literal(1), z.literal(2)]).optional(),
+  modifiers: z.array(z.enum(["Alt", "Control", "Meta", "Shift", "ControlOrMeta"])).optional(),
 });
 export const browserTypeRequest = z.object({
   selector: z.string().optional(),
@@ -1161,7 +1164,9 @@ export const browserSelectRequest = z.object({
   selector: z.string().min(1),
   label: z.string().optional(),
   value: z.string().optional(),
-}).refine(input => (input.label === undefined) !== (input.value === undefined), "exactly one of label or value is required");
+  labels: z.array(z.string()).max(100).optional(),
+  values: z.array(z.string()).max(100).optional(),
+}).refine(input => [input.label, input.value, input.labels, input.values].filter(value => value !== undefined).length === 1, "exactly one of label, value, labels or values is required");
 export const browserScrollRequest = z.object({
   selector: z.string().optional(),
   deltaX: z.number().optional(),

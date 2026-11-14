@@ -5330,3 +5330,7 @@ func (f *engineTestBrowser) Hover(context.Context, string, string, browser.Hover
 func (f *engineTestBrowser) Dialog(context.Context, string, string, browser.DialogInput) (browser.ActionResult, error) {
 	return browser.ActionResult{}, nil
 }
+
+func (f *engineTestBrowser) Drag(context.Context, string, string, browser.DragInput) (browser.ActionResult, error) {
+	return browser.ActionResult{}, nil
+}

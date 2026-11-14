@@ -4,6 +4,7 @@ package browser
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 )
 
@@ -37,6 +38,7 @@ type Service interface {
 	Scroll(ctx context.Context, sessionID, tabID string, in ScrollInput) (ActionResult, error)
 	Dialog(ctx context.Context, sessionID, tabID string, in DialogInput) (ActionResult, error)
 	Hover(ctx context.Context, sessionID, tabID string, in HoverInput) (ActionResult, error)
+	Drag(ctx context.Context, sessionID, tabID string, in DragInput) (ActionResult, error)
 	PressKey(ctx context.Context, sessionID, tabID string, in KeyInput) (ActionResult, error)
 	Wait(ctx context.Context, sessionID, tabID string, in WaitInput) (ActionResult, error)
 	Close() error
@@ -220,6 +222,9 @@ type ClickInput struct {
 	X             *float64 `json:"x,omitempty"`
 	Y             *float64 `json:"y,omitempty"`
 	Method        string   `json:"method,omitempty"`
+	Button        string   `json:"button,omitempty"`
+	ClickCount    *int     `json:"clickCount,omitempty"`
+	Modifiers     []string `json:"modifiers,omitempty"`
 }
 
 type TypeInput struct {
@@ -233,12 +238,58 @@ type TypeInput struct {
 }
 
 type SelectInput struct {
-	FrameID  string  `json:"frameID,omitempty"`
-	WindowID string  `json:"windowID,omitempty"`
-	TabID    string  `json:"tabID,omitempty"`
-	Selector string  `json:"selector"`
-	Label    *string `json:"label,omitempty"`
-	Value    *string `json:"value,omitempty"`
+	FrameID  string    `json:"frameID,omitempty"`
+	WindowID string    `json:"windowID,omitempty"`
+	TabID    string    `json:"tabID,omitempty"`
+	Selector string    `json:"selector"`
+	Label    *string   `json:"label,omitempty"`
+	Value    *string   `json:"value,omitempty"`
+	Labels   *[]string `json:"labels,omitempty"`
+	Values   *[]string `json:"values,omitempty"`
+}
+
+func (in SelectInput) Validate() error {
+	count := 0
+	for _, present := range []bool{in.Label != nil, in.Value != nil, in.Labels != nil, in.Values != nil} {
+		if present {
+			count++
+		}
+	}
+	if strings.TrimSpace(in.Selector) == "" || count != 1 {
+		return errors.New("selector and exactly one of label, value, labels or values are required")
+	}
+	for _, items := range []*[]string{in.Labels, in.Values} {
+		if items == nil {
+			continue
+		}
+		if len(*items) > 100 {
+			return errors.New("invalid select options: maximum 100")
+		}
+		seen := make(map[string]bool)
+		for _, item := range *items {
+			if seen[item] {
+				return errors.New("duplicate select option")
+			}
+			seen[item] = true
+		}
+	}
+	return nil
+}
+
+type DragPoint struct {
+	Selector      string   `json:"selector,omitempty"`
+	X             *float64 `json:"x,omitempty"`
+	Y             *float64 `json:"y,omitempty"`
+	ObservationID string   `json:"observationID,omitempty"`
+}
+type DragInput struct {
+	FrameID    string    `json:"frameID,omitempty"`
+	WindowID   string    `json:"windowID,omitempty"`
+	TabID      string    `json:"tabID,omitempty"`
+	Source     DragPoint `json:"source"`
+	Target     DragPoint `json:"target"`
+	DurationMS *int      `json:"durationMs,omitempty"`
+	Modifiers  []string  `json:"modifiers,omitempty"`
 }
 
 type ScrollInput struct {

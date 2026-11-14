@@ -300,6 +300,7 @@ func TestBuiltinBrowserOpenWithoutTabIDReportsOpenFailure(t *testing.T) {
 
 type fakeToolBrowser struct {
 	hoverInput  browser.HoverInput
+	dragInput   browser.DragInput
 	dialogInput browser.DialogInput
 	keyInput    browser.KeyInput
 	waitInput   browser.WaitInput
@@ -536,5 +537,24 @@ func TestBuiltinBrowserDialogDispatch(t *testing.T) {
 	res = runner.Call(context.Background(), Call{SessionID: "session", Name: BrowserDialog, Args: json.RawMessage(`{"tabID":"tab","action":"inspect"}`)})
 	if res.Ok {
 		t.Fatalf("cancelled dialog reported success: %+v", res)
+	}
+}
+
+func (f *fakeToolBrowser) Drag(_ context.Context, sessionID, tabID string, in browser.DragInput) (browser.ActionResult, error) {
+	f.dragInput = in
+	return browser.ActionResult{Tab: browser.TabSnapshot{ID: tabID, SessionID: sessionID}, Action: "drag"}, f.actionError
+}
+
+func TestBuiltinBrowserDragDispatch(t *testing.T) {
+	fake := &fakeToolBrowser{}
+	runner := NewBuiltinRunner(WithBrowser(fake))
+	call := Call{SessionID: "session", Name: BrowserDrag, Args: json.RawMessage(`{"tabID":"tab","frameID":"frame","windowID":"popup","source":{"selector":"pudding-ref:start"},"target":{"selector":"pudding-ref:end"},"durationMs":600}`)}
+	result := runner.Call(context.Background(), call)
+	if !result.Ok || fake.dragInput.FrameID != "frame" || fake.dragInput.WindowID != "popup" || fake.dragInput.Source.Selector != "pudding-ref:start" || fake.dragInput.Target.Selector != "pudding-ref:end" || (fake.dragInput.DurationMS == nil || *fake.dragInput.DurationMS != 600) {
+		t.Fatalf("drag lost: %+v %+v", result, fake.dragInput)
+	}
+	fake.actionError = context.Canceled
+	if result = runner.Call(context.Background(), call); result.Ok || !strings.Contains(result.Content, "browser_operation_cancelled") {
+		t.Fatalf("cancel lost: %+v", result)
 	}
 }

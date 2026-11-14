@@ -18,29 +18,29 @@ LDFLAGS="-X $MODULE/internal/buildinfo.channel=release"
 DAEMON_PATH="$OUT_DIR/puddingd"
 mkdir -p "$OUT_DIR"
 cd "$ROOT"
-if [[ "$ARCH" == "x64" ]]; then
-  bash "$ROOT/packaging/macos/prepare-x64-deps.sh"
-  DEPS_PREFIX="$ROOT/dist/deps/macos-x64"
-  PKG_CONFIG_DIRS="$DEPS_PREFIX/lib/pkgconfig:$DEPS_PREFIX/share/pkgconfig"
-  env \
-    GOOS=darwin \
-    GOARCH=amd64 \
-    CGO_ENABLED=1 \
-    CC=clang \
-    CXX=clang++ \
-    CGO_CFLAGS="-arch x86_64 -mmacosx-version-min=12.0" \
-    CGO_CXXFLAGS="-arch x86_64 -mmacosx-version-min=12.0" \
-    CGO_LDFLAGS="-arch x86_64 -mmacosx-version-min=12.0" \
-    PKG_CONFIG_PATH="$PKG_CONFIG_DIRS" \
-    PKG_CONFIG_LIBDIR="$PKG_CONFIG_DIRS" \
-    go build -tags "$BUILD_TAGS" -ldflags "$LDFLAGS" -o "$DAEMON_PATH" ./cmd/puddingd
-else
-  env \
-    GOOS=darwin \
-    GOARCH=arm64 \
-    CGO_ENABLED=1 \
-    go build -tags "$BUILD_TAGS" -ldflags "$LDFLAGS" -o "$DAEMON_PATH" ./cmd/puddingd
+bash "$ROOT/packaging/macos/prepare-deps.sh" "$ARCH"
+DEPS_PREFIX="$ROOT/dist/deps/macos-$ARCH"
+PKG_CONFIG_DIRS="$DEPS_PREFIX/lib/pkgconfig:$DEPS_PREFIX/share/pkgconfig"
+MACH_ARCH=x86_64
+# The pinned Intel ONNX Runtime requires 15.5, matching Desktop's declaration.
+MIN_MACOS_VERSION=15.5
+if [[ "$ARCH" == arm64 ]]; then
+  MACH_ARCH=arm64
+  MIN_MACOS_VERSION=14.0
+  PKG_CONFIG_DIRS="$PKG_CONFIG_DIRS:$ROOT/dist/deps/abseil/lib/pkgconfig"
 fi
+# cgo environment flags precede package flags: select the freshly built bridge,
+# not the historical source-tree archive. Never fall back to Homebrew libraries.
+# AEC/NS intentionally link the same archives; ignore only duplicate-library
+# diagnostics, keeping deployment-target and other linker warnings fatal.
+env \
+  GOOS=darwin GOARCH="$GOARCH" CGO_ENABLED=1 CC=clang CXX=clang++ \
+  MACOSX_DEPLOYMENT_TARGET="$MIN_MACOS_VERSION" \
+  CGO_CFLAGS="-O2 -g -arch $MACH_ARCH -mmacosx-version-min=$MIN_MACOS_VERSION" \
+  CGO_CXXFLAGS="-O2 -g -arch $MACH_ARCH -mmacosx-version-min=$MIN_MACOS_VERSION" \
+  CGO_LDFLAGS="-L$DEPS_PREFIX/lib -arch $MACH_ARCH -mmacosx-version-min=$MIN_MACOS_VERSION -Wl,-no_warn_duplicate_libraries -Wl,-fatal_warnings" \
+  PKG_CONFIG_PATH="$PKG_CONFIG_DIRS" PKG_CONFIG_LIBDIR="$PKG_CONFIG_DIRS" \
+  go build -tags "$BUILD_TAGS" -ldflags "$LDFLAGS" -o "$DAEMON_PATH" ./cmd/puddingd
 
 PUDDING_LANGUAGE_SERVER_OUT_DIR="$OUT_DIR/language-servers" \
  PUDDING_LANGUAGE_SERVER_GOOS=darwin PUDDING_LANGUAGE_SERVER_GOARCH="$GOARCH" \

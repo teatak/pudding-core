@@ -31,7 +31,12 @@ make schema-check
 
 The preparation script pins Abseil to match the ABI of the existing arm64 WebRTC library;
 do not replace it with the latest system version. Set `PKG_CONFIG_PATH` again when opening a new terminal.
-Intel release builds use a separate dependency setup through `make runtime ARCH=x64 OUT=/absolute/path`.
+Release runtimes use `make runtime ARCH=arm64 OUT=/absolute/path` (or `ARCH=x64`).
+This rebuilds pinned WebRTC, Abseil and PortAudio dependencies for the target architecture,
+instead of using Homebrew or the historical development bridge archive. The runtime deployment
+targets are macOS 14.0 for arm64 and 15.5 for x64 (the pinned Intel ONNX Runtime minimum); Desktop may declare a higher minimum for
+its other components. Linker compatibility warnings fail the build. Desktop packaging additionally
+checks the deployment target of every bundled Mach-O against the app's declared minimum.
 
 Run `make daemon-dev` to start the development daemon. Development data is stored in `~/.pudding-dev`;
 release builds use `~/.pudding`. Tests must use temporary directories. The daemon listens only on loopback,

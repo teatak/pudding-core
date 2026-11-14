@@ -118,7 +118,7 @@ func TestBuiltinPluginsMergeEnablementAndSkills(t *testing.T) {
 	expectedTools := map[string]bool{toolBrowserStatus: true, toolBrowserOpen: true, toolBrowserObserve: true, toolBrowserScreenshot: true,
 		toolBrowserBack: true, toolBrowserForward: true, toolBrowserReload: true, toolBrowserClose: true, toolBrowserClick: true,
 		toolBrowserType: true, toolBrowserSelect: true, toolBrowserScroll: true, toolBrowserPressKey: true, toolBrowserWait: true,
-		toolBrowserHover: true, toolBrowserDialog: true, toolBrowserUpload: true, toolBrowserDownloads: true}
+		toolBrowserHover: true, toolBrowserDrag: true, toolBrowserDialog: true, toolBrowserUpload: true, toolBrowserDownloads: true}
 	for _, ref := range browser.Tools {
 		if !expectedTools[ref.Name] {
 			t.Fatalf("unexpected or duplicate browser tool: %s", ref.Name)

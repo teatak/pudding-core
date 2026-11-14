@@ -798,3 +798,55 @@ func TestElectronBridgeFileTransfersPreserveScopeAndPaths(t *testing.T) {
 		t.Fatalf("download baseline lost: %+v", requests[1])
 	}
 }
+
+func TestElectronBridgeComplexInteractions(t *testing.T) {
+	count, duration := 2, 500
+	var requests []map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Error(err)
+			return
+		}
+		request["route"] = r.URL.Path
+		requests = append(requests, request)
+		writeElectronBridgeTestJSON(w, electronBridgeActionResponse{Result: map[string]any{"delivered": true}})
+	}))
+	defer server.Close()
+	service, err := NewElectronBridgeService(ElectronBridgeConfig{URL: server.URL, Token: "test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	_, err = service.Click(ctx, "session", "tab", ClickInput{FrameID: "frame", WindowID: "popup", Selector: "#row", Button: "left", ClickCount: &count, Modifiers: []string{"ControlOrMeta"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	empty := []string{}
+	_, err = service.Select(ctx, "session", "tab", SelectInput{FrameID: "frame", WindowID: "popup", Selector: "#multi", Values: &empty})
+	if err != nil {
+		t.Fatal(err)
+	}
+	x, y := 20.0, 30.0
+	_, err = service.Drag(ctx, "session", "tab", DragInput{FrameID: "frame", WindowID: "popup", Source: DragPoint{Selector: "pudding-ref:source"}, Target: DragPoint{X: &x, Y: &y, ObservationID: "observation"}, DurationMS: &duration})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(requests) != 3 {
+		t.Fatal(requests)
+	}
+	for _, r := range requests {
+		if r["sessionID"] != "session" || r["tabID"] != "tab" || r["frameID"] != "frame" || r["windowID"] != "popup" {
+			t.Fatalf("scope lost: %+v", r)
+		}
+	}
+	if requests[0]["clickCount"] != float64(2) || requests[0]["button"] != "left" || requests[0]["modifiers"].([]any)[0] != "ControlOrMeta" {
+		t.Fatal(requests[0])
+	}
+	if values, ok := requests[1]["values"].([]any); !ok || len(values) != 0 {
+		t.Fatalf("empty selection lost: %+v", requests[1])
+	}
+	if requests[2]["route"] != "/browser/tabs/drag" || requests[2]["target"].(map[string]any)["observationID"] != "observation" {
+		t.Fatal(requests[2])
+	}
+}

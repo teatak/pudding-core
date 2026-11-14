@@ -954,8 +954,8 @@ func (s *Server) selectBrowserTab(c *cart.Context) error {
 	if err := decode(c, &req); err != nil {
 		return badRequest(c, "invalid json body")
 	}
-	if strings.TrimSpace(req.Selector) == "" || (req.Label == nil) == (req.Value == nil) {
-		return badRequest(c, "selector and exactly one of label or value are required")
+	if err := req.Validate(); err != nil {
+		return badRequest(c, err.Error())
 	}
 	result, err := s.browser.Select(c.Request.Context(), sessionID, tabID, req)
 	if err != nil {

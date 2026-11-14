@@ -37,6 +37,7 @@ const (
 	toolBrowserPressKey   = "builtin_browser_press_key"
 	toolBrowserDialog     = "builtin_browser_dialog"
 	toolBrowserHover      = "builtin_browser_hover"
+	toolBrowserDrag       = "builtin_browser_drag"
 	toolBrowserWait       = "builtin_browser_wait"
 	toolBrowserUpload     = "builtin_browser_upload"
 	toolBrowserDownloads  = "builtin_browser_downloads"
@@ -115,6 +116,7 @@ Use child conversations for bounded work that can make useful progress independe
 				{Name: toolBrowserUpload},
 				{Name: toolBrowserDownloads},
 				{Name: toolBrowserHover},
+				{Name: toolBrowserDrag},
 				{Name: toolBrowserDialog},
 			},
 			Skills: []SkillRef{{
@@ -140,12 +142,14 @@ Use Pudding's built-in browser for webpages that require navigation or interacti
 - Check browser status before assuming a tab exists.
 - Observe the page before clicking or typing. Prefer the returned element ref as the selector argument. Re-observe after stale-reference or moved-target errors; never guess a replacement positional selector. Controls intersecting the viewport come first; offscreen controls remain available on later pages. If a target is missing, pass nextOffset as offset until it is found or nextOffset is null before falling back to screenshot coordinates.
 - Restart observation at offset=0 after scrolling, navigation, or a significant page change; offsets refer to the current page state. Coordinates use viewport CSS pixels and require observationID from that observation or screenshot. An observation_stale error means the old coordinates must not be reused. Prefer element refs over screenshot coordinates.
-- For native dropdowns use builtin_browser_select with the observed ref and exactly one label or value. For custom comboboxes, open the list, observe, click the matching option ref, then verify the selected option.
+- For native dropdowns use builtin_browser_select with the observed ref and exactly one label/value for one option, or labels/values arrays to replace the full selection of a multiple select (empty array clears it). For custom comboboxes, open the list, observe, click the matching option ref, then verify the selected option.
 - Use builtin_browser_upload on a file input with session attachments or authorized project paths. Selection can trigger immediate network upload; only use files authorized for that site. Verify the website outcome separately.
 - Use builtin_browser_downloads list before triggering an export, then wait with those knownIDs (or an exact downloadID). Check completed/failed/cancelled state; a wait timeout never authorizes another export. Cancel a transfer explicitly with action=cancel; saved paths are returned only for completed downloads.
 - For form values use builtin_browser_type with clear=true and commit=true to replace the value and dispatch change/blur. Use canonical date/time values (datetime-local: YYYY-MM-DDTHH:mm); committing a field does not submit the form.
 - Use builtin_browser_press_key for Enter to submit, Tab/Shift+Tab to move focus, Escape to dismiss, and ControlOrMeta shortcuts. Keys act on the selected tab, not the desktop.
 - Observe returns frames and native popup windows. Pass their frameID/windowID explicitly on subsequent operations; omit them for the main document. Re-observe after navigation or stale targets. Screenshot uses windowID only and whole-window viewport coordinates. Close with windowID closes only that popup.
+- Use builtin_browser_click with clickCount=2 for double click, button=right for webpage context menus, and modifiers=[ControlOrMeta] or [Shift] for additive/range selection. Native application menus are outside DOM observation.
+- Use builtin_browser_drag with source/target refs or observed coordinates in the same frame and viewport. Supports pointer gestures and HTML5 drag-and-drop. It does not upload files or drag between frames/windows. Verify the result; never replay an interrupted drag.
 - Use builtin_browser_hover to reveal hover menus/tooltips without clicking; then observe or wait for the revealed content.
 - Use builtin_browser_wait with newTab/newWindow and knownIDs captured before the triggering action to discover newly opened targets, even when they appeared before wait starts. Choose explicitly from targets[]; an optional url filter is exact. CSS/text/URL waits can follow navigation of the same iframe; use the returned current frameID for a fresh observation. Removed frames and old refs do not silently rebind.
 - Use builtin_browser_wait for a specific visible/hidden element, enabled/disabled, checked/unchecked, expanded/collapsed, exact value/valueChanged, rendered text, or URL result after an action. Mixed checkboxes match neither checked nor unchecked. Value waits reject password/file fields; valueChanged requires the complete previous value, never a truncated observation. Prefer CSS for newly created or replaced targets. A timeout is not permission to repeat a submission; observe first. After cancellation or uncertain input delivery, re-observe before further input.

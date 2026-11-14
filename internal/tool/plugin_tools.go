@@ -30,6 +30,7 @@ var builtinPluginTools = map[string]string{
 	BrowserPressKey:   plugin.BuiltinBrowserID,
 	BrowserDialog:     plugin.BuiltinBrowserID,
 	BrowserHover:      plugin.BuiltinBrowserID,
+	BrowserDrag:       plugin.BuiltinBrowserID,
 	BrowserWait:       plugin.BuiltinBrowserID,
 	BrowserUpload:     plugin.BuiltinBrowserID,
 	BrowserDownloads:  plugin.BuiltinBrowserID,

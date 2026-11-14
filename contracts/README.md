@@ -35,6 +35,20 @@ The Go daemon embeds it through this package; desktop generates `web/contracts/`
 `api.ts` and `events.ts` are the TypeScript/Zod client validation definitions for the REST and SSE protocol.
 Server structs and lifecycle semantics remain owned by core; verify both sides when changing a wire field.
 
+Protocol 68 extends browser click with `button` (`left`/`right`), `clickCount`
+(1/2, double click is left-only), and keyboard `modifiers` including ControlOrMeta.
+Select accepts exactly one of label/value/labels/values; arrays replace the full
+selection of a native multiple select and an empty array clears it. Validation
+precedes mutation and the complete selected set is read back.
+`/browser/tabs/drag` / `builtin_browser_drag` accepts source/target objects with
+an observed selector or x/y plus observationID, optional frameID/windowID,
+modifiers and durationMs (100..2000, default 400). Both endpoints must be visible
+in the same frame/window. Pointer capture and native HTML5 drag data are supported;
+cross-frame/window dragging is unsupported; file upload uses the upload tool. Cancellation
+balances mouse release, cancels native dragging and removes drag interception.
+An interrupted gesture is never automatically replayed. Core and Desktop must
+be updated together; older click and scalar select requests remain valid.
+
 Protocol 67 adds `/browser/tabs/dialog` / `builtin_browser_dialog`: inspect the
 current alert/confirm/prompt or respond using its exact dialogID and an explicit
 accept boolean. promptText preserves the distinction between omitted and empty.
@@ -115,8 +129,8 @@ also declare `coordinateSpace: "viewport_css_pixels"`. Coordinate clicks must pa
 the matching ID and are rejected after detected document, viewport or scroll changes.
 Prefer element refs, which are checked against node identity independently.
 `POST /sessions/{id}/browser/tabs/{tabID}/select` and `builtin_browser_select` accept
-`selector` plus exactly one of `label` or `value` (including an empty option value)
-for native single-select controls. Observe exposes bounded native options and ARIA
+`selector` plus exactly one of `label` or `value` (including an empty option value),
+or `labels`/`values` arrays for native multiple-select controls. Observe exposes bounded native options and ARIA
 combobox/listbox/option controls; custom options are activated by their observed ref.
 Type accepts `commit:true` to dispatch change and blur, and `text:"",clear:true`
 to clear a field. Type/select read back the field and reject mismatches. Action
