@@ -11,17 +11,13 @@ import (
 	"fmt"
 	"io"
 	"math"
-	"net"
 	"net/http"
 	"slices"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/teatak/pudding-core/internal/provider"
 )
-
-const defaultResponseHeaderTimeout = 30 * time.Second
 
 type Config struct {
 	BaseURL    string
@@ -39,7 +35,7 @@ func New(cfg Config) *Client {
 	return &Client{
 		baseURL: strings.TrimRight(cfg.BaseURL, "/"),
 		apiKey:  cfg.APIKey,
-		http:    httpClient(cfg.HTTPClient),
+		http:    provider.HTTPClient(cfg.HTTPClient),
 	}
 }
 
@@ -81,7 +77,7 @@ func (c *Client) streamOnce(ctx context.Context, req provider.Request, out chan<
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return &httpStatusError{status: resp.StatusCode, summary: redact(bodySummary(resp.Body), c.apiKey)}
+		return &httpStatusError{status: resp.StatusCode, summary: provider.HTTPErrorSummary(resp.Body, c.apiKey)}
 	}
 	return readSSE(ctx, resp.Body, out)
 }
@@ -281,13 +277,13 @@ func ListModels(ctx context.Context, cfg Config) ([]provider.ModelCandidate, err
 	if cfg.APIKey != "" {
 		req.Header.Set("Authorization", "Bearer "+cfg.APIKey)
 	}
-	resp, err := httpClient(cfg.HTTPClient).Do(req)
+	resp, err := provider.HTTPClient(cfg.HTTPClient).Do(req)
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("openai: status %d: %s", resp.StatusCode, redact(bodySummary(resp.Body), cfg.APIKey))
+		return nil, fmt.Errorf("openai: status %d: %s", resp.StatusCode, provider.HTTPErrorSummary(resp.Body, cfg.APIKey))
 	}
 	var payload struct {
 		Data []struct {
@@ -412,40 +408,6 @@ func calculateOpenRouterCostMultiplier(id string, p *openRouterPricing) *float64
 		val = math.Round(cost*10) / 10
 	}
 	return &val
-}
-
-func bodySummary(r io.Reader) string {
-	b, err := io.ReadAll(io.LimitReader(r, 2048))
-	if err != nil {
-		return err.Error()
-	}
-	return strings.TrimSpace(string(b))
-}
-
-func redact(s, secret string) string {
-	if secret == "" {
-		return s
-	}
-	return strings.ReplaceAll(s, secret, "[redacted]")
-}
-
-func httpClient(client *http.Client) *http.Client {
-	if client != nil {
-		return client
-	}
-	dialer := &net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second}
-	return &http.Client{
-		Transport: &http.Transport{
-			Proxy:                 http.ProxyFromEnvironment,
-			DialContext:           dialer.DialContext,
-			ForceAttemptHTTP2:     true,
-			MaxIdleConns:          100,
-			IdleConnTimeout:       90 * time.Second,
-			TLSHandshakeTimeout:   10 * time.Second,
-			ResponseHeaderTimeout: defaultResponseHeaderTimeout,
-			ExpectContinueTimeout: 1 * time.Second,
-		},
-	}
 }
 
 type chatRequest struct {

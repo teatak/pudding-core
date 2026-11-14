@@ -84,15 +84,6 @@ func NameAllowedForMode(mode store.AgentMode, name string) bool {
 	return store.AgentModeRank(mode) >= store.AgentModeRank(RequiredModeForName(name))
 }
 
-func AllowedForMode(mode store.AgentMode, defs []provider.ToolDef, name string) bool {
-	for _, def := range defs {
-		if def.Name == name {
-			return ToolDefAllowedForMode(mode, def)
-		}
-	}
-	return false
-}
-
 func HasDefinition(defs []provider.ToolDef, name string) bool {
 	for _, def := range defs {
 		if def.Name == name {

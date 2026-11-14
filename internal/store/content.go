@@ -2,9 +2,7 @@ package store
 
 import (
 	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
-	"strings"
 )
 
 type ContentAuthor struct {
@@ -34,7 +32,3 @@ type InvalidContent struct{ Message string }
 func (e *InvalidContent) Error() string { return e.Message }
 
 func ContentHash(body string) string { return fmt.Sprintf("%x", sha256.Sum256([]byte(body))) }
-func ValidContentHash(hash string) bool {
-	b, e := hex.DecodeString(hash)
-	return e == nil && len(b) == 32 && hash == strings.ToLower(hash)
-}

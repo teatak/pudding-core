@@ -48,10 +48,6 @@ func WithRequestTimeout(timeout time.Duration) ManagerOption {
 	return func(m *Manager) { m.requestTimeout = timeout }
 }
 
-func WithDiagnosticTimeout(timeout time.Duration) ManagerOption {
-	return func(m *Manager) { m.diagnosticTimeout = timeout }
-}
-
 func WithShutdownTimeout(timeout time.Duration) ManagerOption {
 	return func(m *Manager) { m.opts.shutdownTimeout = timeout }
 }
@@ -62,14 +58,6 @@ func WithIdleTimeout(timeout time.Duration) ManagerOption {
 
 func WithReapInterval(interval time.Duration) ManagerOption {
 	return func(m *Manager) { m.reapInterval = interval }
-}
-
-func WithMaxProcesses(maxProcesses int) ManagerOption {
-	return func(m *Manager) { m.maxProcesses = maxProcesses }
-}
-
-func WithMaxMessageBytes(maxBytes int) ManagerOption {
-	return func(m *Manager) { m.opts.maxMessageBytes = maxBytes }
 }
 
 type managerEntry struct {

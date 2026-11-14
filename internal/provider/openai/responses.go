@@ -25,7 +25,7 @@ func NewResponses(cfg Config) *ResponsesClient {
 	return &ResponsesClient{
 		baseURL: strings.TrimRight(cfg.BaseURL, "/"),
 		apiKey:  cfg.APIKey,
-		http:    httpClient(cfg.HTTPClient),
+		http:    provider.HTTPClient(cfg.HTTPClient),
 	}
 }
 
@@ -59,7 +59,7 @@ func (c *ResponsesClient) stream(ctx context.Context, req provider.Request, out 
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("openai responses: status %d: %s", resp.StatusCode, redact(bodySummary(resp.Body), c.apiKey))
+		return fmt.Errorf("openai responses: status %d: %s", resp.StatusCode, provider.HTTPErrorSummary(resp.Body, c.apiKey))
 	}
 	return readResponsesSSE(ctx, resp.Body, out)
 }

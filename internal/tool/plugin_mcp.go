@@ -43,8 +43,6 @@ type PluginMCPSource interface {
 	ListEndpointBindings(ctx context.Context, kind string) ([]*plugin.EndpointBinding, error)
 }
 
-type PluginMCPOption func(*PluginMCPRunner)
-
 type PluginMCPRunner struct {
 	source     PluginMCPSource
 	httpClient *http.Client
@@ -103,25 +101,13 @@ type pluginMCPToolCache struct {
 	tools     map[string]pluginMCPDiscoveredTool
 }
 
-func NewPluginMCPRunner(source PluginMCPSource, opts ...PluginMCPOption) *PluginMCPRunner {
-	r := &PluginMCPRunner{
+func NewPluginMCPRunner(source PluginMCPSource) *PluginMCPRunner {
+	return &PluginMCPRunner{
 		source:       source,
 		httpClient:   &http.Client{Timeout: pluginMCPRequestTimeout},
 		sessionDefs:  map[string][]provider.ToolDef{},
 		sessionTools: map[string]map[string]pluginMCPDiscoveredTool{},
 		caches:       map[string]pluginMCPToolCache{},
-	}
-	for _, opt := range opts {
-		opt(r)
-	}
-	return r
-}
-
-func WithPluginMCPHTTPClient(client *http.Client) PluginMCPOption {
-	return func(r *PluginMCPRunner) {
-		if client != nil {
-			r.httpClient = client
-		}
 	}
 }
 

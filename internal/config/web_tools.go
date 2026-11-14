@@ -321,23 +321,6 @@ func (m *Manager) writeWebTools(cfg webToolsYAML) error {
 	return writeYAML(m.path(webToolsFile), cfg)
 }
 
-func webToolsView(cfg webToolsYAML) *WebToolsView {
-	return &WebToolsView{
-		SearchProvider: cfg.Search.Provider,
-		FetchProvider:  cfg.Fetch.Provider,
-		Providers: []WebToolProviderView{
-			webToolProviderView(cfg, "tavily"),
-			webToolProviderView(cfg, "deepseek"),
-		},
-	}
-}
-
-func webToolProviderView(cfg webToolsYAML, name string) WebToolProviderView {
-	provider := cfg.Providers[name]
-	apiKey := strings.TrimSpace(provider.APIKey)
-	return WebToolProviderView{Name: name, APIKey: apiKey, APIKeySet: apiKey != ""}
-}
-
 func normalizeWebProvider(name string) (string, error) {
 	name = strings.ToLower(strings.TrimSpace(name))
 	switch name {

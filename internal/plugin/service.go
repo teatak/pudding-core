@@ -764,20 +764,6 @@ func (s *Service) ResolveBoundEndpoint(ctx context.Context, pluginID, endpointNa
 	return nil, "", ErrNotFound
 }
 
-func (s *Service) readyEndpointBinding(ctx context.Context, binding *EndpointBinding) (*EndpointBinding, error) {
-	if binding == nil || binding.ConnectionID == "" || s.connectionStore == nil {
-		return binding, nil
-	}
-	connection, err := s.ReadyConnection(ctx, binding.ConnectionID)
-	if err != nil {
-		return nil, err
-	}
-	out := *binding
-	out.Auth = CloneAuth(connection.Auth)
-	out.ConnectionFields = cloneStringMap(connection.Fields)
-	return &out, nil
-}
-
 func (s *Service) refreshConnectionIfNeeded(ctx context.Context, connection *Connection) (*Connection, error) {
 	if connection == nil || (connection.PluginID != "github" && connection.PluginID != "gmail") || connection.Auth.Type != AuthTypeOAuth2 {
 		return CloneConnection(connection), nil
@@ -1011,21 +997,4 @@ func viewConnectionChoice(conn *Connection) ConnectionChoice {
 		AuthVariant:  conn.Auth.Variant,
 		Account:      cloneConnectionAccount(conn.Account),
 	}
-}
-
-func dedupeConnectionChoices(in []ConnectionChoice) []ConnectionChoice {
-	seen := make(map[string]struct{}, len(in))
-	out := make([]ConnectionChoice, 0, len(in))
-	for _, item := range in {
-		key := item.PluginID + "/" + item.ID
-		if key == "/" {
-			continue
-		}
-		if _, ok := seen[key]; ok {
-			continue
-		}
-		seen[key] = struct{}{}
-		out = append(out, item)
-	}
-	return out
 }

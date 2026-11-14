@@ -65,16 +65,6 @@ func ValidPageRange(body string, from, to int) bool {
 		(from == len(body) || utf8.RuneStart(body[from])) && (to == len(body) || utf8.RuneStart(body[to]))
 }
 
-// Map only disjoint changes. Boundary edits are conservative: deleting a newline
-// or inserting at the edge can change the protected paragraph's structure.
-func MapPageRange(before, after string, from, to int) (int, int, bool) {
-	ranges, conflict := MapPageRanges(before, after, []PageEditRange{{From: from, To: to}})
-	if conflict >= 0 {
-		return 0, 0, false
-	}
-	return ranges[0].From, ranges[0].To, true
-}
-
 // One diff for the entire batch, including unrelated concurrent reservations.
 // The conflict index identifies the owning operation without repeating the diff.
 func MapPageRanges(before, after string, ranges []PageEditRange) ([]PageEditRange, int) {
