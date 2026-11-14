@@ -2,9 +2,13 @@ package provider
 
 import (
 	"encoding/json"
+	"errors"
+	"net/http"
 	"reflect"
 	"strings"
 	"testing"
+	"testing/iotest"
+	"time"
 )
 
 func TestSplitMessagePreservesContinuationOrder(t *testing.T) {
@@ -126,5 +130,39 @@ func TestSplitMessagePreservesTrailingStateOnlyContinuation(t *testing.T) {
 	}
 	if got := string(segments[2].Continuations[0].Data); got != `["final-reasoning"]` {
 		t.Fatalf("trailing continuation = %s", got)
+	}
+}
+
+func TestHTTPClientPreservesCustomClientAndStreamingTimeouts(t *testing.T) {
+	custom := &http.Client{Timeout: time.Second, Transport: http.DefaultTransport}
+	if got := HTTPClient(custom); got != custom {
+		t.Fatal("injected HTTP client was replaced")
+	}
+	client := HTTPClient(nil)
+	transport := client.Transport.(*http.Transport)
+	if client.Timeout != 0 || transport.ResponseHeaderTimeout != 30*time.Second {
+		t.Fatalf("stream/header timeout = %v/%v", client.Timeout, transport.ResponseHeaderTimeout)
+	}
+	if transport.TLSHandshakeTimeout != 10*time.Second || transport.IdleConnTimeout != 90*time.Second {
+		t.Fatalf("transport deadlines changed: %+v", transport)
+	}
+}
+
+func TestHTTPErrorSummaryBoundsAndRedactsUpstreamErrors(t *testing.T) {
+	for _, tc := range []struct{ body, secret, want string }{
+		{" \nupstream failed\t", "", "upstream failed"},
+		{"key=secret twice secret", "secret", "key=[redacted] twice [redacted]"},
+		{"secret", "", "secret"},
+	} {
+		if got := HTTPErrorSummary(strings.NewReader(tc.body), tc.secret); got != tc.want {
+			t.Errorf("summary = %q, want %q", got, tc.want)
+		}
+	}
+	body := strings.NewReader(strings.Repeat("x", 4096))
+	if got := HTTPErrorSummary(body, ""); len(got) != 2048 || body.Len() != 2048 {
+		t.Fatalf("error body limit: summary=%d remaining=%d", len(got), body.Len())
+	}
+	if got := HTTPErrorSummary(iotest.ErrReader(errors.New("read secret failed")), "secret"); got != "read [redacted] failed" {
+		t.Fatalf("reader error leaked a credential: %q", got)
 	}
 }

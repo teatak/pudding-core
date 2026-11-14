@@ -248,14 +248,15 @@ func TestElectronBridgeServiceMapsMissingTab(t *testing.T) {
 }
 
 func TestElectronBridgeServicePreservesStructuredOperationErrors(t *testing.T) {
-	tests := []struct {
+	type operationErrorCase struct {
 		name      string
 		status    int
 		body      string
 		code      string
 		retryable bool
 		cause     error
-	}{
+	}
+	tests := []operationErrorCase{
 		{
 			name:   "element failure is not a missing tab",
 			status: http.StatusUnprocessableEntity,
@@ -284,6 +285,11 @@ func TestElectronBridgeServicePreservesStructuredOperationErrors(t *testing.T) {
 			retryable: true,
 			cause:     ErrUnavailable,
 		},
+	}
+	for _, code := range []string{"browser_screenshot_prepare_timeout", "browser_screenshot_prepare_failed", "browser_screenshot_capture_failed"} {
+		tests = append(tests, operationErrorCase{name: code, status: http.StatusServiceUnavailable,
+			body: `{"error":"screenshot stage failed","code":"` + code + `","retryable":true}`,
+			code: code, retryable: true, cause: ErrUnavailable})
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

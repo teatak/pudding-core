@@ -720,6 +720,8 @@ func bridgeHTTPError(resp *http.Response) error {
 		cause = ErrTabNotFound
 	case code == "browser_webview_not_ready" || code == "cdp_detached" || (code == "" && resp.StatusCode == http.StatusServiceUnavailable):
 		cause = ErrUnavailable
+	case code == "browser_screenshot_prepare_timeout" || code == "browser_screenshot_prepare_failed" || code == "browser_screenshot_capture_failed":
+		cause = ErrUnavailable
 	case code == "browser_tab_required" || (code == "" && resp.StatusCode == http.StatusBadRequest && strings.Contains(payload.Error, "tab id")):
 		cause = ErrTabRequired
 	}
