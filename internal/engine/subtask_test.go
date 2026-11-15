@@ -309,6 +309,9 @@ func TestCollaborationBackgroundProcessAllowsProjectWork(t *testing.T) {
 			old, next = "root edit", "peer edit"
 		}
 		patch.Args, _ = json.Marshal(map[string]any{"scope": "project", "files": []map[string]any{{"path": "notes.txt", "action": "edit", "hunks": []map[string]any{{"old_lines": []string{old}, "new_lines": []string{next}}}}}})
+		if _, err := runner.ApprovalDetails(context.Background(), patch); err != nil {
+			t.Fatalf("prepare %s edit: %v", sessionID, err)
+		}
 		if result := collaborationResourceCall(t, eng, patch); !result.Ok {
 			t.Fatalf("%s edit while background process is running: %s", sessionID, result.Content)
 		}
@@ -397,7 +400,10 @@ func TestCollaborationYieldedForegroundRetainsProjectLease(t *testing.T) {
 	}
 	patch := call
 	patch.SessionID, patch.TurnID, patch.CallID, patch.Name = "peer", "peer_turn", "peer_patch", tool.FilePatch
-	patch.Args = json.RawMessage(`{"scope":"project","files":[{"path":"notes.txt","action":"edit","hunks":[{"old_lines":["command"],"new_lines":["after"]}]}]}`)
+	patch.Args = json.RawMessage(`{"scope":"project","files":[{"path":"notes.txt","action":"edit","hunks":[{"old_lines":["before"],"new_lines":["blocked"]}]}]}`)
+	if _, err := runner.ApprovalDetails(ctx, patch); err != nil {
+		t.Fatalf("prepare competing edit: %v", err)
+	}
 	waitCtx, waitCancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
 	blocked := eng.callTrackedTool(waitCtx, patch.SessionID, patch.TurnID, store.ModeCode, patch)
 	waitCancel()
@@ -435,6 +441,10 @@ func TestCollaborationYieldedForegroundRetainsProjectLease(t *testing.T) {
 	changes, err := eng.turnFiles.Finish(call.TurnID)
 	if err != nil || len(changes) != 1 || changes[0].OldContent != "before\n" || changes[0].NewContent != "command\n" || changes[0].Origin != store.FileChangeOriginCommandObserved {
 		t.Fatalf("yielded foreground mutation baseline was not completed: %+v (%v)", changes, err)
+	}
+	patch.Args = json.RawMessage(`{"scope":"project","files":[{"path":"notes.txt","action":"edit","hunks":[{"old_lines":["command"],"new_lines":["after"]}]}]}`)
+	if _, err := runner.ApprovalDetails(ctx, patch); err != nil {
+		t.Fatalf("prepare edit after foreground completion: %v", err)
 	}
 	if result := collaborationResourceCall(t, eng, patch); !result.Ok {
 		t.Fatalf("project lease was not released after foreground completion: %s", result.Content)
