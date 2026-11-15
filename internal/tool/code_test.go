@@ -664,6 +664,29 @@ func TestTypeScriptSymbolsOpenSeedDocumentBeforeWorkspaceQuery(t *testing.T) {
 	}
 }
 
+func TestCodeSymbolPathKey(t *testing.T) {
+	for _, tc := range []struct {
+		name, goos, walked, member string
+		equal                      bool
+	}{
+		{"windows_drive_case", "windows", `C:\Repo\src\App.ts`, `c:\Repo\src\App.ts`, true},
+		{"windows_path_case", "windows", `C:\Repo\src\App.ts`, `C:\REPO\SRC\APP.TS`, true},
+		{"windows_separators", "windows", `C:\Repo\src\App.ts`, `c:/repo/src/app.ts`, true},
+		{"windows_clean_path", "windows", `C:\Repo\src\App.ts`, `c:/repo/src/../src/APP.ts`, true},
+		{"windows_unc", "windows", `\\Server\Share\src\App.ts`, `//server/share/SRC/app.ts`, true},
+		{"different_files", "windows", `C:\Repo\src\App.ts`, `c:/repo/src/other.ts`, false},
+		{"posix_case_sensitive", "linux", "/repo/src/App.ts", "/repo/src/app.ts", false},
+		{"posix_clean_path", "linux", "/repo/src/App.ts", "/repo/src/../src/App.ts", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			covered := map[string]bool{codeSymbolPathKey(tc.member, tc.goos): true}
+			if got := covered[codeSymbolPathKey(tc.walked, tc.goos)]; got != tc.equal {
+				t.Fatalf("walked=%q member=%q coverage=%v, want %v", tc.walked, tc.member, got, tc.equal)
+			}
+		})
+	}
+}
+
 func TestTypeScriptSymbolsBoundProjectDiscovery(t *testing.T) {
 	for _, shared := range []bool{false, true} {
 		t.Run(fmt.Sprintf("shared_project_%v", shared), func(t *testing.T) {
@@ -676,6 +699,11 @@ func TestTypeScriptSymbolsBoundProjectDiscovery(t *testing.T) {
 				canonical, err := filepath.EvalSymlinks(path)
 				if err != nil {
 					t.Fatal(err)
+				}
+				if runtime.GOOS == "windows" {
+					// A single project with >32 files must still use one seed when
+					// tsserver spells every member differently from WalkDir.
+					canonical = strings.ToUpper(filepath.ToSlash(canonical))
 				}
 				members = append(members, canonical)
 			}

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"time"
@@ -220,7 +221,8 @@ func (r *BuiltinRunner) syncCodeSymbolSeeds(ctx context.Context, target resolved
 			return filepath.SkipAll
 		}
 		language, documentID := codeLanguageForPath(path)
-		if language != target.language || covered[path] {
+		pathKey := codeSymbolPathKey(path, runtime.GOOS)
+		if language != target.language || covered[pathKey] {
 			return nil
 		}
 		if seedCount >= maxCodeBootstrapProjects {
@@ -251,9 +253,9 @@ func (r *BuiltinRunner) syncCodeSymbolSeeds(ctx context.Context, target resolved
 		if !response.Success {
 			return fmt.Errorf("TypeScript projectInfo failed: %s", response.Message)
 		}
-		covered[path] = true
+		covered[pathKey] = true
 		for _, member := range response.Body.FileNames {
-			covered[filepath.Clean(member)] = true
+			covered[codeSymbolPathKey(member, runtime.GOOS)] = true
 		}
 		return nil
 	})
@@ -264,6 +266,17 @@ func (r *BuiltinRunner) syncCodeSymbolSeeds(ctx context.Context, target resolved
 		return false, errors.New("language_root_not_found: no TypeScript or JavaScript source file found in the language root")
 	}
 	return truncated, nil
+}
+
+// Only the coverage key is folded; filesystem reads retain the original path.
+// Traversal already uses a resolved root and skips symlinks. tsserver may return
+// Windows members with different casing or separators, so normalize both sides.
+func codeSymbolPathKey(name, goos string) string {
+	if goos == "windows" {
+		name = strings.ReplaceAll(name, `\`, "/")
+		return strings.ToLower(filepath.ToSlash(filepath.Clean(name)))
+	}
+	return filepath.Clean(name)
 }
 
 func (r *BuiltinRunner) codeDefinition(ctx context.Context, call Call) Result {
