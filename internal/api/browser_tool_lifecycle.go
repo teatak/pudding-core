@@ -2,39 +2,48 @@ package api
 
 import (
 	"context"
+	"maps"
 	"sync"
 
 	"github.com/teatak/pudding-core/internal/browser"
 )
 
 type browserOpenContextKey struct{}
+type browserToolOpenWait struct {
+	count   int
+	changed chan struct{}
+}
 type browserOpenVersion struct {
 	sessionID string
 	version   uint64
+	tabs      map[string]uint64
 }
 
 func (s *Server) BeginBrowserOpen(ctx context.Context, sessionID string) (context.Context, func()) {
 	s.browserMu.Lock()
 	if s.browserToolOpens == nil {
-		s.browserToolOpens = map[string]map[chan struct{}]struct{}{}
+		s.browserToolOpens = map[string]*browserToolOpenWait{}
 	}
 	if s.browserToolOpens[sessionID] == nil {
-		s.browserToolOpens[sessionID] = map[chan struct{}]struct{}{}
+		s.browserToolOpens[sessionID] = &browserToolOpenWait{changed: make(chan struct{})}
 	}
-	done := make(chan struct{})
-	s.browserToolOpens[sessionID][done] = struct{}{}
+	wait := s.browserToolOpens[sessionID]
+	wait.count++
 	version := s.browserSessionVersions[sessionID]
+	tabs := maps.Clone(s.browserTabVersions[sessionID])
 	s.browserMu.Unlock()
 	var once sync.Once
-	return context.WithValue(ctx, browserOpenContextKey{}, browserOpenVersion{sessionID, version}), func() {
+	return context.WithValue(ctx, browserOpenContextKey{}, browserOpenVersion{sessionID, version, tabs}), func() {
 		once.Do(func() {
 			s.browserMu.Lock()
 			defer s.browserMu.Unlock()
-			delete(s.browserToolOpens[sessionID], done)
-			if len(s.browserToolOpens[sessionID]) == 0 {
+			wait.count--
+			close(wait.changed)
+			if wait.count == 0 {
 				delete(s.browserToolOpens, sessionID)
+			} else {
+				wait.changed = make(chan struct{})
 			}
-			close(done)
 		})
 	}
 }
@@ -46,9 +55,8 @@ func (s *Server) awaitBrowserToolOpen(ctx context.Context, sessionID, tabID stri
 		s.browserMu.Lock()
 		var pending chan struct{}
 		if !s.browserTabAllowedLocked(sessionID, tabID) {
-			for done := range s.browserToolOpens[sessionID] {
-				pending = done
-				break
+			if wait := s.browserToolOpens[sessionID]; wait != nil {
+				pending = wait.changed
 			}
 		}
 		s.browserMu.Unlock()
@@ -63,11 +71,22 @@ func (s *Server) awaitBrowserToolOpen(ctx context.Context, sessionID, tabID stri
 	}
 }
 
+func (s *Server) checkBrowserTabAccess(ctx context.Context, sessionID, tabID string) error {
+	if err := s.awaitBrowserToolOpen(ctx, sessionID, tabID); err != nil {
+		return err
+	}
+	if !s.browserTabAllowed(sessionID, tabID) {
+		return browser.ErrTabNotFound
+	}
+	return nil
+}
+
 func (s *Server) BrowserTabOpened(ctx context.Context, sessionID string, tab browser.TabSnapshot) error {
 	s.browserMu.Lock()
 	defer s.browserMu.Unlock()
 	version, ok := ctx.Value(browserOpenContextKey{}).(browserOpenVersion)
-	if !ok || version.sessionID != sessionID || version.version != s.browserSessionVersions[sessionID] {
+	if !ok || version.sessionID != sessionID || version.version != s.browserSessionVersions[sessionID] ||
+		version.tabs[tab.ID] != s.browserTabVersions[sessionID][tab.ID] {
 		return browser.ErrTabNotFound
 	}
 	s.allowBrowserTabInGateLocked(sessionID, tab.ID)

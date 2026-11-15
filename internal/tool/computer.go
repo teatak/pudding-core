@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/teatak/pudding-core/internal/attachment"
 	"github.com/teatak/pudding-core/internal/computer"
@@ -424,9 +425,11 @@ func (r *BuiltinRunner) releaseComputerSession(sessionID string) {
 	if r.computer == nil || strings.TrimSpace(sessionID) == "" {
 		return
 	}
-	// The manager budgets each quit after acquiring the write slot. Waiting for
-	// an in-flight action must not consume an application's cleanup budget.
-	if err := r.computer.ReleaseSession(context.Background(), sessionID); err != nil {
+	// Bound the foreground wait, not the individual quits. If the write slot
+	// stays busy, the manager retains cleanup in its background queue.
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := r.computer.ReleaseSession(ctx, sessionID); err != nil {
 		slog.Warn("tool: Computer Use session cleanup incomplete", "sessionID", sessionID, "err", err)
 	}
 }

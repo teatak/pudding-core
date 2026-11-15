@@ -1628,6 +1628,7 @@ type fakeBrowserService struct {
 	releaseTabHook           func()
 	recoverErrors            map[string]error
 	recoverHook              func()
+	openHook                 func(browser.TabSnapshot)
 	tabs                     map[string]browser.TabSnapshot
 	recoverableTabs          map[string]browser.TabSnapshot
 	processMode              string
@@ -1836,6 +1837,9 @@ func (f *fakeBrowserService) Open(_ context.Context, sessionID, tabID, rawURL st
 	tab.URL = rawURL
 	tab.Mode = f.ProcessMode(context.Background(), sessionID)
 	f.tabs[tab.ID] = tab
+	if f.openHook != nil {
+		f.openHook(tab)
+	}
 	return tab, nil
 }
 

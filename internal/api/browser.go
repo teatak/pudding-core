@@ -256,8 +256,8 @@ func (s *Server) getBrowserTab(c *cart.Context) error {
 		return nil
 	}
 	tabID, _ := c.Param("tabID")
-	if !s.browserTabAllowed(sessionID, tabID) {
-		return s.browserError(c, browser.ErrTabNotFound)
+	if err := s.checkBrowserTabAccess(c.Request.Context(), sessionID, tabID); err != nil {
+		return s.browserError(c, err)
 	}
 	tab, err := s.browser.GetTab(c.Request.Context(), sessionID, tabID)
 	if err != nil {
@@ -273,8 +273,8 @@ func (s *Server) recoverBrowserTab(c *cart.Context) error {
 		return nil
 	}
 	tabID, _ := c.Param("tabID")
-	if !s.browserTabAllowed(sessionID, tabID) {
-		return s.browserError(c, browser.ErrTabNotFound)
+	if err := s.checkBrowserTabAccess(c.Request.Context(), sessionID, tabID); err != nil {
+		return s.browserError(c, err)
 	}
 	tab, err := s.browser.GetTab(c.Request.Context(), sessionID, tabID)
 	if err != nil {
@@ -350,6 +350,9 @@ func (s *Server) syncBrowserTab(c *cart.Context) error {
 		return nil
 	}
 	tabID, _ := c.Param("tabID")
+	if err := s.awaitBrowserToolOpen(c.Request.Context(), sessionID, tabID); err != nil {
+		return s.browserError(c, err)
+	}
 	version, allowed := s.browserTabSyncVersion(sessionID, tabID)
 	if !allowed {
 		return s.browserError(c, browser.ErrTabNotFound)
@@ -783,8 +786,8 @@ func (s *Server) backBrowserTab(c *cart.Context) error {
 		return nil
 	}
 	tabID, _ := c.Param("tabID")
-	if !s.browserTabAllowed(sessionID, tabID) {
-		return s.browserError(c, browser.ErrTabNotFound)
+	if err := s.checkBrowserTabAccess(c.Request.Context(), sessionID, tabID); err != nil {
+		return s.browserError(c, err)
 	}
 	tab, err := s.browser.Back(c.Request.Context(), sessionID, tabID)
 	if err != nil {
@@ -803,8 +806,8 @@ func (s *Server) forwardBrowserTab(c *cart.Context) error {
 		return nil
 	}
 	tabID, _ := c.Param("tabID")
-	if !s.browserTabAllowed(sessionID, tabID) {
-		return s.browserError(c, browser.ErrTabNotFound)
+	if err := s.checkBrowserTabAccess(c.Request.Context(), sessionID, tabID); err != nil {
+		return s.browserError(c, err)
 	}
 	tab, err := s.browser.Forward(c.Request.Context(), sessionID, tabID)
 	if err != nil {
@@ -823,8 +826,8 @@ func (s *Server) reloadBrowserTab(c *cart.Context) error {
 		return nil
 	}
 	tabID, _ := c.Param("tabID")
-	if !s.browserTabAllowed(sessionID, tabID) {
-		return s.browserError(c, browser.ErrTabNotFound)
+	if err := s.checkBrowserTabAccess(c.Request.Context(), sessionID, tabID); err != nil {
+		return s.browserError(c, err)
 	}
 	tab, err := s.browser.Reload(c.Request.Context(), sessionID, tabID)
 	if err != nil {
@@ -843,8 +846,8 @@ func (s *Server) observeBrowserTab(c *cart.Context) error {
 		return nil
 	}
 	tabID, _ := c.Param("tabID")
-	if !s.browserTabAllowed(sessionID, tabID) {
-		return s.browserError(c, browser.ErrTabNotFound)
+	if err := s.checkBrowserTabAccess(c.Request.Context(), sessionID, tabID); err != nil {
+		return s.browserError(c, err)
 	}
 	var req browserObserveReq
 	if err := decode(c, &req); err != nil && !errors.Is(err, io.EOF) {
@@ -871,8 +874,8 @@ func (s *Server) screenshotBrowserTab(c *cart.Context) error {
 		return nil
 	}
 	tabID, _ := c.Param("tabID")
-	if !s.browserTabAllowed(sessionID, tabID) {
-		return s.browserError(c, browser.ErrTabNotFound)
+	if err := s.checkBrowserTabAccess(c.Request.Context(), sessionID, tabID); err != nil {
+		return s.browserError(c, err)
 	}
 	var req browserScreenshotReq
 	if err := decode(c, &req); err != nil && !errors.Is(err, io.EOF) {
@@ -896,8 +899,8 @@ func (s *Server) clickBrowserTab(c *cart.Context) error {
 		return nil
 	}
 	tabID, _ := c.Param("tabID")
-	if !s.browserTabAllowed(sessionID, tabID) {
-		return s.browserError(c, browser.ErrTabNotFound)
+	if err := s.checkBrowserTabAccess(c.Request.Context(), sessionID, tabID); err != nil {
+		return s.browserError(c, err)
 	}
 	var req browser.ClickInput
 	if err := decode(c, &req); err != nil && !errors.Is(err, io.EOF) {
@@ -929,8 +932,8 @@ func (s *Server) typeBrowserTab(c *cart.Context) error {
 		return nil
 	}
 	tabID, _ := c.Param("tabID")
-	if !s.browserTabAllowed(sessionID, tabID) {
-		return s.browserError(c, browser.ErrTabNotFound)
+	if err := s.checkBrowserTabAccess(c.Request.Context(), sessionID, tabID); err != nil {
+		return s.browserError(c, err)
 	}
 	var req browser.TypeInput
 	if err := decode(c, &req); err != nil {
@@ -956,8 +959,8 @@ func (s *Server) selectBrowserTab(c *cart.Context) error {
 		return nil
 	}
 	tabID, _ := c.Param("tabID")
-	if !s.browserTabAllowed(sessionID, tabID) {
-		return s.browserError(c, browser.ErrTabNotFound)
+	if err := s.checkBrowserTabAccess(c.Request.Context(), sessionID, tabID); err != nil {
+		return s.browserError(c, err)
 	}
 	var req browser.SelectInput
 	if err := decode(c, &req); err != nil {
@@ -983,8 +986,8 @@ func (s *Server) scrollBrowserTab(c *cart.Context) error {
 		return nil
 	}
 	tabID, _ := c.Param("tabID")
-	if !s.browserTabAllowed(sessionID, tabID) {
-		return s.browserError(c, browser.ErrTabNotFound)
+	if err := s.checkBrowserTabAccess(c.Request.Context(), sessionID, tabID); err != nil {
+		return s.browserError(c, err)
 	}
 	var req browser.ScrollInput
 	if err := decode(c, &req); err != nil && !errors.Is(err, io.EOF) {
@@ -1042,12 +1045,6 @@ func (s *Server) browserSession(c *cart.Context) (string, bool) {
 	if _, err := s.store.GetSession(c.Request.Context(), sessionID); err != nil {
 		_ = s.fail(c, err)
 		return "", false
-	}
-	if tabID, _ := c.Param("tabID"); tabID != "" {
-		if err := s.awaitBrowserToolOpen(c.Request.Context(), sessionID, tabID); err != nil {
-			_ = s.browserError(c, err)
-			return "", false
-		}
 	}
 	return sessionID, true
 }
