@@ -628,8 +628,13 @@ func (r *BuiltinRunner) browserResolveTabID(ctx context.Context, sessionID, tabI
 	return tab.ID, r.syncBrowserState(ctx, sessionID, tab)
 }
 
-func (r *BuiltinRunner) browserTabs(ctx context.Context, sessionID string) ([]browser.TabSnapshot, error) {
-	tabs, err := r.browser.ListTabs(ctx, sessionID)
+func (r *BuiltinRunner) browserTabs(ctx context.Context, sessionID string) (tabs []browser.TabSnapshot, err error) {
+	defer func() {
+		if err == nil && r.browserLifecycle != nil {
+			tabs = r.browserLifecycle.FilterBrowserTabs(sessionID, tabs)
+		}
+	}()
+	tabs, err = r.browser.ListTabs(ctx, sessionID)
 	if err != nil || r.browserState == nil {
 		return tabs, err
 	}

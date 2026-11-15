@@ -122,7 +122,7 @@ func (s *Server) getBrowserState(c *cart.Context) error {
 	live := map[string]bool{}
 	if s.browser != nil {
 		var err error
-		tabs, err = s.browser.ListTabs(c.Request.Context(), sessionID)
+		tabs, err = s.listLiveBrowserTabsAfterToolOpens(c.Request.Context(), sessionID)
 		if err != nil {
 			return s.browserError(c, err)
 		}
@@ -214,7 +214,7 @@ func (s *Server) listBrowserTabs(c *cart.Context) error {
 	if !ok {
 		return nil
 	}
-	tabs, err := s.browser.ListTabs(c.Request.Context(), sessionID)
+	tabs, err := s.listLiveBrowserTabsAfterToolOpens(c.Request.Context(), sessionID)
 	if err != nil {
 		return s.browserError(c, err)
 	}

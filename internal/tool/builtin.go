@@ -139,6 +139,7 @@ type BrowserLifecycle interface {
 	BrowserTabUpdated(context.Context, string, browser.TabSnapshot) error
 	BrowserTabClosed(context.Context, string, string) error
 	BrowserSessionClosed(context.Context, string, []browser.TabSnapshot) error
+	FilterBrowserTabs(string, []browser.TabSnapshot) []browser.TabSnapshot
 }
 
 type StudioItemStore interface {

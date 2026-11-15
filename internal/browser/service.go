@@ -24,6 +24,8 @@ type Service interface {
 	Recover(ctx context.Context, sessionID string, hint RecoverHint) (TabSnapshot, error)
 	CloseSessionBrowser(ctx context.Context, sessionID string) error
 	ReleaseTab(ctx context.Context, sessionID, tabID string) error
+	// DiscardOpen removes only the exact rejected open, never a later reuse of its tab ID.
+	DiscardOpen(ctx context.Context, sessionID string, tab TabSnapshot) error
 	CloseWindow(ctx context.Context, sessionID, tabID, windowID string) error
 	ReleaseSession(ctx context.Context, sessionID string) error
 	Open(ctx context.Context, sessionID, tabID, rawURL string) (TabSnapshot, error)
@@ -55,6 +57,7 @@ type FileAccessRevoker interface {
 }
 
 type TabSnapshot struct {
+	OpenID       string    `json:"-"` // Internal open ownership; never persisted or exposed to clients.
 	ID           string    `json:"id"`
 	SessionID    string    `json:"sessionID"`
 	TargetID     string    `json:"targetID,omitempty"`

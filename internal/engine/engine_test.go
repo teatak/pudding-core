@@ -4662,6 +4662,10 @@ func (b *engineTestBrowser) ReleaseTab(context.Context, string, string) error {
 	return nil
 }
 
+func (b *engineTestBrowser) DiscardOpen(context.Context, string, browser.TabSnapshot) error {
+	return nil
+}
+
 func (b *engineTestBrowser) CloseSessionBrowser(context.Context, string) error {
 	return nil
 }

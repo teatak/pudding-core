@@ -31,6 +31,7 @@ type ElectronBridgeService struct {
 }
 
 type electronBridgeRequest struct {
+	OpenID    string `json:"openID,omitempty"`
 	SessionID string `json:"sessionID"`
 	TabID     string `json:"tabID,omitempty"`
 	URL       string `json:"url,omitempty"`
@@ -249,8 +250,10 @@ func (s *ElectronBridgeService) OpenNewTab(ctx context.Context, sessionID, rawUR
 		return TabSnapshot{}, err
 	}
 	tabID := newID("tab")
+	openID := newID("open")
 	var snapshot electronBridgeSnapshot
 	if err := s.post(ctx, "/browser/tabs/open", electronBridgeRequest{
+		OpenID:    openID,
 		SessionID: sessionID,
 		TabID:     tabID,
 		URL:       authorizedURL.URL,
@@ -261,7 +264,9 @@ func (s *ElectronBridgeService) OpenNewTab(ctx context.Context, sessionID, rawUR
 		_ = s.post(cleanupCtx, "/browser/tabs/close", electronBridgeRequest{SessionID: sessionID, TabID: tabID}, nil)
 		return TabSnapshot{}, err
 	}
-	return snapshot.tab(), nil
+	tab := snapshot.tab()
+	tab.OpenID = openID
+	return tab, nil
 }
 
 func (s *ElectronBridgeService) ListTabs(ctx context.Context, sessionID string) ([]TabSnapshot, error) {
@@ -347,6 +352,15 @@ func (s *ElectronBridgeService) ReleaseTab(ctx context.Context, sessionID, tabID
 	return s.post(ctx, "/browser/tabs/close", electronBridgeRequest{SessionID: sessionID, TabID: tabID}, nil)
 }
 
+func (s *ElectronBridgeService) DiscardOpen(ctx context.Context, sessionID string, tab TabSnapshot) error {
+	if tab.ID == "" || tab.OpenID == "" {
+		return errors.New("cannot discard browser open without its identity")
+	}
+	return s.post(ctx, "/browser/tabs/discard-open", electronBridgeRequest{
+		SessionID: sessionID, TabID: tab.ID, OpenID: tab.OpenID,
+	}, nil)
+}
+
 func (s *ElectronBridgeService) ReleaseSession(ctx context.Context, sessionID string) error {
 	return s.post(ctx, "/browser/session/release", electronBridgeRequest{SessionID: sessionID}, nil)
 }
@@ -360,8 +374,10 @@ func (s *ElectronBridgeService) Open(ctx context.Context, sessionID, tabID, rawU
 	if err != nil {
 		return TabSnapshot{}, err
 	}
+	openID := newID("open")
 	var snapshot electronBridgeSnapshot
 	if err := s.post(ctx, "/browser/tabs/open", electronBridgeRequest{
+		OpenID:    openID,
 		SessionID: sessionID,
 		TabID:     tabID,
 		URL:       authorizedURL.URL,
@@ -369,7 +385,9 @@ func (s *ElectronBridgeService) Open(ctx context.Context, sessionID, tabID, rawU
 	}, &snapshot); err != nil {
 		return TabSnapshot{}, err
 	}
-	return snapshot.tab(), nil
+	tab := snapshot.tab()
+	tab.OpenID = openID
+	return tab, nil
 }
 
 func (s *ElectronBridgeService) Back(ctx context.Context, sessionID, tabID string) (TabSnapshot, error) {

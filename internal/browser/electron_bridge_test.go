@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -147,8 +148,60 @@ func TestElectronBridgeServiceOpenNewTabUsesSingleOpenRequest(t *testing.T) {
 	if opened.SessionID != "sess_new" || opened.TabID == "" || opened.URL != "https://example.com" {
 		t.Fatalf("unexpected open request: %+v", opened)
 	}
-	if tab.ID != opened.TabID || tab.URL != opened.URL {
+	if tab.ID != opened.TabID || tab.URL != opened.URL || tab.OpenID == "" || tab.OpenID != opened.OpenID {
 		t.Fatalf("unexpected opened tab: %+v", tab)
+	}
+}
+
+func TestElectronBridgeOpenRollbackCarriesPrivateIdentity(t *testing.T) {
+	for _, newTab := range []bool{false, true} {
+		t.Run(strconv.FormatBool(newTab), func(t *testing.T) {
+			var opened, discarded electronBridgeRequest
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/browser/tabs/open":
+					if err := json.NewDecoder(r.Body).Decode(&opened); err != nil {
+						t.Error(err)
+					}
+					writeElectronBridgeTestJSON(w, electronBridgeSnapshot{SessionID: opened.SessionID, TabID: opened.TabID, URL: opened.URL})
+				case "/browser/tabs/discard-open":
+					if err := json.NewDecoder(r.Body).Decode(&discarded); err != nil {
+						t.Error(err)
+					}
+					writeElectronBridgeTestJSON(w, map[string]bool{"discarded": true})
+				default:
+					t.Errorf("unexpected request: %s", r.URL.Path)
+					w.WriteHeader(http.StatusNotFound)
+				}
+			}))
+			defer server.Close()
+			service, err := NewElectronBridgeService(ElectronBridgeConfig{URL: server.URL, Token: "token"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var tab TabSnapshot
+			if newTab {
+				tab, err = service.OpenNewTab(context.Background(), "session", "https://example.com/")
+			} else {
+				tab, err = service.Open(context.Background(), "session", "tab", "https://example.com/")
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := service.DiscardOpen(context.Background(), "session", tab); err != nil {
+				t.Fatal(err)
+			}
+			if opened.OpenID == "" || discarded.OpenID != opened.OpenID || discarded.SessionID != opened.SessionID || discarded.TabID != opened.TabID {
+				t.Fatalf("rollback identity lost: open=%+v discard=%+v", opened, discarded)
+			}
+			data, err := json.Marshal(tab)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.Contains(string(data), opened.OpenID) {
+				t.Fatal("internal open identity leaked into public snapshot")
+			}
+		})
 	}
 }
 

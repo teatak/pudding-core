@@ -2,8 +2,11 @@ package api
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"maps"
 	"sync"
+	"time"
 
 	"github.com/teatak/pudding-core/internal/browser"
 )
@@ -83,14 +86,57 @@ func (s *Server) checkBrowserTabAccess(ctx context.Context, sessionID, tabID str
 
 func (s *Server) BrowserTabOpened(ctx context.Context, sessionID string, tab browser.TabSnapshot) error {
 	s.browserMu.Lock()
-	defer s.browserMu.Unlock()
 	version, ok := ctx.Value(browserOpenContextKey{}).(browserOpenVersion)
 	if !ok || version.sessionID != sessionID || version.version != s.browserSessionVersions[sessionID] ||
 		version.tabs[tab.ID] != s.browserTabVersions[sessionID][tab.ID] {
+		// A newer accepted open (or a cancelled close) may already own this ID.
+		// Do not tombstone it or close it by ID. The host atomically checks the
+		// rejected open's identity, including when a newer open is still pending.
+		discard := !s.browserTabAllowedLocked(sessionID, tab.ID)
+		s.browserMu.Unlock()
+		if discard && s.browser != nil {
+			cleanupCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			if err := s.browser.DiscardOpen(cleanupCtx, sessionID, tab); err != nil {
+				return errors.Join(browser.ErrTabNotFound, fmt.Errorf("discard rejected browser open: %w", err))
+			}
+		}
 		return browser.ErrTabNotFound
 	}
+	defer s.browserMu.Unlock()
 	s.allowBrowserTabInGateLocked(sessionID, tab.ID)
 	return s.syncBrowserStateLocked(ctx, sessionID, tab)
+}
+
+func (s *Server) FilterBrowserTabs(sessionID string, tabs []browser.TabSnapshot) []browser.TabSnapshot {
+	return s.filterBrowserTabs(sessionID, tabs)
+}
+
+// Summary reads can observe a reserved native slot before its tool open commits.
+// Wait only for those unpublished live IDs, never for already closed tabs.
+func (s *Server) listLiveBrowserTabsAfterToolOpens(ctx context.Context, sessionID string) ([]browser.TabSnapshot, error) {
+	tabs, err := s.browser.ListTabs(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	waited := false
+	for _, tab := range tabs {
+		s.browserMu.Lock()
+		_, closed := s.browserClosedTabs[sessionID][tab.ID]
+		wait := tab.SessionID == sessionID && !closed && s.browserToolOpens[sessionID] != nil && !s.browserTabAllowedLocked(sessionID, tab.ID)
+		s.browserMu.Unlock()
+		if wait {
+			if err := s.awaitBrowserToolOpen(ctx, sessionID, tab.ID); err != nil {
+				return nil, err
+			}
+			waited = true
+		}
+	}
+	if waited {
+		// The pre-commit snapshot may still have a blank URL or a pending renderer.
+		return s.browser.ListTabs(ctx, sessionID)
+	}
+	return tabs, nil
 }
 
 func (s *Server) BrowserTabUpdated(ctx context.Context, sessionID string, tab browser.TabSnapshot) error {

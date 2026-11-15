@@ -1629,6 +1629,9 @@ type fakeBrowserService struct {
 	recoverErrors            map[string]error
 	recoverHook              func()
 	openHook                 func(browser.TabSnapshot)
+	beforeOpenHook           func()
+	listTabsHook             func()
+	discardOpenHook          func(context.Context, browser.TabSnapshot) error
 	tabs                     map[string]browser.TabSnapshot
 	recoverableTabs          map[string]browser.TabSnapshot
 	processMode              string
@@ -1671,11 +1674,18 @@ func (f *fakeBrowserService) CreateTab(_ context.Context, sessionID string) (bro
 }
 
 func (f *fakeBrowserService) OpenNewTab(_ context.Context, sessionID, rawURL string) (browser.TabSnapshot, error) {
+	if f.beforeOpenHook != nil {
+		f.beforeOpenHook()
+	}
 	tab := f.create(sessionID, "")
+	tab.OpenID = time.Now().String()
 	tab.URL = rawURL
 	tab.Title = rawURL
 	tab.UpdatedAt = time.Now().UTC()
 	f.tabs[tab.ID] = tab
+	if f.openHook != nil {
+		f.openHook(tab)
+	}
 	return tab, nil
 }
 
@@ -1705,6 +1715,9 @@ func (f *fakeBrowserService) ListTabs(_ context.Context, sessionID string) ([]br
 			tab.Mode = f.ProcessMode(context.Background(), sessionID)
 			out = append(out, tab)
 		}
+	}
+	if f.listTabsHook != nil {
+		f.listTabsHook()
 	}
 	return out, nil
 }
@@ -1795,6 +1808,18 @@ func (f *fakeBrowserService) ReleaseTab(_ context.Context, sessionID, tabID stri
 	return nil
 }
 
+func (f *fakeBrowserService) DiscardOpen(ctx context.Context, sessionID string, tab browser.TabSnapshot) error {
+	if f.discardOpenHook != nil {
+		if err := f.discardOpenHook(ctx, tab); err != nil {
+			return err
+		}
+	}
+	if current, ok := f.tabs[tab.ID]; ok && current.SessionID == sessionID && tab.OpenID != "" && current.OpenID == tab.OpenID {
+		delete(f.tabs, tab.ID)
+	}
+	return nil
+}
+
 func (f *fakeBrowserService) CloseSessionBrowser(_ context.Context, sessionID string) error {
 	f.closedBrowserSession = sessionID
 	if f.keepTabsOnClose {
@@ -1826,6 +1851,9 @@ func (f *fakeBrowserService) ReleaseSession(_ context.Context, sessionID string)
 }
 
 func (f *fakeBrowserService) Open(_ context.Context, sessionID, tabID, rawURL string) (browser.TabSnapshot, error) {
+	if f.beforeOpenHook != nil {
+		f.beforeOpenHook()
+	}
 	f.openSession = sessionID
 	tab, ok := f.tabs[tabID]
 	if !ok {
@@ -1835,6 +1863,7 @@ func (f *fakeBrowserService) Open(_ context.Context, sessionID, tabID, rawURL st
 		return browser.TabSnapshot{}, browser.ErrTabNotFound
 	}
 	tab.URL = rawURL
+	tab.OpenID = time.Now().String()
 	tab.Mode = f.ProcessMode(context.Background(), sessionID)
 	f.tabs[tab.ID] = tab
 	if f.openHook != nil {

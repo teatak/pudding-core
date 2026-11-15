@@ -360,6 +360,15 @@ func (f *fakeToolBrowser) ReleaseTab(_ context.Context, _ string, tabID string) 
 	return nil
 }
 
+func (f *fakeToolBrowser) DiscardOpen(ctx context.Context, sessionID string, tab browser.TabSnapshot) error {
+	for _, current := range f.tabs {
+		if current.ID == tab.ID && current.OpenID == tab.OpenID && tab.OpenID != "" {
+			return f.ReleaseTab(ctx, sessionID, tab.ID)
+		}
+	}
+	return nil
+}
+
 func (f *fakeToolBrowser) CloseSessionBrowser(_ context.Context, sessionID string) error {
 	f.closedSession = sessionID
 	return nil
