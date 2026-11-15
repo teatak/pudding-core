@@ -1,8 +1,11 @@
 package tool
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -299,6 +302,7 @@ func TestComputerActionExamplesMatchTheRuntimeContract(t *testing.T) {
 type fakeComputerController struct {
 	lastSession string
 	released    string
+	releaseErr  error
 	acted       bool
 	actions     []computer.ActionInput
 	foreground  bool
@@ -366,7 +370,25 @@ func (f *fakeComputerController) Act(_ context.Context, sessionID, appID string,
 
 func (f *fakeComputerController) ReleaseSession(_ context.Context, sessionID string) error {
 	f.released = sessionID
-	return nil
+	return f.releaseErr
+}
+
+func TestComputerSessionCleanupFailureIsLogged(t *testing.T) {
+	var output bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&output, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+	failure := errors.New("release app com.example.App (PID 42): context deadline exceeded")
+	fake := &fakeComputerController{releaseErr: failure}
+	runner := NewBuiltinRunner(WithComputer(fake))
+	runner.releaseComputerSession("session_a")
+	var entry map[string]any
+	if err := json.Unmarshal(output.Bytes(), &entry); err != nil {
+		t.Fatalf("cleanup failure was not logged: %v output=%s", err, output.Bytes())
+	}
+	if entry["level"] != "WARN" || entry["sessionID"] != "session_a" || entry["err"] != failure.Error() {
+		t.Fatalf("missing cleanup diagnostics: %+v", entry)
+	}
 }
 
 func TestComputerToolsRouteExplicitSessionAndScreenshot(t *testing.T) {

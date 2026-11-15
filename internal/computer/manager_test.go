@@ -450,6 +450,286 @@ func TestManagerReleasesOwnedApplicationsWithNormalQuit(t *testing.T) {
 	assertOperationCode(t, err, "computer_launch_not_owned")
 }
 
+func TestManagerReleaseRevokesOwnershipEvenWhenWriteQueueTimesOut(t *testing.T) {
+	service := &fakeService{}
+	manager := NewManager(service)
+	launched, err := manager.UseApp(context.Background(), "session_a", "com.example.App", false, AppSelection{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	unlock := holdComputerWrite(t, manager)
+	defer unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+	err = manager.ReleaseSession(ctx, "session_a")
+	if !errors.Is(err, context.DeadlineExceeded) || !strings.Contains(err.Error(), "com.example.App") || !strings.Contains(err.Error(), "PID 42") {
+		t.Fatalf("release error = %v", err)
+	}
+	if _, ok := manager.OwnedLaunchAppID("session_a", *launched.LaunchID); ok || len(manager.launches) != 0 {
+		t.Fatal("timed-out release retained session ownership")
+	}
+	if len(service.quitRequests) != 0 {
+		t.Fatalf("cleanup bypassed the write queue: %+v", service.quitRequests)
+	}
+}
+
+func TestManagerReleaseStopsQueuedAppUse(t *testing.T) {
+	service := &fakeService{}
+	manager := NewManager(service)
+	unlock := holdComputerWrite(t, manager)
+	defer unlock()
+	ctx := &computerWriteWaitContext{Context: context.Background(), waiting: make(chan struct{})}
+	done := make(chan error, 1)
+	go func() {
+		_, err := manager.UseApp(ctx, "session_a", "com.example.App", false, AppSelection{})
+		done <- err
+	}()
+	awaitComputerLifecycle(t, ctx.waiting)
+	if err := manager.ReleaseSession(context.Background(), "session_a"); err != nil {
+		t.Fatal(err)
+	}
+	unlock()
+	err := awaitComputerLifecycle(t, done)
+	assertOperationCode(t, err, "computer_action_cancelled")
+	if failure := ErrorFailure(err); failure.Outcome != "not_started" || service.uses != 0 || len(manager.launches) != 0 {
+		t.Fatalf("queued app entry ran or retained state: failure=%+v uses=%d", failure, service.uses)
+	}
+}
+
+func TestManagerReleaseHandlesLateAppEntry(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		newlyLaunched bool
+		closed        bool
+	}{
+		{name: "new launch", newlyLaunched: true, closed: true},
+		{name: "already running", closed: true},
+		{name: "new launch needs attention", newlyLaunched: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			started, finish := make(chan struct{}), make(chan struct{})
+			var finishOnce sync.Once
+			resume := func() { finishOnce.Do(func() { close(finish) }) }
+			t.Cleanup(resume)
+			service := &computerLifecycleService{}
+			service.use = func(context.Context, string, string, bool, AppSelection) (NativeUse, error) {
+				close(started)
+				<-finish
+				return NativeUse{AppID: "com.example.App", Name: "Example", PID: 42, NewlyLaunched: tc.newlyLaunched, WindowStatus: WindowStatusNone}, nil
+			}
+			cleanupBudgetValid := false
+			service.quit = func(ctx context.Context, _ string, appID string, pid int32) (NativeQuit, error) {
+				deadline, ok := ctx.Deadline()
+				cleanupBudgetValid = ok && ctx.Err() == nil && time.Until(deadline) > 0 && time.Until(deadline) <= 2*time.Second
+				service.quitRequests = append(service.quitRequests, NativeQuit{AppID: appID, PID: pid})
+				return NativeQuit{AppID: appID, PID: pid, Closed: tc.closed}, nil
+			}
+			manager := NewManager(service)
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			done := make(chan error, 1)
+			go func() {
+				_, err := manager.UseApp(ctx, "session_a", "com.example.App", false, AppSelection{})
+				done <- err
+			}()
+			awaitComputerLifecycle(t, started)
+			if err := manager.ReleaseSession(context.Background(), "session_a"); err != nil {
+				t.Fatal(err)
+			}
+			cancel()
+			resume()
+			err := awaitComputerLifecycle(t, done)
+			assertOperationCode(t, err, "computer_action_cancelled")
+			if failure := ErrorFailure(err); failure.Outcome != "unknown" || len(manager.launches) != 0 {
+				t.Fatalf("late app entry revived ownership: %+v", failure)
+			}
+			if tc.newlyLaunched {
+				if len(service.quitRequests) != 1 || service.quitRequests[0].AppID != "com.example.App" || service.quitRequests[0].PID != 42 || !cleanupBudgetValid {
+					t.Fatalf("late cleanup = %+v budgetValid=%t", service.quitRequests, cleanupBudgetValid)
+				}
+				if !tc.closed && !strings.Contains(err.Error(), "user attention") {
+					t.Fatalf("cleanup refusal was hidden: %v", err)
+				}
+			} else if len(service.quitRequests) != 0 {
+				t.Fatalf("already-running app was quit: %+v", service.quitRequests)
+			}
+		})
+	}
+}
+
+func TestManagerReleaseDoesNotRepeatAnInFlightSuccessfulQuit(t *testing.T) {
+	started, finish := make(chan struct{}), make(chan struct{})
+	var finishOnce sync.Once
+	resume := func() { finishOnce.Do(func() { close(finish) }) }
+	t.Cleanup(resume)
+	service := &computerLifecycleService{}
+	service.quit = func(_ context.Context, _ string, appID string, pid int32) (NativeQuit, error) {
+		service.quitRequests = append(service.quitRequests, NativeQuit{AppID: appID, PID: pid})
+		if len(service.quitRequests) == 1 {
+			close(started)
+			<-finish
+		}
+		return NativeQuit{AppID: appID, PID: pid, Closed: true}, nil
+	}
+	manager := NewManager(service)
+	launched, err := manager.UseApp(context.Background(), "session_a", "com.example.App", false, AppSelection{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	quitDone := make(chan error, 1)
+	go func() {
+		_, err := manager.QuitApp(context.Background(), "session_a", *launched.LaunchID)
+		quitDone <- err
+	}()
+	awaitComputerLifecycle(t, started)
+	ctx := &computerWriteWaitContext{Context: context.Background(), waiting: make(chan struct{})}
+	releaseDone := make(chan error, 1)
+	go func() { releaseDone <- manager.ReleaseSession(ctx, "session_a") }()
+	awaitComputerLifecycle(t, ctx.waiting)
+	if _, ok := manager.OwnedLaunchAppID("session_a", *launched.LaunchID); ok {
+		t.Fatal("release did not revoke ownership while waiting")
+	}
+	resume()
+	if err := awaitComputerLifecycle(t, quitDone); err != nil {
+		t.Fatal(err)
+	}
+	if err := awaitComputerLifecycle(t, releaseDone); err != nil {
+		t.Fatal(err)
+	}
+	if len(service.quitRequests) != 1 || len(manager.launches) != 0 {
+		t.Fatalf("duplicate quit or retained state: %+v", service.quitRequests)
+	}
+}
+
+func TestManagerLateAppEntryCannotClearANewSessionLease(t *testing.T) {
+	started, finish := make(chan struct{}), make(chan struct{})
+	var finishOnce sync.Once
+	resume := func() { finishOnce.Do(func() { close(finish) }) }
+	t.Cleanup(resume)
+	service := &computerLifecycleService{}
+	entries := 0
+	service.use = func(context.Context, string, string, bool, AppSelection) (NativeUse, error) {
+		entries++
+		pid := int32(99)
+		if entries == 1 {
+			close(started)
+			<-finish
+			pid = 42
+		}
+		return NativeUse{AppID: "com.example.App", Name: "Example", PID: pid, NewlyLaunched: true, WindowStatus: WindowStatusNone}, nil
+	}
+	manager := NewManager(service)
+	oldDone := make(chan error, 1)
+	go func() {
+		_, err := manager.UseApp(context.Background(), "session_a", "com.example.App", false, AppSelection{})
+		oldDone <- err
+	}()
+	awaitComputerLifecycle(t, started)
+	if err := manager.ReleaseSession(context.Background(), "session_a"); err != nil {
+		t.Fatal(err)
+	}
+	ctx := &computerWriteWaitContext{Context: context.Background(), waiting: make(chan struct{})}
+	newDone := make(chan UseResult, 1)
+	newErr := make(chan error, 1)
+	go func() {
+		result, err := manager.UseApp(ctx, "session_a", "com.example.App", false, AppSelection{})
+		newDone <- result
+		newErr <- err
+	}()
+	awaitComputerLifecycle(t, ctx.waiting)
+	resume()
+	assertOperationCode(t, awaitComputerLifecycle(t, oldDone), "computer_action_cancelled")
+	result := awaitComputerLifecycle(t, newDone)
+	if err := awaitComputerLifecycle(t, newErr); err != nil {
+		t.Fatal(err)
+	}
+	if result.LaunchID == nil || result.PID != 99 {
+		t.Fatalf("new app entry = %+v", result)
+	}
+	if _, ok := manager.OwnedLaunchAppID("session_a", *result.LaunchID); !ok {
+		t.Fatal("late app entry removed the new session's ownership")
+	}
+	if len(service.quitRequests) != 1 || service.quitRequests[0].PID != 42 {
+		t.Fatalf("late cleanup targeted the new process: %+v", service.quitRequests)
+	}
+}
+
+func TestManagerReleaseReportsAppsThatDidNotClose(t *testing.T) {
+	for _, response := range []NativeQuit{
+		{AppID: "com.example.App", PID: 42, Closed: false},
+		{AppID: "com.example.App", PID: 99, Closed: true},
+	} {
+		service := &fakeService{quits: []NativeQuit{response}}
+		manager := NewManager(service)
+		if _, err := manager.UseApp(context.Background(), "session_a", "com.example.App", false, AppSelection{}); err != nil {
+			t.Fatal(err)
+		}
+		err := manager.ReleaseSession(context.Background(), "session_a")
+		if err == nil || !strings.Contains(err.Error(), "com.example.App") || !strings.Contains(err.Error(), "PID 42") {
+			t.Fatalf("release result = %v", err)
+		}
+		if len(service.quitRequests) != 1 || service.quitRequests[0].PID != 42 || len(manager.launches) != 0 {
+			t.Fatalf("cleanup retried or retained ownership: %+v", service.quitRequests)
+		}
+	}
+}
+
+type computerLifecycleService struct {
+	fakeService
+	use  func(context.Context, string, string, bool, AppSelection) (NativeUse, error)
+	quit func(context.Context, string, string, int32) (NativeQuit, error)
+}
+
+func (s *computerLifecycleService) UseApp(ctx context.Context, sessionID, appID string, foreground bool, selection AppSelection) (NativeUse, error) {
+	if s.use != nil {
+		return s.use(ctx, sessionID, appID, foreground, selection)
+	}
+	return s.fakeService.UseApp(ctx, sessionID, appID, foreground, selection)
+}
+
+func (s *computerLifecycleService) QuitApp(ctx context.Context, sessionID, appID string, pid int32) (NativeQuit, error) {
+	if s.quit != nil {
+		return s.quit(ctx, sessionID, appID, pid)
+	}
+	return s.fakeService.QuitApp(ctx, sessionID, appID, pid)
+}
+
+// Signal after an app entry has registered its lease and reaches the write
+// queue, without scheduling sleeps or adding hooks to production code.
+type computerWriteWaitContext struct {
+	context.Context
+	waiting chan struct{}
+	once    sync.Once
+}
+
+func (c *computerWriteWaitContext) Done() <-chan struct{} {
+	c.once.Do(func() { close(c.waiting) })
+	return c.Context.Done()
+}
+
+func holdComputerWrite(t *testing.T, manager *Manager) func() {
+	t.Helper()
+	if err := manager.acquireWrite(context.Background(), "test"); err != nil {
+		t.Fatal(err)
+	}
+	var once sync.Once
+	unlock := func() { once.Do(manager.releaseWrite) }
+	t.Cleanup(unlock)
+	return unlock
+}
+
+func awaitComputerLifecycle[T any](t *testing.T, ch <-chan T) T {
+	t.Helper()
+	select {
+	case value := <-ch:
+		return value
+	case <-time.After(3 * time.Second):
+		t.Fatal("Computer Use lifecycle operation did not finish")
+		var zero T
+		return zero
+	}
+}
+
 func TestManagerReturnsStatelessAtomicObserveCapture(t *testing.T) {
 	manager := NewManager(&fakeService{})
 	result, err := manager.ObserveCapture(
