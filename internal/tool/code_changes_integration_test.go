@@ -89,6 +89,11 @@ func TestCodeSymbolsTracksUnopenedGoFiles(t *testing.T) {
 			changeUnopenedCodeFile(t, ctx, runner, root, source, "replace", "package demo\nfunc PuddingAfter() {}\n", mode)
 			check("PuddingAfter", true, eventual)
 			check("PuddingBefore", false, false)
+			// A new file in an indexed package and a new package in an unseen
+			// directory exercise different gopls metadata discovery paths.
+			sibling := filepath.Join(root, "sibling.go")
+			changeUnopenedCodeFile(t, ctx, runner, root, sibling, "create", "package demo\nfunc PuddingSibling() {}\n", mode)
+			check("PuddingSibling", true, eventual)
 			created := filepath.Join(root, "nested", "created.go")
 			changeUnopenedCodeFile(t, ctx, runner, root, created, "create", "package nested\nfunc PuddingCreated() {}\n", mode)
 			// Neither creation nor the next edit is queried separately: event

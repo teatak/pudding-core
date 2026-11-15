@@ -181,6 +181,12 @@ func TestManagerEnablesServerFileWatchingOnlyForGopls(t *testing.T) {
 				if initial["fileWatcher"] != "fsnotify" || configuration[0]["fileWatcher"] != "fsnotify" {
 					t.Fatalf("gopls lost watcher settings at startup or configuration: %+v, %+v", initial, configuration)
 				}
+				for _, settings := range []map[string]any{initial, configuration[0]} {
+					patterns, ok := settings["workspaceFiles"].([]any)
+					if !ok || len(patterns) != 1 || patterns[0] != "**/*.go" {
+						t.Fatalf("gopls cannot discover unopened new packages after file events: %+v", settings)
+					}
+				}
 			} else {
 				if initial != nil || configuration[0] != nil {
 					t.Fatalf("Go settings leaked to TypeScript: %+v, %+v", initial, configuration)

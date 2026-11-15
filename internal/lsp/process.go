@@ -323,7 +323,16 @@ func (p *Process) workspaceConfiguration() map[string]any {
 		// its known mutations synchronously and uses this watcher for external
 		// edits and commands whose changed paths are unknown. Those filesystem
 		// events are asynchronous; they are not a query freshness barrier.
-		return map[string]any{"fileWatcher": "fsnotify"}
+		// gopls v0.22 only invalidates known packages for ordinary file events.
+		// An unopened, unimported new package therefore needs a workspace reload.
+		// Every on-disk Go event batch reloads workspace module metadata, including
+		// ordinary edits, and semantic requests await that reload. Unchanged
+		// queries do not reload; no document overlay or client directory scan is
+		// needed.
+		return map[string]any{
+			"fileWatcher":    "fsnotify",
+			"workspaceFiles": []string{"**/*.go"},
+		}
 	}
 	return nil
 }
