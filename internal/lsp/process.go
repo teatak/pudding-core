@@ -42,6 +42,7 @@ type Process struct {
 	stderr           *byteRing
 	documentsMu      sync.Mutex
 	documents        map[string]documentState
+	documentUse      uint64
 
 	writeMu sync.Mutex
 	mu      sync.Mutex
