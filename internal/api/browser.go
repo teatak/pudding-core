@@ -29,6 +29,11 @@ type browserSyncReq struct {
 	HistoryVisit bool   `json:"historyVisit"`
 }
 
+type browserTabVersion struct {
+	session uint64
+	tab     uint64
+}
+
 type browserObserveReq struct {
 	MaxTextChars int `json:"maxTextChars"`
 	MaxElements  int `json:"maxElements"`
@@ -210,7 +215,7 @@ func (s *Server) closeBrowserSession(c *cart.Context) error {
 		s.clearBrowserTabGate(sessionID)
 		return s.browserError(c, err)
 	}
-	if err := s.store.ClearBrowserState(c.Request.Context(), sessionID); err != nil {
+	if err := s.clearClosedBrowserSessionState(c.Request.Context(), sessionID); err != nil {
 		return s.fail(c, err)
 	}
 	c.Response.WriteHeader(http.StatusNoContent)
@@ -251,8 +256,7 @@ func (s *Server) createBrowserTab(c *cart.Context) error {
 	if err != nil {
 		return s.browserError(c, err)
 	}
-	s.allowBrowserTabInGate(sessionID, tab.ID)
-	if err := s.syncBrowserState(c.Request.Context(), sessionID, tab); err != nil {
+	if err := s.allowAndSyncBrowserState(c.Request.Context(), sessionID, tab); err != nil {
 		return browserStoreError(c, s, err)
 	}
 	c.JSON(http.StatusCreated, tab)
@@ -346,8 +350,7 @@ func (s *Server) openBrowserTab(c *cart.Context) error {
 	if err != nil {
 		return s.browserError(c, err)
 	}
-	s.allowBrowserTabInGate(sessionID, tab.ID)
-	if err := s.syncBrowserState(c.Request.Context(), sessionID, tab); err != nil {
+	if err := s.allowAndSyncBrowserState(c.Request.Context(), sessionID, tab); err != nil {
 		return browserStoreError(c, s, err)
 	}
 	c.JSON(http.StatusOK, tab)
@@ -360,7 +363,8 @@ func (s *Server) syncBrowserTab(c *cart.Context) error {
 		return nil
 	}
 	tabID, _ := c.Param("tabID")
-	if !s.browserTabAllowed(sessionID, tabID) {
+	version, allowed := s.browserTabSyncVersion(sessionID, tabID)
+	if !allowed {
 		return s.browserError(c, browser.ErrTabNotFound)
 	}
 	var req browserSyncReq
@@ -381,13 +385,8 @@ func (s *Server) syncBrowserTab(c *cart.Context) error {
 		CreatedAt:    now,
 		UpdatedAt:    now,
 	}
-	if current, ignore, err := s.ignoreTransientBlankSync(c.Request.Context(), sessionID, tab); err != nil {
-		return s.fail(c, err)
-	} else if ignore {
-		c.JSON(http.StatusOK, current)
-		return nil
-	}
-	if err := s.syncBrowserSnapshot(c.Request.Context(), sessionID, tab, req.HistoryVisit); err != nil {
+	tab, err := s.syncBrowserSnapshot(c.Request.Context(), sessionID, tab, req.HistoryVisit, version)
+	if err != nil {
 		return browserStoreError(c, s, err)
 	}
 	c.JSON(http.StatusOK, tab)
@@ -407,8 +406,7 @@ func (s *Server) adoptBrowserTab(c *cart.Context) error {
 	if err != nil {
 		return s.browserError(c, err)
 	}
-	s.allowBrowserTabInGate(sessionID, tab.ID)
-	if err := s.syncBrowserState(c.Request.Context(), sessionID, tab); err != nil {
+	if err := s.allowAndSyncBrowserState(c.Request.Context(), sessionID, tab); err != nil {
 		return browserStoreError(c, s, err)
 	}
 	c.JSON(http.StatusOK, tab)
@@ -436,8 +434,7 @@ func (s *Server) openBrowserSession(c *cart.Context) error {
 	if err != nil {
 		return s.browserError(c, err)
 	}
-	s.allowBrowserTabInGate(sessionID, tab.ID)
-	if err := s.syncBrowserState(c.Request.Context(), sessionID, tab); err != nil {
+	if err := s.allowAndSyncBrowserState(c.Request.Context(), sessionID, tab); err != nil {
 		return browserStoreError(c, s, err)
 	}
 	c.JSON(http.StatusOK, tab)
@@ -458,10 +455,27 @@ func (s *Server) closeBrowserTabGate(sessionID string) {
 	}
 	s.browserMu.Lock()
 	defer s.browserMu.Unlock()
+	s.closeBrowserTabGateLocked(sessionID)
+}
+
+func (s *Server) closeBrowserTabGateLocked(sessionID string) {
 	if s.browserAllowedTabs == nil {
 		s.browserAllowedTabs = map[string]map[string]struct{}{}
 	}
 	s.browserAllowedTabs[sessionID] = map[string]struct{}{}
+	if s.browserSessionVersions == nil {
+		s.browserSessionVersions = map[string]uint64{}
+	}
+	s.browserSessionVersions[sessionID]++
+}
+
+func (s *Server) clearClosedBrowserSessionState(ctx context.Context, sessionID string) error {
+	s.browserMu.Lock()
+	defer s.browserMu.Unlock()
+	// Browser IPC finishes before this commit. A concurrent reopen either
+	// persists before the close or starts a new lifetime after it.
+	s.closeBrowserTabGateLocked(sessionID)
+	return s.store.ClearBrowserState(ctx, sessionID)
 }
 
 func (s *Server) clearBrowserTabGate(sessionID string) {
@@ -483,6 +497,13 @@ func (s *Server) allowBrowserTabInGate(sessionID, tabID string) {
 	}
 	s.browserMu.Lock()
 	defer s.browserMu.Unlock()
+	s.allowBrowserTabInGateLocked(sessionID, tabID)
+}
+
+func (s *Server) allowBrowserTabInGateLocked(sessionID, tabID string) {
+	if sessionID == "" || tabID == "" {
+		return
+	}
 	delete(s.browserClosedTabs[sessionID], tabID)
 	allowed, ok := s.browserAllowedTabs[sessionID]
 	if !ok {
@@ -538,12 +559,30 @@ func (s *Server) singleBrowserTabGateID(sessionID string) string {
 func (s *Server) browserTabAllowed(sessionID, tabID string) bool {
 	s.browserMu.Lock()
 	defer s.browserMu.Unlock()
-	allowed, ok := s.browserAllowedTabs[strings.TrimSpace(sessionID)]
+	return s.browserTabAllowedLocked(strings.TrimSpace(sessionID), strings.TrimSpace(tabID))
+}
+
+func (s *Server) browserTabAllowedLocked(sessionID, tabID string) bool {
+	if _, closed := s.browserClosedTabs[sessionID][tabID]; closed {
+		return false
+	}
+	allowed, ok := s.browserAllowedTabs[sessionID]
 	if !ok {
 		return true
 	}
-	_, ok = allowed[strings.TrimSpace(tabID)]
+	_, ok = allowed[tabID]
 	return ok
+}
+
+func (s *Server) browserTabSyncVersion(sessionID, tabID string) (browserTabVersion, bool) {
+	s.browserMu.Lock()
+	defer s.browserMu.Unlock()
+	sessionID, tabID = strings.TrimSpace(sessionID), strings.TrimSpace(tabID)
+	return s.browserTabVersionLocked(sessionID, tabID), s.browserTabAllowedLocked(sessionID, tabID)
+}
+
+func (s *Server) browserTabVersionLocked(sessionID, tabID string) browserTabVersion {
+	return browserTabVersion{session: s.browserSessionVersions[sessionID], tab: s.browserTabVersions[sessionID][tabID]}
 }
 
 func (s *Server) rememberClosedBrowserTabs(sessionID string, tabs []browser.TabSnapshot) {
@@ -562,6 +601,13 @@ func (s *Server) rememberClosedBrowserTab(sessionID, tabID string) {
 	}
 	s.browserMu.Lock()
 	defer s.browserMu.Unlock()
+	s.rememberClosedBrowserTabLocked(sessionID, tabID)
+}
+
+func (s *Server) rememberClosedBrowserTabLocked(sessionID, tabID string) {
+	if sessionID == "" || tabID == "" {
+		return
+	}
 	if s.browserClosedTabs == nil {
 		s.browserClosedTabs = map[string]map[string]struct{}{}
 	}
@@ -572,6 +618,21 @@ func (s *Server) rememberClosedBrowserTab(sessionID, tabID string) {
 	if allowed, ok := s.browserAllowedTabs[sessionID]; ok {
 		delete(allowed, tabID)
 	}
+	if s.browserTabVersions == nil {
+		s.browserTabVersions = map[string]map[string]uint64{}
+	}
+	if s.browserTabVersions[sessionID] == nil {
+		s.browserTabVersions[sessionID] = map[string]uint64{}
+	}
+	s.browserTabVersions[sessionID][tabID]++
+}
+
+func (s *Server) deleteClosedBrowserTabState(ctx context.Context, sessionID, tabID string) error {
+	s.browserMu.Lock()
+	defer s.browserMu.Unlock()
+	sessionID, tabID = strings.TrimSpace(sessionID), strings.TrimSpace(tabID)
+	s.rememberClosedBrowserTabLocked(sessionID, tabID)
+	return s.store.DeleteBrowserState(ctx, sessionID, tabID)
 }
 
 func (s *Server) revokeBrowserFileAccess(ctx context.Context, sessionID string) error {
@@ -588,12 +649,11 @@ func (s *Server) revokeBrowserFileAccess(ctx context.Context, sessionID string) 
 		if err := s.browser.CloseSessionBrowser(ctx, sessionID); err != nil {
 			return err
 		}
-		return s.store.ClearBrowserState(ctx, sessionID)
+		return s.clearClosedBrowserSessionState(ctx, sessionID)
 	}
 	closedTabIDs, revokeErr := revoker.RevokeFileAccess(ctx, sessionID)
 	for _, tabID := range closedTabIDs {
-		s.rememberClosedBrowserTab(sessionID, tabID)
-		if err := s.store.DeleteBrowserState(ctx, sessionID, tabID); err != nil {
+		if err := s.deleteClosedBrowserTabState(ctx, sessionID, tabID); err != nil {
 			return err
 		}
 	}
@@ -612,8 +672,7 @@ func (s *Server) clearStoredBrowserFileStates(ctx context.Context, sessionID str
 		if state == nil || !strings.HasPrefix(strings.ToLower(strings.TrimSpace(state.URL)), "file:") {
 			continue
 		}
-		s.rememberClosedBrowserTab(sessionID, state.TabID)
-		if err := s.store.DeleteBrowserState(ctx, sessionID, state.TabID); err != nil {
+		if err := s.deleteClosedBrowserTabState(ctx, sessionID, state.TabID); err != nil {
 			return err
 		}
 	}
@@ -647,7 +706,7 @@ func (s *Server) ignoreTransientBlankSync(ctx context.Context, sessionID string,
 		URL:        state.URL,
 		Title:      state.Title,
 		FaviconURL: state.FaviconURL,
-		Mode:       s.browserProcessMode(ctx, sessionID),
+		Mode:       tab.Mode,
 		CreatedAt:  state.CreatedAt,
 		UpdatedAt:  state.UpdatedAt,
 	}, true, nil
@@ -660,17 +719,14 @@ func browserURLIsBlank(rawURL string) bool {
 func (s *Server) filterBrowserTabs(sessionID string, tabs []browser.TabSnapshot) []browser.TabSnapshot {
 	sessionID = strings.TrimSpace(sessionID)
 	s.browserMu.Lock()
-	allowed, gated := s.browserAllowedTabs[sessionID]
-	s.browserMu.Unlock()
+	defer s.browserMu.Unlock()
 	out := make([]browser.TabSnapshot, 0, len(tabs))
 	for _, tab := range tabs {
 		if strings.TrimSpace(tab.SessionID) != sessionID {
 			continue
 		}
-		if gated {
-			if _, ok := allowed[strings.TrimSpace(tab.ID)]; !ok {
-				continue
-			}
+		if !s.browserTabAllowedLocked(sessionID, strings.TrimSpace(tab.ID)) {
+			continue
 		}
 		out = append(out, tab)
 	}
@@ -1006,7 +1062,9 @@ func (s *Server) releaseBrowserTab(c *cart.Context) error {
 			return s.browserError(c, err)
 		}
 	}
-	s.rememberClosedBrowserTab(sessionID, tabID)
+	if err := s.deleteClosedBrowserTabState(c.Request.Context(), sessionID, tabID); err != nil {
+		return s.fail(c, err)
+	}
 	tabs, err := s.browser.ListTabs(c.Request.Context(), sessionID)
 	if err != nil {
 		return s.browserError(c, err)
@@ -1016,9 +1074,6 @@ func (s *Server) releaseBrowserTab(c *cart.Context) error {
 		return s.fail(c, err)
 	}
 	s.replaceBrowserTabGate(sessionID, tabs)
-	if err := s.store.DeleteBrowserState(c.Request.Context(), sessionID, tabID); err != nil {
-		return s.fail(c, err)
-	}
 	c.String(http.StatusNoContent, "")
 	return nil
 }
@@ -1056,6 +1111,24 @@ func (s *Server) browserStateSession(c *cart.Context) (string, bool) {
 }
 
 func (s *Server) syncBrowserState(ctx context.Context, sessionID string, tab browser.TabSnapshot) error {
+	s.browserMu.Lock()
+	defer s.browserMu.Unlock()
+	if !s.browserTabAllowedLocked(strings.TrimSpace(sessionID), strings.TrimSpace(tab.ID)) {
+		return browser.ErrTabNotFound
+	}
+	return s.syncBrowserStateLocked(ctx, sessionID, tab)
+}
+
+func (s *Server) allowAndSyncBrowserState(ctx context.Context, sessionID string, tab browser.TabSnapshot) error {
+	s.browserMu.Lock()
+	defer s.browserMu.Unlock()
+	// Publish the allowed tab and its saved state together, so a concurrent
+	// gate refresh cannot hide a new tab before its first snapshot is stored.
+	s.allowBrowserTabInGateLocked(strings.TrimSpace(sessionID), strings.TrimSpace(tab.ID))
+	return s.syncBrowserStateLocked(ctx, sessionID, tab)
+}
+
+func (s *Server) syncBrowserStateLocked(ctx context.Context, sessionID string, tab browser.TabSnapshot) error {
 	in, ok := browserStateInputFromTab(sessionID, tab)
 	if !ok {
 		if strings.TrimSpace(tab.ID) == "" {
@@ -1067,19 +1140,32 @@ func (s *Server) syncBrowserState(ctx context.Context, sessionID string, tab bro
 	return err
 }
 
-func (s *Server) syncBrowserSnapshot(ctx context.Context, sessionID string, tab browser.TabSnapshot, historyVisit bool) error {
-	if err := s.syncBrowserState(ctx, sessionID, tab); err != nil {
-		return err
+func (s *Server) syncBrowserSnapshot(ctx context.Context, sessionID string, tab browser.TabSnapshot, historyVisit bool, version browserTabVersion) (browser.TabSnapshot, error) {
+	s.browserMu.Lock()
+	defer s.browserMu.Unlock()
+	sessionID, tabID := strings.TrimSpace(sessionID), strings.TrimSpace(tab.ID)
+	// Validate and persist together. Neither a close nor a reopen of the same
+	// tab ID can intervene after this check and before the store write.
+	if !s.browserTabAllowedLocked(sessionID, tabID) || s.browserTabVersionLocked(sessionID, tabID) != version {
+		return browser.TabSnapshot{}, browser.ErrTabNotFound
+	}
+	if current, ignore, err := s.ignoreTransientBlankSync(ctx, sessionID, tab); err != nil {
+		return browser.TabSnapshot{}, err
+	} else if ignore {
+		return current, nil
+	}
+	if err := s.syncBrowserStateLocked(ctx, sessionID, tab); err != nil {
+		return browser.TabSnapshot{}, err
 	}
 	in, ok := browserHistoryInputFromTab(tab)
 	if !ok {
-		return nil
+		return tab, nil
 	}
 	if historyVisit {
 		_, err := s.store.PutBrowserHistory(ctx, in)
-		return err
+		return tab, err
 	}
-	return s.store.UpdateBrowserHistoryMetadata(ctx, in)
+	return tab, s.store.UpdateBrowserHistoryMetadata(ctx, in)
 }
 
 func browserHistoryInputFromTab(tab browser.TabSnapshot) (store.BrowserHistoryInput, bool) {
@@ -1222,6 +1308,9 @@ func latestBrowserTab(tabs []browser.TabSnapshot) (browser.TabSnapshot, bool, er
 }
 
 func browserStoreError(c *cart.Context, s *Server, err error) error {
+	if errors.Is(err, browser.ErrTabNotFound) {
+		return s.browserError(c, err)
+	}
 	if errors.Is(err, store.ErrInvalidBrowserState) {
 		return badRequest(c, "invalid browser state")
 	}
