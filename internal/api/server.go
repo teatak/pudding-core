@@ -63,6 +63,9 @@ type Server struct {
 	// browserAllowedTabs is absent until a session's browser surface is explicitly closed or rebound.
 	// Once present, only listed tabs are visible; an empty set means the session has no browser tab.
 	browserAllowedTabs map[string]map[string]struct{}
+	// Close versions survive reopening, so an in-flight sync cannot write into a later tab lifetime.
+	browserSessionVersions map[string]uint64
+	browserTabVersions     map[string]map[string]uint64
 	// browserClosedTabs prevents delayed live snapshots from re-adopting explicitly closed tab IDs.
 	browserClosedTabs map[string]map[string]struct{}
 	oauthMu           sync.Mutex

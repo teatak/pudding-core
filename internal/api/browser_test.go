@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -22,13 +23,22 @@ import (
 func newBrowserTestServer(t *testing.T) (*httptest.Server, store.Store, *fakeBrowserService) {
 	t.Helper()
 	ms := storetest.New(t)
+	srv, browserSvc := newBrowserTestServerWithStore(t, ms)
+	return srv, ms, browserSvc
+}
+
+func newBrowserTestServerWithStore(t *testing.T, ms interface {
+	store.Store
+	engine.ConfigSource
+}) (*httptest.Server, *fakeBrowserService) {
+	t.Helper()
 	homeDir := t.TempDir()
 	hub := event.NewHub()
 	eng := engine.New(ms, hub, registry.Static(mock.New(mock.WithScript([]string{"ok"}))), ms, engine.WithAttachmentHome(homeDir))
 	browserSvc := &fakeBrowserService{tabs: map[string]browser.TabSnapshot{}}
 	srv := httptest.NewServer(New(eng, ms, ms, hub).WithHome(homeDir).WithBrowser(browserSvc).Handler(testToken, nil))
 	t.Cleanup(srv.Close)
-	return srv, ms, browserSvc
+	return srv, browserSvc
 }
 
 func TestBrowserObservePagination(t *testing.T) {
@@ -617,6 +627,221 @@ func TestReleaseBrowserTabBlocksStaleSync(t *testing.T) {
 	}
 	if _, err := st.GetBrowserState(ctx, "sess_release_sync"); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("stale sync revived browser state: %v", err)
+	}
+}
+
+func TestBrowserTabGateConcurrentFilterAndMutation(t *testing.T) {
+	s := &Server{}
+	s.closeBrowserTabGate("session")
+	s.allowBrowserTabInGate("session", "tab")
+	tabs := []browser.TabSnapshot{{SessionID: "session", ID: "tab"}, {SessionID: "other", ID: "tab"}}
+	var group sync.WaitGroup
+	group.Go(func() {
+		for range 10000 {
+			for _, tab := range s.filterBrowserTabs("session", tabs) {
+				if tab.SessionID != "session" || tab.ID != "tab" {
+					t.Errorf("filter returned another session's tab: %+v", tab)
+				}
+			}
+		}
+	})
+	group.Go(func() {
+		for range 10000 {
+			s.allowBrowserTabInGate("session", "tab")
+			s.rememberClosedBrowserTab("session", "tab")
+		}
+	})
+	group.Wait()
+}
+
+func TestBrowserTabGateRejectsClosedTabsWithoutAllowlist(t *testing.T) {
+	s := &Server{}
+	s.rememberClosedBrowserTab("session", "closed")
+	if s.browserTabAllowed("session", "closed") {
+		t.Fatal("a closed tab must stay blocked before a session allowlist exists")
+	}
+	if !s.browserTabAllowed("session", "new") {
+		t.Fatal("an unrelated tab must remain allowed")
+	}
+	tabs := s.filterBrowserTabs("session", []browser.TabSnapshot{
+		{SessionID: "session", ID: "closed"}, {SessionID: "session", ID: "new"},
+	})
+	if len(tabs) != 1 || tabs[0].ID != "new" {
+		t.Fatalf("closed live snapshot was exposed: %+v", tabs)
+	}
+}
+
+type blockedBrowserSyncBody struct {
+	reader  *strings.Reader
+	entered chan struct{}
+	resume  chan struct{}
+	once    sync.Once
+}
+
+func (b *blockedBrowserSyncBody) Read(data []byte) (int, error) {
+	b.once.Do(func() { close(b.entered); <-b.resume })
+	return b.reader.Read(data)
+}
+
+func (b *blockedBrowserSyncBody) Close() error { return nil }
+
+func TestSyncBrowserTabRejectsInFlightClosedGeneration(t *testing.T) {
+	for _, closeSession := range []bool{false, true} {
+		for _, reopen := range []bool{false, true} {
+			name := "release"
+			if closeSession {
+				name = "session-close-dormant"
+			}
+			if reopen {
+				name += "-reopen-same-id"
+			}
+			t.Run(name, func(t *testing.T) {
+				srv, st, service := newBrowserTestServer(t)
+				ctx := context.Background()
+				const sessionID = "sync-close"
+				if err := st.CreateSession(ctx, &store.Session{ID: sessionID, Provider: "mock", Model: "mock"}); err != nil {
+					t.Fatal(err)
+				}
+				opened := req(t, http.MethodPost, srv.URL+"/sessions/"+sessionID+"/browser/open", map[string]string{"url": "https://before.example/"})
+				tab := decodeJSON[browser.TabSnapshot](t, opened)
+				if opened.StatusCode != http.StatusOK {
+					t.Fatalf("open: %d", opened.StatusCode)
+				}
+				if closeSession {
+					// Session close must invalidate pending snapshots even for
+					// saved tabs absent from the browser's live target list.
+					service.tabs = map[string]browser.TabSnapshot{}
+				}
+				base := "/sessions/" + sessionID + "/browser/tabs/" + tab.ID
+				body := &blockedBrowserSyncBody{
+					reader:  strings.NewReader(`{"url":"https://late.example/","title":"Late snapshot","historyVisit":true}`),
+					entered: make(chan struct{}), resume: make(chan struct{}),
+				}
+				var resumeOnce sync.Once
+				resume := func() { resumeOnce.Do(func() { close(body.resume) }) }
+				t.Cleanup(resume)
+				request := httptest.NewRequest(http.MethodPost, base+"/sync", body)
+				request.Header.Set("Authorization", "Bearer "+testToken)
+				recorder := httptest.NewRecorder()
+				done := make(chan struct{})
+				go func() { defer close(done); srv.Config.Handler.ServeHTTP(recorder, request) }()
+				waitBrowserTestSignal(t, body.entered, "sync body decode")
+				closePath := base + "/release"
+				if closeSession {
+					closePath = "/sessions/" + sessionID + "/browser/close"
+				}
+				closed := req(t, http.MethodPost, srv.URL+closePath, nil)
+				closed.Body.Close()
+				if closed.StatusCode != http.StatusNoContent {
+					t.Fatalf("close: %d", closed.StatusCode)
+				}
+				if _, err := st.GetBrowserTabState(ctx, sessionID, tab.ID); !errors.Is(err, store.ErrNotFound) {
+					t.Fatalf("close did not clear state: %v", err)
+				}
+				if reopen {
+					fresh := req(t, http.MethodPost, srv.URL+base+"/open", map[string]string{"url": "https://fresh.example/"})
+					fresh.Body.Close()
+					if fresh.StatusCode != http.StatusOK {
+						t.Fatalf("reopen same tab ID: %d", fresh.StatusCode)
+					}
+				}
+				resume()
+				waitBrowserTestSignal(t, done, "stale sync completion")
+				if recorder.Code != http.StatusNotFound {
+					t.Errorf("stale sync status=%d, want 404", recorder.Code)
+				}
+				state, stateErr := st.GetBrowserTabState(ctx, sessionID, tab.ID)
+				// A new Server has no in-memory gate, as after a daemon restart.
+				freshServer := &Server{store: st, browser: service}
+				restored, err := freshServer.listStoredBrowserTabs(ctx, sessionID, nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if reopen {
+					if stateErr != nil || state.URL != "https://fresh.example/" || len(restored) != 1 || restored[0].URL != state.URL {
+						t.Fatalf("old sync overwrote reopened tab: state=%+v err=%v restored=%+v", state, stateErr, restored)
+					}
+					current := req(t, http.MethodPost, srv.URL+base+"/sync", map[string]string{"url": "https://current.example/"})
+					current.Body.Close()
+					if current.StatusCode != http.StatusOK {
+						t.Fatalf("new generation sync rejected: %d", current.StatusCode)
+					}
+				} else if !errors.Is(stateErr, store.ErrNotFound) || len(restored) != 0 {
+					t.Fatalf("old sync revived closed tab: state=%+v err=%v restored=%+v", state, stateErr, restored)
+				}
+				history, err := st.ListBrowserHistory(ctx, "", 20)
+				if err != nil || len(history) != 0 {
+					t.Fatalf("stale sync recorded history: entries=%+v err=%v", history, err)
+				}
+			})
+		}
+	}
+}
+
+func waitBrowserTestSignal(t *testing.T, signal <-chan struct{}, description string) {
+	t.Helper()
+	select {
+	case <-signal:
+	case <-time.After(5 * time.Second):
+		t.Fatalf("timed out waiting for %s", description)
+	}
+}
+
+type blockedBrowserStateStore struct {
+	*storetest.Store
+	entered chan struct{}
+	resume  chan struct{}
+}
+
+func (s *blockedBrowserStateStore) PutBrowserState(ctx context.Context, in store.BrowserStateInput) (*store.BrowserState, error) {
+	if in.URL == "https://pending.example/" {
+		close(s.entered)
+		<-s.resume
+	}
+	return s.Store.PutBrowserState(ctx, in)
+}
+
+func TestSyncBrowserTabAndReleaseSerializeStateWrites(t *testing.T) {
+	st := &blockedBrowserStateStore{Store: storetest.New(t), entered: make(chan struct{}), resume: make(chan struct{})}
+	var resumeOnce sync.Once
+	resume := func() { resumeOnce.Do(func() { close(st.resume) }) }
+	t.Cleanup(resume)
+	srv, service := newBrowserTestServerWithStore(t, st)
+	ctx := context.Background()
+	const sessionID = "sync-write-close"
+	if err := st.CreateSession(ctx, &store.Session{ID: sessionID, Provider: "mock", Model: "mock"}); err != nil {
+		t.Fatal(err)
+	}
+	opened := req(t, http.MethodPost, srv.URL+"/sessions/"+sessionID+"/browser/open", map[string]string{"url": "https://before.example/"})
+	tab := decodeJSON[browser.TabSnapshot](t, opened)
+	base := "/sessions/" + sessionID + "/browser/tabs/" + tab.ID
+	request := httptest.NewRequest(http.MethodPost, base+"/sync", strings.NewReader(`{"url":"https://pending.example/"}`))
+	request.Header.Set("Authorization", "Bearer "+testToken)
+	syncResponse := httptest.NewRecorder()
+	syncDone := make(chan struct{})
+	go func() { defer close(syncDone); srv.Config.Handler.ServeHTTP(syncResponse, request) }()
+	waitBrowserTestSignal(t, st.entered, "pending sync store write")
+	releaseStarted := make(chan struct{})
+	service.releaseTabHook = func() { close(releaseStarted) }
+	releaseRequest := httptest.NewRequest(http.MethodPost, base+"/release", nil)
+	releaseRequest.Header.Set("Authorization", "Bearer "+testToken)
+	releaseResponse := httptest.NewRecorder()
+	releaseDone := make(chan struct{})
+	go func() { defer close(releaseDone); srv.Config.Handler.ServeHTTP(releaseResponse, releaseRequest) }()
+	waitBrowserTestSignal(t, releaseStarted, "browser release IPC")
+	select {
+	case <-releaseDone:
+		t.Error("release completed while an earlier sync write was still pending")
+	case <-time.After(100 * time.Millisecond):
+	}
+	resume()
+	waitBrowserTestSignal(t, syncDone, "sync completion")
+	waitBrowserTestSignal(t, releaseDone, "release completion")
+	if syncResponse.Code != http.StatusOK || releaseResponse.Code != http.StatusNoContent {
+		t.Fatalf("sync=%d release=%d", syncResponse.Code, releaseResponse.Code)
+	}
+	if state, err := st.GetBrowserTabState(ctx, sessionID, tab.ID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("earlier sync write survived release: state=%+v err=%v", state, err)
 	}
 }
 
@@ -1284,6 +1509,7 @@ func TestProjectChangesRevokeLiveBrowserFileAccess(t *testing.T) {
 type fakeBrowserService struct {
 	observeOptions           browser.ObserveOptions
 	releaseError             error
+	releaseTabHook           func()
 	recoverErrors            map[string]error
 	tabs                     map[string]browser.TabSnapshot
 	recoverableTabs          map[string]browser.TabSnapshot
@@ -1442,6 +1668,9 @@ func (f *fakeBrowserService) ReleaseTab(_ context.Context, sessionID, tabID stri
 		return browser.ErrTabNotFound
 	}
 	delete(f.tabs, tabID)
+	if f.releaseTabHook != nil {
+		f.releaseTabHook()
+	}
 	return nil
 }
 
