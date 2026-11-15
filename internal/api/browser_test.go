@@ -1094,11 +1094,58 @@ func TestRecoverBrowserTabReturnsCurrentSessionTab(t *testing.T) {
 	if resp.StatusCode != http.StatusOK || recovered.ID != opened.ID || recovered.SessionID != "sess_recover" {
 		t.Fatalf("recover status=%d tab=%+v", resp.StatusCode, recovered)
 	}
-	if browserSvc.recoverCount != 1 {
-		t.Fatalf("recover should call browser service, count=%d", browserSvc.recoverCount)
+	if browserSvc.getTabCount != 1 || browserSvc.recoverCount != 1 {
+		t.Fatalf("live recovery should read and recover once: get=%d recover=%d", browserSvc.getTabCount, browserSvc.recoverCount)
 	}
 	if state, err := st.GetBrowserState(ctx, "sess_recover"); err != nil || state.TabID != opened.ID {
 		t.Fatalf("browser state should stay synced: state=%+v err=%v", state, err)
+	}
+}
+
+func TestRecoverBrowserTabRestoresStoredMetadataOnce(t *testing.T) {
+	srv, st, browserSvc := newBrowserTestServer(t)
+	browserSvc.supportsMetadataRecovery = true
+	ctx := context.Background()
+	const sessionID, tabID = "sess_metadata_recover", "tab_saved"
+	if err := st.CreateSession(ctx, &store.Session{ID: sessionID, Provider: "mock", Model: "mock"}); err != nil {
+		t.Fatal(err)
+	}
+	saved, err := st.PutBrowserState(ctx, store.BrowserStateInput{
+		SessionID: sessionID, TabID: tabID, URL: "https://example.com/saved",
+		Title: "Saved page", FaviconURL: "https://example.com/icon.png",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp := req(t, http.MethodPost, srv.URL+"/sessions/"+sessionID+"/browser/tabs/"+tabID+"/recover", nil)
+	recovered := decodeJSON[browser.TabSnapshot](t, resp)
+	if resp.StatusCode != http.StatusOK || recovered.ID != tabID || recovered.SessionID != sessionID || recovered.URL != saved.URL {
+		t.Fatalf("stored recovery status=%d tab=%+v", resp.StatusCode, recovered)
+	}
+	if browserSvc.getTabCount != 1 || len(browserSvc.recoverHints) != 1 {
+		t.Fatalf("stored recovery repeated a lookup or recovery: get=%d hints=%+v", browserSvc.getTabCount, browserSvc.recoverHints)
+	}
+	hint := browserSvc.recoverHints[0]
+	if hint.TabID != tabID || hint.URL != saved.URL || hint.Title != saved.Title || hint.FaviconURL != saved.FaviconURL || !hint.CreatedAt.Equal(saved.CreatedAt) {
+		t.Fatalf("recovery did not use the saved metadata: %+v", hint)
+	}
+	stored, err := st.GetBrowserTabState(ctx, sessionID, tabID)
+	if err != nil || stored.URL != recovered.URL || stored.Title != recovered.Title || stored.FaviconURL != recovered.FaviconURL {
+		t.Fatalf("recovered snapshot was not persisted: state=%+v tab=%+v err=%v", stored, recovered, err)
+	}
+}
+
+func TestRecoverBrowserTabDoesNotProbeMissingMetadataTab(t *testing.T) {
+	srv, st, browserSvc := newBrowserTestServer(t)
+	browserSvc.supportsMetadataRecovery = true
+	ctx := context.Background()
+	if err := st.CreateSession(ctx, &store.Session{ID: "sess_missing_metadata", Provider: "mock", Model: "mock"}); err != nil {
+		t.Fatal(err)
+	}
+	resp := req(t, http.MethodPost, srv.URL+"/sessions/sess_missing_metadata/browser/tabs/tab_missing/recover", nil)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound || browserSvc.getTabCount != 1 || len(browserSvc.recoverHints) != 0 {
+		t.Fatalf("missing metadata should not issue an empty recovery: status=%d get=%d hints=%+v", resp.StatusCode, browserSvc.getTabCount, browserSvc.recoverHints)
 	}
 }
 
@@ -1253,7 +1300,9 @@ type fakeBrowserService struct {
 	typeCommit               bool
 	selectInput              browser.SelectInput
 	scrollY                  float64
+	getTabCount              int
 	recoverCount             int
+	recoverHints             []browser.RecoverHint
 	nextTab                  int
 	revokedSessions          []string
 }
@@ -1317,6 +1366,7 @@ func (f *fakeBrowserService) ListTabs(_ context.Context, sessionID string) ([]br
 }
 
 func (f *fakeBrowserService) GetTab(_ context.Context, sessionID, tabID string) (browser.TabSnapshot, error) {
+	f.getTabCount++
 	tab, ok := f.tabs[tabID]
 	if !ok || tab.SessionID != sessionID {
 		return browser.TabSnapshot{}, browser.ErrTabNotFound
@@ -1326,6 +1376,7 @@ func (f *fakeBrowserService) GetTab(_ context.Context, sessionID, tabID string) 
 }
 
 func (f *fakeBrowserService) Recover(_ context.Context, sessionID string, hint browser.RecoverHint) (browser.TabSnapshot, error) {
+	f.recoverHints = append(f.recoverHints, hint)
 	if err := f.recoverErrors[hint.TabID]; err != nil && hint.URL != "" {
 		return browser.TabSnapshot{}, err
 	}

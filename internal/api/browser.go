@@ -290,26 +290,29 @@ func (s *Server) recoverBrowserTab(c *cart.Context) error {
 		if !errors.Is(err, browser.ErrTabNotFound) {
 			return s.browserError(c, err)
 		}
-		tab, err = s.browser.Recover(c.Request.Context(), sessionID, browser.RecoverHint{TabID: tabID})
-		if err == nil {
-			if err := s.syncBrowserState(c.Request.Context(), sessionID, tab); err != nil {
-				return browserStoreError(c, s, err)
+		// Metadata-backed services need the saved URL. Services retaining their
+		// own target bindings can still recover a missing live target by ID.
+		if !browserSupportsMetadataRecovery(s.browser) {
+			tab, err = s.browser.Recover(c.Request.Context(), sessionID, browser.RecoverHint{TabID: tabID})
+			if err == nil {
+				if err := s.syncBrowserState(c.Request.Context(), sessionID, tab); err != nil {
+					return browserStoreError(c, s, err)
+				}
+				c.JSON(http.StatusOK, tab)
+				return nil
 			}
-			c.JSON(http.StatusOK, tab)
-			return nil
+			if !errors.Is(err, browser.ErrTabNotFound) {
+				return s.browserError(c, err)
+			}
 		}
-		if !errors.Is(err, browser.ErrTabNotFound) {
-			return s.browserError(c, err)
-		}
-		if ok, recoverErr := s.recoverStoredBrowserTab(c.Request.Context(), sessionID, tabID); recoverErr != nil {
+		tab, ok, recoverErr := s.recoverStoredBrowserTab(c.Request.Context(), sessionID, tabID)
+		if recoverErr != nil {
 			return s.browserError(c, recoverErr)
 		} else if !ok {
 			return s.browserError(c, err)
 		}
-		tab, err = s.browser.GetTab(c.Request.Context(), sessionID, tabID)
-		if err != nil {
-			return s.browserError(c, err)
-		}
+		c.JSON(http.StatusOK, tab)
+		return nil
 	}
 	tab, err = s.browser.Recover(c.Request.Context(), sessionID, browser.RecoverHint{
 		TabID:      tab.ID,
@@ -1107,28 +1110,28 @@ func (s *Server) browserProcessMode(ctx context.Context, sessionID string) strin
 	return s.browser.ProcessMode(ctx, sessionID)
 }
 
-func (s *Server) recoverStoredBrowserTab(ctx context.Context, sessionID, tabID string) (bool, error) {
+func (s *Server) recoverStoredBrowserTab(ctx context.Context, sessionID, tabID string) (browser.TabSnapshot, bool, error) {
 	if s.browser == nil {
-		return false, nil
+		return browser.TabSnapshot{}, false, nil
 	}
 	state, err := s.store.GetBrowserTabState(ctx, sessionID, tabID)
 	if errors.Is(err, store.ErrNotFound) {
-		return false, nil
+		return browser.TabSnapshot{}, false, nil
 	}
 	if err != nil {
-		return false, err
+		return browser.TabSnapshot{}, false, err
 	}
 	if tabID != "" && state.TabID != tabID {
-		return false, nil
+		return browser.TabSnapshot{}, false, nil
 	}
 	tab, ok, err := s.recoverBrowserState(ctx, sessionID, state)
 	if err != nil || !ok {
-		return ok, err
+		return tab, ok, err
 	}
 	if err := s.syncBrowserState(ctx, sessionID, tab); err != nil {
-		return false, err
+		return browser.TabSnapshot{}, false, err
 	}
-	return true, nil
+	return tab, true, nil
 }
 
 func (s *Server) recoverBrowserState(ctx context.Context, sessionID string, state *store.BrowserState) (browser.TabSnapshot, bool, error) {
