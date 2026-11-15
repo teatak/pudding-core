@@ -86,13 +86,14 @@ type bridgeNativeAction struct {
 }
 
 type bridgeNativeUse struct {
-	BundleID      string                   `json:"bundleID"`
-	Name          string                   `json:"name"`
-	PID           int32                    `json:"pid"`
-	NewlyLaunched bool                     `json:"newlyLaunched"`
-	WindowStatus  string                   `json:"windowStatus"`
-	WindowError   *bridgeFailure           `json:"windowError,omitempty"`
-	Windows       []bridgeCapturableWindow `json:"windows"`
+	BundleID        string                   `json:"bundleID"`
+	Name            string                   `json:"name"`
+	PID             int32                    `json:"pid"`
+	NewlyLaunched   bool                     `json:"newlyLaunched"`
+	ForegroundError json.RawMessage          `json:"foregroundError,omitempty"`
+	WindowStatus    string                   `json:"windowStatus"`
+	WindowError     *bridgeFailure           `json:"windowError,omitempty"`
+	Windows         []bridgeCapturableWindow `json:"windows"`
 }
 
 type bridgeNativeQuit struct {
@@ -172,7 +173,17 @@ func (s *ElectronBridgeService) UseApp(ctx context.Context, sessionID, appID str
 		failure := Failure{Code: raw.WindowError.Code, Message: raw.WindowError.Message, Permission: raw.WindowError.Permission, Retryable: raw.WindowError.Retryable, Outcome: validOutcome(raw.WindowError.Outcome)}
 		windowError = &failure
 	}
-	return NativeUse{AppID: raw.BundleID, Name: raw.Name, PID: raw.PID, NewlyLaunched: raw.NewlyLaunched, WindowStatus: raw.WindowStatus, WindowError: windowError, Windows: windows}, nil
+	var foregroundError *Failure
+	if len(raw.ForegroundError) != 0 && !bytes.Equal(bytes.TrimSpace(raw.ForegroundError), []byte("null")) {
+		// Preserve the envelope for the manager: the app may already have been
+		// launched, so ownership must be registered before reporting this error.
+		foregroundError = &Failure{}
+		var failure bridgeFailure
+		if json.Unmarshal(raw.ForegroundError, &failure) == nil {
+			foregroundError = &Failure{Code: failure.Code, Message: failure.Message, Permission: failure.Permission, Retryable: failure.Retryable, Outcome: failure.Outcome}
+		}
+	}
+	return NativeUse{AppID: raw.BundleID, Name: raw.Name, PID: raw.PID, NewlyLaunched: raw.NewlyLaunched, ForegroundError: foregroundError, WindowStatus: raw.WindowStatus, WindowError: windowError, Windows: windows}, nil
 }
 
 func (s *ElectronBridgeService) QuitApp(ctx context.Context, sessionID, appID string, pid int32) (NativeQuit, error) {

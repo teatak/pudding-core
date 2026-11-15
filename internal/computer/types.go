@@ -85,13 +85,14 @@ type AppList struct {
 }
 
 type NativeUse struct {
-	AppID         string             `json:"appID"`
-	Name          string             `json:"name"`
-	PID           int32              `json:"pid"`
-	NewlyLaunched bool               `json:"newlyLaunched"`
-	WindowStatus  string             `json:"windowStatus"`
-	WindowError   *Failure           `json:"windowError,omitempty"`
-	Windows       []CapturableWindow `json:"windows"`
+	AppID           string             `json:"appID"`
+	Name            string             `json:"name"`
+	PID             int32              `json:"pid"`
+	NewlyLaunched   bool               `json:"newlyLaunched"`
+	ForegroundError *Failure           `json:"foregroundError,omitempty"`
+	WindowStatus    string             `json:"windowStatus"`
+	WindowError     *Failure           `json:"windowError,omitempty"`
+	Windows         []CapturableWindow `json:"windows"`
 }
 
 type UseResult struct {

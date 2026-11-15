@@ -388,6 +388,114 @@ func TestManagerDoesNotOwnAlreadyRunningApplication(t *testing.T) {
 	}
 }
 
+func TestManagerKeepsLaunchedApplicationAfterForegroundFailure(t *testing.T) {
+	for _, code := range []string{"computer_activation_failed", "computer_window_raise_failed", "computer_use_failed"} {
+		t.Run(code, func(t *testing.T) {
+			service := &fakeService{launch: NativeUse{
+				AppID: "com.example.App", Name: "Example", PID: 42, NewlyLaunched: true, WindowStatus: WindowStatusNone,
+				ForegroundError: &Failure{Code: code, Message: "could not show the application", Outcome: "unknown"},
+			}}
+			manager := NewManager(service)
+			result, err := manager.UseApp(context.Background(), "session_a", "com.example.App", true, AppSelection{})
+			assertOperationCode(t, err, code)
+			if failure := ErrorFailure(err); failure.Outcome != "unknown" || failure.Retryable || result.LaunchID != nil {
+				t.Fatalf("foreground failure reported success or a safe retry: result=%+v failure=%+v", result, failure)
+			}
+			if err := manager.ReleaseSession(context.Background(), "session_a"); err != nil {
+				t.Fatal(err)
+			}
+			if len(service.quitRequests) != 1 || service.quitRequests[0].AppID != "com.example.App" || service.quitRequests[0].PID != 42 || len(manager.launches) != 0 {
+				t.Fatalf("foreground failure lost the launched application: quits=%+v leases=%+v", service.quitRequests, manager.launches)
+			}
+		})
+	}
+}
+
+func TestManagerRecoversSameLaunchAfterForegroundFailure(t *testing.T) {
+	service := &fakeService{launch: NativeUse{
+		AppID: "com.example.App", Name: "Example", PID: 42, NewlyLaunched: true, WindowStatus: WindowStatusNone,
+		ForegroundError: &Failure{Code: "computer_activation_failed", Message: "could not activate", Outcome: "unknown"},
+	}}
+	manager := NewManager(service)
+	_, err := manager.UseApp(context.Background(), "session_a", "com.example.App", true, AppSelection{})
+	assertOperationCode(t, err, "computer_activation_failed")
+	lease := manager.launches["session_a"]
+	if lease == nil || len(lease.owned) != 1 {
+		t.Fatalf("failed app entry has no launch ownership: %+v", lease)
+	}
+	var launchID string
+	for id := range lease.owned {
+		launchID = id
+	}
+	service.launch.NewlyLaunched = false
+	_, err = manager.UseApp(context.Background(), "session_a", "com.example.App", true, AppSelection{})
+	assertOperationCode(t, err, "computer_activation_failed")
+	service.launch.ForegroundError = nil
+	recovered, err := manager.UseApp(context.Background(), "session_a", "com.example.App", false, AppSelection{})
+	if err != nil || recovered.LaunchID == nil || *recovered.LaunchID != launchID || len(lease.owned) != 1 {
+		t.Fatalf("app entry did not recover original ownership: result=%+v err=%v lease=%+v", recovered, err, lease)
+	}
+	closed, err := manager.QuitApp(context.Background(), "session_a", *recovered.LaunchID)
+	if err != nil || !closed.Closed || len(service.quitRequests) != 1 {
+		t.Fatalf("recovered launch was not normally quit: result=%+v err=%v", closed, err)
+	}
+}
+
+func TestManagerDoesNotOwnPreexistingApplicationAfterForegroundFailure(t *testing.T) {
+	service := &fakeService{launch: NativeUse{
+		AppID: "com.example.App", Name: "Example", PID: 42, WindowStatus: WindowStatusNone,
+		ForegroundError: &Failure{Code: "computer_window_raise_failed", Message: "could not raise windows", Outcome: "unknown"},
+	}}
+	manager := NewManager(service)
+	_, err := manager.UseApp(context.Background(), "session_a", "com.example.App", true, AppSelection{})
+	assertOperationCode(t, err, "computer_window_raise_failed")
+	if len(manager.launches) != 0 {
+		t.Fatalf("preexisting app acquired launch ownership: %+v", manager.launches)
+	}
+	if err := manager.ReleaseSession(context.Background(), "session_a"); err != nil {
+		t.Fatal(err)
+	}
+	if len(service.quitRequests) != 0 {
+		t.Fatalf("preexisting app was quit: %+v", service.quitRequests)
+	}
+}
+
+func TestManagerRejectsMalformedForegroundFailureWithoutLosingLaunch(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		foreground bool
+		failure    Failure
+	}{
+		{name: "empty object", foreground: true},
+		{name: "invalid code", foreground: true, failure: Failure{Code: "invalid", Message: "activation failed", Outcome: "unknown"}},
+		{name: "empty message", foreground: true, failure: Failure{Code: "computer_activation_failed", Outcome: "unknown"}},
+		{name: "missing outcome", foreground: true, failure: Failure{Code: "computer_activation_failed", Message: "activation failed"}},
+		{name: "not started", foreground: true, failure: Failure{Code: "computer_activation_failed", Message: "activation failed", Outcome: "not_started"}},
+		{name: "completed", foreground: true, failure: Failure{Code: "computer_activation_failed", Message: "activation failed", Outcome: "completed"}},
+		{name: "retryable", foreground: true, failure: Failure{Code: "computer_activation_failed", Message: "activation failed", Outcome: "unknown", Retryable: true}},
+		{name: "not requested", failure: Failure{Code: "computer_activation_failed", Message: "activation failed", Outcome: "unknown"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			service := &fakeService{launch: NativeUse{
+				AppID: "com.example.App", Name: "Example", PID: 42, NewlyLaunched: true, WindowStatus: WindowStatusNone,
+				ForegroundError: &tc.failure,
+			}}
+			manager := NewManager(service)
+			_, err := manager.UseApp(context.Background(), "session_a", "com.example.App", tc.foreground, AppSelection{})
+			assertOperationCode(t, err, "computer_invalid_response")
+			if failure := ErrorFailure(err); failure.Outcome != "unknown" || failure.Retryable {
+				t.Fatalf("malformed foreground error permitted replay: %+v", failure)
+			}
+			if err := manager.ReleaseSession(context.Background(), "session_a"); err != nil {
+				t.Fatal(err)
+			}
+			if len(service.quitRequests) != 1 || service.quitRequests[0].PID != 42 {
+				t.Fatalf("malformed foreground error lost launch ownership: %+v", service.quitRequests)
+			}
+		})
+	}
+}
+
 func TestManagerRejectsWindowFromAnotherProcess(t *testing.T) {
 	appID := "com.example.App"
 	service := &fakeService{launch: NativeUse{
@@ -497,14 +605,19 @@ func TestManagerReleaseStopsQueuedAppUse(t *testing.T) {
 }
 
 func TestManagerReleaseHandlesLateAppEntry(t *testing.T) {
+	foregroundFailure := &Failure{Code: "computer_activation_failed", Message: "could not activate", Outcome: "unknown"}
 	for _, tc := range []struct {
-		name          string
-		newlyLaunched bool
-		closed        bool
+		name            string
+		newlyLaunched   bool
+		closed          bool
+		foregroundError *Failure
 	}{
 		{name: "new launch", newlyLaunched: true, closed: true},
 		{name: "already running", closed: true},
 		{name: "new launch needs attention", newlyLaunched: true},
+		{name: "new launch foreground failed", newlyLaunched: true, closed: true, foregroundError: foregroundFailure},
+		{name: "already running foreground failed", closed: true, foregroundError: foregroundFailure},
+		{name: "new launch malformed foreground error", newlyLaunched: true, closed: true, foregroundError: &Failure{}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			started, finish := make(chan struct{}), make(chan struct{})
@@ -515,7 +628,7 @@ func TestManagerReleaseHandlesLateAppEntry(t *testing.T) {
 			service.use = func(context.Context, string, string, bool, AppSelection) (NativeUse, error) {
 				close(started)
 				<-finish
-				return NativeUse{AppID: "com.example.App", Name: "Example", PID: 42, NewlyLaunched: tc.newlyLaunched, WindowStatus: WindowStatusNone}, nil
+				return NativeUse{AppID: "com.example.App", Name: "Example", PID: 42, NewlyLaunched: tc.newlyLaunched, ForegroundError: tc.foregroundError, WindowStatus: WindowStatusNone}, nil
 			}
 			cleanupBudgetValid := false
 			service.quit = func(ctx context.Context, _ string, appID string, pid int32) (NativeQuit, error) {
@@ -529,7 +642,7 @@ func TestManagerReleaseHandlesLateAppEntry(t *testing.T) {
 			defer cancel()
 			done := make(chan error, 1)
 			go func() {
-				_, err := manager.UseApp(ctx, "session_a", "com.example.App", false, AppSelection{})
+				_, err := manager.UseApp(ctx, "session_a", "com.example.App", tc.foregroundError != nil, AppSelection{})
 				done <- err
 			}()
 			awaitComputerLifecycle(t, started)
