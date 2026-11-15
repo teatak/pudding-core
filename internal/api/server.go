@@ -68,6 +68,7 @@ type Server struct {
 	browserTabVersions     map[string]map[string]uint64
 	// browserClosedTabs prevents delayed live snapshots from re-adopting explicitly closed tab IDs.
 	browserClosedTabs map[string]map[string]struct{}
+	browserToolOpens  map[string]map[chan struct{}]struct{}
 	oauthMu           sync.Mutex
 	oauth             map[string]oauthStartState
 	oauthBroker       *oauthbroker.Client

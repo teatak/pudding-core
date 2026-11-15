@@ -559,7 +559,10 @@ func TestManagerReleasesOwnedApplicationsWithNormalQuit(t *testing.T) {
 }
 
 func TestManagerReleaseRevokesOwnershipEvenWhenWriteQueueTimesOut(t *testing.T) {
-	service := &fakeService{}
+	closed := make(chan NativeQuit, 1)
+	service := &computerLifecycleService{quit:func(_ context.Context,_ string,appID string,pid int32)(NativeQuit,error){
+		result:=NativeQuit{AppID:appID,PID:pid,Closed:true};closed<-result;return result,nil
+	}}
 	manager := NewManager(service)
 	launched, err := manager.UseApp(context.Background(), "session_a", "com.example.App", false, AppSelection{})
 	if err != nil {
@@ -570,15 +573,37 @@ func TestManagerReleaseRevokesOwnershipEvenWhenWriteQueueTimesOut(t *testing.T) 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
 	defer cancel()
 	err = manager.ReleaseSession(ctx, "session_a")
-	if !errors.Is(err, context.DeadlineExceeded) || !strings.Contains(err.Error(), "com.example.App") || !strings.Contains(err.Error(), "PID 42") {
+	if !errors.Is(err, context.DeadlineExceeded) || !strings.Contains(err.Error(), "queued") {
 		t.Fatalf("release error = %v", err)
 	}
 	if _, ok := manager.OwnedLaunchAppID("session_a", *launched.LaunchID); ok || len(manager.launches) != 0 {
 		t.Fatal("timed-out release retained session ownership")
 	}
-	if len(service.quitRequests) != 0 {
-		t.Fatalf("cleanup bypassed the write queue: %+v", service.quitRequests)
+	select {case <-closed:t.Fatal("cleanup bypassed write queue");default:}
+	unlock()
+	if result:=awaitComputerLifecycle(t,closed);result.PID!=42{t.Fatalf("wrong cleanup target: %+v",result)}
+}
+
+func TestManagerReleaseBudgetsEachQuitAfterTheWriteWait(t *testing.T) {
+	var budgets []time.Duration
+	service:=&computerLifecycleService{quit:func(ctx context.Context,_ string,appID string,pid int32)(NativeQuit,error){
+		deadline,ok:=ctx.Deadline();if !ok {t.Error("quit has no deadline")};budgets=append(budgets,time.Until(deadline))
+		if len(budgets)==1 {<-ctx.Done();return NativeQuit{},ctx.Err()}
+		return NativeQuit{AppID:appID,PID:pid,Closed:true},nil
+	}}
+	manager:=NewManager(service)
+	for _,appID:=range []string{"com.example.A","com.example.B"}{
+		if _,err:=manager.UseApp(context.Background(),"session",appID,false,AppSelection{});err!=nil{t.Fatal(err)}
 	}
+	unlock:=holdComputerWrite(t,manager);defer unlock()
+	waiting:=&computerWriteWaitContext{Context:context.Background(),waiting:make(chan struct{})}
+	done:=make(chan error,1);go func(){done<-manager.ReleaseSession(waiting,"session")}()
+	awaitComputerLifecycle(t,waiting.waiting)
+	time.Sleep(2100*time.Millisecond)
+	unlock()
+	if err:=awaitComputerLifecycle(t,done);!errors.Is(err,context.DeadlineExceeded){t.Fatalf("expected first quit timeout: %v",err)}
+	if len(budgets)!=2 {t.Fatalf("quit count=%d",len(budgets))}
+	for _,budget:=range budgets {if budget<1900*time.Millisecond || budget>2*time.Second{t.Fatalf("quit budget=%v",budget)}}
 }
 
 func TestManagerReleaseStopsQueuedAppUse(t *testing.T) {

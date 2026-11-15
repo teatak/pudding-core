@@ -131,6 +131,16 @@ type BrowserStateStore interface {
 	ClearBrowserState(ctx context.Context, sessionID string) error
 }
 
+// BrowserLifecycle shares persistence and close generations with HTTP clients.
+// The open scope keeps early renderer snapshots from racing gate publication.
+type BrowserLifecycle interface {
+	BeginBrowserOpen(context.Context, string) (context.Context, func())
+	BrowserTabOpened(context.Context, string, browser.TabSnapshot) error
+	BrowserTabUpdated(context.Context, string, browser.TabSnapshot) error
+	BrowserTabClosed(context.Context, string, string) error
+	BrowserSessionClosed(context.Context, string, []browser.TabSnapshot) error
+}
+
 type StudioItemStore interface {
 	GetStudioItem(ctx context.Context, id string) (*store.StudioItem, error)
 }
@@ -148,6 +158,7 @@ type BuiltinRunner struct {
 	historyMessages          HistoryMessageSource
 	historyTurns             HistoryTurnSource
 	browserState             BrowserStateStore
+	browserLifecycle         BrowserLifecycle
 	widgetStore              StudioItemStore
 	browser                  browser.Service
 	computer                 computer.Controller
@@ -277,6 +288,11 @@ func WithBrowserState(store BrowserStateStore) BuiltinOption {
 	return func(r *BuiltinRunner) {
 		r.browserState = store
 	}
+}
+
+// SetBrowserLifecycle is wired once at startup, before tools or HTTP run.
+func (r *BuiltinRunner) SetBrowserLifecycle(lifecycle BrowserLifecycle) {
+	r.browserLifecycle = lifecycle
 }
 
 func WithStudioItems(source StudioItemStore) BuiltinOption {

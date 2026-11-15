@@ -29,6 +29,11 @@ func (r *BuiltinRunner) browserOpen(ctx context.Context, call Call) Result {
 	if args.NewTab && strings.TrimSpace(args.TabID) != "" {
 		return toolJSONError(out, "invalid_arguments", "tabID and newTab cannot be used together")
 	}
+	if r.browserLifecycle != nil {
+		var finish func()
+		ctx, finish = r.browserLifecycle.BeginBrowserOpen(ctx, call.SessionID)
+		defer finish()
+	}
 	var tab browser.TabSnapshot
 	var err error
 	if args.NewTab {
@@ -52,7 +57,12 @@ func (r *BuiltinRunner) browserOpen(ctx context.Context, call Call) Result {
 	if err != nil {
 		return browserToolError(out, err)
 	}
-	if err := r.syncBrowserState(ctx, call.SessionID, tab); err != nil {
+	if r.browserLifecycle != nil {
+		err = r.browserLifecycle.BrowserTabOpened(ctx, call.SessionID, tab)
+	} else {
+		err = r.syncBrowserState(ctx, call.SessionID, tab)
+	}
+	if err != nil {
 		return browserToolError(out, err)
 	}
 	out.Ok = true
@@ -524,7 +534,11 @@ func (r *BuiltinRunner) browserClose(ctx context.Context, call Call) Result {
 		if err := r.browser.ReleaseTab(ctx, call.SessionID, requestedTabID); err != nil && !errors.Is(err, browser.ErrTabNotFound) {
 			return browserToolError(out, err)
 		}
-		if r.browserState != nil {
+		if r.browserLifecycle != nil {
+			if err := r.browserLifecycle.BrowserTabClosed(ctx, call.SessionID, requestedTabID); err != nil {
+				return browserToolError(out, err)
+			}
+		} else if r.browserState != nil {
 			if err := r.browserState.DeleteBrowserState(ctx, call.SessionID, requestedTabID); err != nil {
 				return browserToolError(out, err)
 			}
@@ -549,7 +563,11 @@ func (r *BuiltinRunner) browserClose(ctx context.Context, call Call) Result {
 	if err := r.browser.CloseSessionBrowser(ctx, call.SessionID); err != nil {
 		return browserToolError(out, err)
 	}
-	if r.browserState != nil {
+	if r.browserLifecycle != nil {
+		if err := r.browserLifecycle.BrowserSessionClosed(ctx, call.SessionID, tabs); err != nil {
+			return browserToolError(out, err)
+		}
+	} else if r.browserState != nil {
 		if err := r.browserState.ClearBrowserState(ctx, call.SessionID); err != nil {
 			return browserToolError(out, err)
 		}
@@ -643,6 +661,9 @@ func (r *BuiltinRunner) browserTabs(ctx context.Context, sessionID string) ([]br
 }
 
 func (r *BuiltinRunner) syncBrowserState(ctx context.Context, sessionID string, tab browser.TabSnapshot) error {
+	if r.browserLifecycle != nil {
+		return r.browserLifecycle.BrowserTabUpdated(ctx, sessionID, tab)
+	}
 	if r.browserState == nil {
 		return nil
 	}

@@ -471,18 +471,29 @@ func (m *Manager) ReleaseSession(ctx context.Context, sessionID string) error {
 		return nil
 	}
 	if err := m.acquireWrite(ctx, "release"); err != nil {
-		var errs []error
-		for _, record := range m.takeReleasedLaunches(lease) {
-			errs = append(errs, fmt.Errorf("release app %s (PID %d): %w", record.appID, record.pid, err))
-		}
-		return errors.Join(errs...)
+		// Ownership is already revoked, but keep the detached lease until its
+		// cleanup gets the write slot. Cancellation is not permission to forget it.
+		go func() {
+			_ = m.acquireWrite(context.Background(), "release")
+			defer m.releaseWrite()
+			if err := m.cleanupReleasedLaunches(sessionID, lease); err != nil {
+				slog.Warn("computer: queued session cleanup incomplete", "sessionID", sessionID, "err", err)
+			}
+		}()
+		return fmt.Errorf("session cleanup queued after write wait: %w", err)
 	}
 	defer m.releaseWrite()
+	return m.cleanupReleasedLaunches(sessionID, lease)
+}
+
+func (m *Manager) cleanupReleasedLaunches(sessionID string, lease *launchLease) error {
 	var errs []error
 	for _, record := range m.takeReleasedLaunches(lease) {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		if err := m.quitReleasedLaunch(ctx, sessionID, record); err != nil {
 			errs = append(errs, err)
 		}
+		cancel()
 	}
 	return errors.Join(errs...)
 }
