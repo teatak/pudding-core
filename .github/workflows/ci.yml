@@ -14,12 +14,18 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+      - name: Report formatting for Code fixes
+        run: gofmt -d internal/lsp internal/tool
       - run: brew install portaudio cmake pkgconf
       - name: Prepare pinned Abseil for the arm64 audio bridge
         run: |
           bash scripts/prepare-abseil.sh
           echo "PKG_CONFIG_PATH=$PWD/dist/deps/abseil/lib/pkgconfig" >> "$GITHUB_ENV"
       - run: make test
+      - name: Verify file safety and verification regressions
+        run: go test -count=1 -v -tags "sqlite_fts5 webrtcaec" ./internal/turnfiles ./internal/tool -run '^(TestTrackerUnreadableBaselineCannotDeleteOriginalOnUndo|TestReplayerRejectsIncompleteExistingSnapshots|TestFilePatchRejectsApprovalPermissionDrift|TestGitStageRetainsBuiltInNormalization|TestGitStageNormalizesWithoutExternalFilters|TestGitStagePreservesLiteralSymlinkTarget|TestCommandMakeIgnoredErrorsDoNotClaimPass)$'
+      - name: Verify language-service cancellation and lifecycle races
+        run: go test -count=1 -v -race ./internal/lsp
       - run: make schema-check
       - run: make daemon
       - uses: actions/setup-node@v6
@@ -68,7 +74,7 @@ jobs:
       - run: make daemon BUILDTAGS=sqlite_fts5 DAEMON_OUT=bin/puddingd.exe
         id: daemon-build
       - name: Verify native PowerShell and command lifecycle
-        run: go test -count=1 -tags sqlite_fts5 ./internal/tool -run '^(TestPowerShell|TestWindows|TestCommandRun(UsesProjectCWDAndCapturesOutput|StreamsStdoutAndStderr|ReturnsExitCode|TimeoutKillsProcessTree|StopsOnContextCancel)|TestBackgroundProcess(StartPollStop|PipeAcceptsInput|RunsAndStopsLocalServer))'
+        run: go test -count=1 -v -tags sqlite_fts5 ./internal/tool -run '^(TestPowerShell|TestWindows|TestCommandRun(UsesProjectCWDAndCapturesOutput|StreamsStdoutAndStderr|ReturnsExitCode|TimeoutKillsProcessTree|StopsOnContextCancel)|TestBackgroundProcess(StartPollStop|PipeAcceptsInput|RunsAndStopsLocalServer))'
       - run: make test BUILDTAGS=sqlite_fts5
         if: ${{ !cancelled() && steps.daemon-build.outcome == 'success' }}
       - run: make schema-check BUILDTAGS=sqlite_fts5

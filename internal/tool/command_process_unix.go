@@ -21,7 +21,7 @@ func configureCommandPTY(cmd *exec.Cmd) {
 // The process group created at start already owns the command's descendants.
 func attachCommandProcess(*exec.Cmd) error { return nil }
 
-func releaseCommandProcess(*exec.Cmd) {}
+func releaseCommandProcess(*exec.Cmd) error { return nil }
 
 func commandProcessSignal(cmd *exec.Cmd) string {
 	if cmd == nil || cmd.ProcessState == nil {

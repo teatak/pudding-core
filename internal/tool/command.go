@@ -132,7 +132,6 @@ func (r *BuiltinRunner) commandRun(ctx context.Context, call Call) Result {
 		_ = cmd.Wait()
 		return commandResult(out, args, shell, resolvedCWD, call.ProjectDirs, execution, -1, stdout, stderr, false, false, time.Since(startedAt), "start_failed", err)
 	}
-	defer releaseCommandProcess(cmd)
 	waitCh := make(chan error, 1)
 	go func() { waitCh <- cmd.Wait() }()
 
@@ -150,6 +149,8 @@ func (r *BuiltinRunner) commandRun(ctx context.Context, call Call) Result {
 			waitErr = errors.Join(waitErr, killErr)
 		}
 	}
+	cleanupErr := releaseCommandProcess(cmd)
+	waitErr = errors.Join(waitErr, cleanupErr)
 
 	exitCode := 0
 	if cmd.ProcessState != nil {
@@ -163,6 +164,8 @@ func (r *BuiltinRunner) commandRun(ctx context.Context, call Call) Result {
 		reason = "timed_out"
 	case cancelled:
 		reason = "cancelled"
+	case cleanupErr != nil:
+		reason = "process_cleanup_failed"
 	case waitErr != nil:
 		reason = "non_zero_exit"
 	}

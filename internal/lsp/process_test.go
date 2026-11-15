@@ -416,6 +416,7 @@ type fakeLSP struct {
 	writeMu         sync.Mutex
 	rootURI         string
 	cancelSeen      bool
+	waitSeen        bool
 	serverRequest   map[string]json.RawMessage
 	nextServerID    int
 	ignoreShutdown  bool
@@ -509,8 +510,24 @@ func (s *fakeLSP) handleClientMessage(message wireMessage) (bool, error) {
 			time.Sleep(delay)
 			_ = s.respond(id, map[string]string{"value": value})
 		}(append(json.RawMessage(nil), message.ID...), params.Value, time.Duration(params.DelayMS)*time.Millisecond)
+	case "test/stopReading":
+		if err := s.respond(message.ID, true); err != nil {
+			return false, err
+		}
+		for { time.Sleep(time.Hour) }
+	case "textDocument/definition":
+		var params struct { TextDocument struct { URI string `json:"uri"` } `json:"textDocument"` }
+		if err := json.Unmarshal(message.Params, &params); err != nil { return false, err }
+		locations := []any{}
+		if _, open := s.documents[params.TextDocument.URI]; open {
+			locations = append(locations, map[string]any{"uri": params.TextDocument.URI, "range": Range{}})
+		}
+		return false, s.respond(message.ID, locations)
 	case "test/wait":
+		s.waitSeen = true
 		return false, nil
+	case "test/waitSeen":
+		return false, s.respond(message.ID, s.waitSeen)
 	case "$/cancelRequest":
 		s.cancelSeen = true
 	case "test/cancelSeen":

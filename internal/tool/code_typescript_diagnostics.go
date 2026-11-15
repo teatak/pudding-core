@@ -12,8 +12,12 @@ import (
 // empty publish is not a completed type check; use its documented tsserver
 // command bridge to obtain each completed diagnostic kind without a timing race.
 func (r *BuiltinRunner) typeScriptDocumentDiagnostics(ctx context.Context, target resolvedCodeTarget, uri string) ([]lsp.Diagnostic, error) {
+	return r.typeScriptDiagnosticKinds(ctx, target, uri, []string{"syntacticDiagnosticsSync", "semanticDiagnosticsSync", "suggestionDiagnosticsSync"})
+}
+
+func (r *BuiltinRunner) typeScriptDiagnosticKinds(ctx context.Context, target resolvedCodeTarget, uri string, commands []string) ([]lsp.Diagnostic, error) {
 	var diagnostics []lsp.Diagnostic
-	for _, command := range []string{"syntacticDiagnosticsSync", "semanticDiagnosticsSync", "suggestionDiagnosticsSync"} {
+	for _, command := range commands {
 		var response struct {
 			Success bool   `json:"success"`
 			Message string `json:"message"`
@@ -25,7 +29,7 @@ func (r *BuiltinRunner) typeScriptDocumentDiagnostics(ctx context.Context, targe
 				Code                   json.RawMessage
 			} `json:"body"`
 		}
-		err := r.languageService.Request(ctx, target.spec, "workspace/executeCommand", map[string]any{
+		err := r.codeLanguageService(ctx).Request(ctx, target.spec, "workspace/executeCommand", map[string]any{
 			"command": "typescript.tsserverRequest",
 			"arguments": []any{command, map[string]any{"file": uri}, map[string]any{
 				"executionTarget": 0, // Semantic server; await a synchronous result.

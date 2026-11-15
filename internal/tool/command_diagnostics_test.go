@@ -476,6 +476,19 @@ func TestCommandVerificationKindRecognizesStaticInvocations(t *testing.T) {
 		{[]string{"make", "build", "--", "-n"}, "build"},
 		{[]string{"make", "build", "FLAGS=-n"}, "build"},
 		{[]string{"make", "build", "-f", "Makefile", "-n"}, ""},
+		{[]string{"make", "build", "-t"}, ""},
+		{[]string{"make", "build", "-kt"}, ""},
+		{[]string{"make", "build", "--touch"}, ""},
+		{[]string{"make", "build", "-q"}, ""},
+		{[]string{"make", "build", "--question"}, ""},
+		{[]string{"make", "build", "-f", "-t"}, "build"},
+		{[]string{"make", "build", "-ft"}, "build"},
+		{[]string{"make", "build", "--file", "--touch"}, "build"},
+		{[]string{"make", "build", "--file=--touch"}, "build"},
+		{[]string{"make", "build", "--", "-t"}, "build"},
+		{[]string{"make", "build", "FLAGS=-t"}, "build"},
+		{[]string{"make", "build", "-Otarget"}, "build"},
+		{[]string{"make", "build", "-Onone"}, "build"},
 		{[]string{"go", "build", "-n=false", "./..."}, "build"},
 		{[]string{"go", "build", "-n", "-n=false", "./..."}, "build"},
 		{[]string{"go", "build", "-ldflags", "-n", "./..."}, "build"},
@@ -516,6 +529,11 @@ func TestCommandNonExecutingModesDoNotClaimVerification(t *testing.T) {
 		"pnpm exec tsc --noCheck",
 		"make build -n",
 		"make build --dry-run",
+		"make build -t",
+		"make build -kt",
+		"make build --touch",
+		"make build -q",
+		"make build --question",
 		"go build -n ./...",
 		"go build -n=true ./...",
 		"go build --n ./...",
@@ -565,7 +583,7 @@ func TestCommandNonExecutingModesDoNotClaimVerification(t *testing.T) {
 	}
 }
 
-func TestCommandVerificationIgnoresRuffFailureOnlyWhenRequested(t *testing.T) {
+func TestCommandVerificationIgnoresFailureOnlyWhenRequested(t *testing.T) {
 	for _, tc := range []struct {
 		argv []string
 		want bool
@@ -583,10 +601,51 @@ func TestCommandVerificationIgnoresRuffFailureOnlyWhenRequested(t *testing.T) {
 		{[]string{"ruff", "format", "--exit-zero"}, false},
 		{[]string{"npm", "run", "lint", "--", "--exit-zero"}, false},
 		{[]string{"eslint", "--exit-zero"}, false},
+		{[]string{"make", "build", "-i"}, true},
+		{[]string{"make", "build", "-ki"}, true},
+		{[]string{"make", "build", "--ignore-errors"}, true},
+		{[]string{"make", "-i", "build"}, true},
+		{[]string{"pnpm", "exec", "make", "build", "-i"}, true},
+		{[]string{"make", "build"}, false},
+		{[]string{"make", "build", "-f", "-i"}, false},
+		{[]string{"make", "build", "-fi"}, false},
+		{[]string{"make", "build", "--file", "--ignore-errors"}, false},
+		{[]string{"make", "build", "--file=--ignore-errors"}, false},
+		{[]string{"make", "build", "--", "-i"}, false},
+		{[]string{"make", "build", "FLAGS=-i"}, false},
+		{[]string{"make", "build", "-Oline"}, false},
 	} {
 		if got := commandVerificationIgnoresFailure(tc.argv); got != tc.want {
 			t.Errorf("%q: ignoresFailure=%v, want %v", tc.argv, got, tc.want)
 		}
+	}
+}
+
+func TestCommandMakeIgnoredErrorsDoNotClaimPass(t *testing.T) {
+	root := t.TempDir()
+	for _, command := range []string{"make build -i", "make build -ki", "make build --ignore-errors", "pnpm exec make build -i"} {
+		t.Run(command, func(t *testing.T) {
+			args := commandRunArgs{Command: command}
+			stdout, stderr := newCommandOutputBuffers(args, root, []string{root})
+			stderr.Write([]byte("make: [Makefile:2: build] Error 1 (ignored)\n"))
+			result := commandResult(Result{}, args, "sh", root, []string{root}, nil, 0, stdout, stderr, false, false, 0, "", nil)
+			for _, content := range []string{result.Content, ModelResultContent(CommandRun, result.Ok, result.Content, "turn", "call", true)} {
+				var fields map[string]any
+				if err := json.Unmarshal([]byte(content), &fields); err != nil {
+					t.Fatal(err)
+				}
+				if fields["ok"] != true || fields["exitCode"] != float64(0) || !strings.Contains(fields["stderr"].(string), "Error 1 (ignored)") {
+					t.Fatalf("process completion or failure output changed: %s", content)
+				}
+				if runtime.GOOS == "windows" {
+					if fields["verificationStatus"] != nil || fields["verificationKind"] != nil {
+						t.Fatalf("PowerShell gained a POSIX verification conclusion: %s", content)
+					}
+				} else if fields["verificationKind"] != "build" || fields["verificationStatus"] != "completed" {
+					t.Fatalf("ignored recipe failures claimed a build outcome: %s", content)
+				}
+			}
+		})
 	}
 }
 

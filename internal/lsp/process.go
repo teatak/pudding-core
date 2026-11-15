@@ -40,11 +40,14 @@ type Process struct {
 	positionEncoding string
 	diagnostics      *diagnosticsCache
 	stderr           *byteRing
-	documentsMu      sync.Mutex
+	documentsMu      chan struct{}
 	documents        map[string]documentState
 	documentUse      uint64
 
-	writeMu sync.Mutex
+	writeMu chan struct{}
+	operationMu chan struct{}
+	leases atomic.Int64
+	killOnce sync.Once
 	mu      sync.Mutex
 	pending map[string]chan wireMessage
 	err     error
@@ -97,6 +100,9 @@ func startProcess(ctx context.Context, spec ServerSpec, opts processOptions) (*P
 		diagnostics:      newDiagnosticsCache(),
 		stderr:           newByteRing(opts.stderrBytes),
 		documents:        map[string]documentState{},
+		documentsMu:      make(chan struct{}, 1),
+		writeMu:          make(chan struct{}, 1),
+		operationMu:      make(chan struct{}, 1),
 		pending:          map[string]chan wireMessage{},
 		done:             make(chan struct{}),
 	}
@@ -143,10 +149,11 @@ func (p *Process) initialize(ctx context.Context) error {
 	if encoding := strings.TrimSpace(result.Capabilities.PositionEncoding); encoding != "" {
 		p.positionEncoding = encoding
 	}
-	return p.Notify("initialized", struct{}{})
+	return p.NotifyContext(ctx, "initialized", struct{}{})
 }
 
-// Request sends one JSON-RPC request. Cancelling ctx only cancels this request.
+// Request cancels one request after a complete send. An interrupted frame makes
+// the stream unusable and terminates the process instead of reusing partial JSON.
 func (p *Process) Request(ctx context.Context, method string, params, result any) error {
 	if method == "" {
 		return errors.New("lsp request method is required")
@@ -173,10 +180,8 @@ func (p *Process) Request(ctx context.Context, method string, params, result any
 	p.mu.Unlock()
 
 	message := wireMessage{JSONRPC: "2.0", ID: idRaw, Method: method, Params: paramsRaw}
-	if err := p.writeMessage(message); err != nil {
+	if err := p.writeMessage(ctx, message); err != nil {
 		p.removePending(key, responseCh)
-		p.finish(fmt.Errorf("write lsp request: %w", err))
-		p.forceTerminate()
 		return err
 	}
 
@@ -194,7 +199,13 @@ func (p *Process) Request(ctx context.Context, method string, params, result any
 		return nil
 	case <-ctx.Done():
 		if p.removePending(key, responseCh) {
-			_ = p.Notify("$/cancelRequest", map[string]any{"id": id})
+			// Cancellation is best-effort and must never delay returning to
+			// the caller when another write or the server stdin is blocked.
+			go func() {
+				cancelCtx, cancel := context.WithTimeout(context.Background(), defaultShutdownTimeout)
+				defer cancel()
+				_ = p.NotifyContext(cancelCtx, "$/cancelRequest", map[string]any{"id": id})
+			}()
 		}
 		return ctx.Err()
 	case <-p.done:
@@ -203,28 +214,70 @@ func (p *Process) Request(ctx context.Context, method string, params, result any
 	}
 }
 
-// Notify sends one JSON-RPC notification.
+// Notify sends one notification with the default bounded write timeout.
 func (p *Process) Notify(method string, params any) error {
+	return p.NotifyContext(context.Background(), method, params)
+}
+
+// NotifyContext includes time waiting for the writer in the caller's deadline.
+func (p *Process) NotifyContext(ctx context.Context, method string, params any) error {
 	paramsRaw, err := marshalOptional(params)
 	if err != nil {
 		return fmt.Errorf("marshal lsp notification: %w", err)
 	}
-	return p.writeMessage(wireMessage{JSONRPC: "2.0", Method: method, Params: paramsRaw})
+	return p.writeMessage(ctx, wireMessage{JSONRPC: "2.0", Method: method, Params: paramsRaw})
 }
 
-func (p *Process) writeMessage(message wireMessage) error {
+func lockContext(ctx context.Context, gate chan struct{}) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	select {
+	case gate <- struct{}{}:
+		if err := ctx.Err(); err != nil {
+			<-gate
+			return err
+		}
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (p *Process) writeMessage(ctx context.Context, message wireMessage) error {
+	ctx, cancel := withTimeout(ctx, defaultRequestTimeout)
+	defer cancel()
 	payload, err := json.Marshal(message)
 	if err != nil {
 		return err
 	}
-	p.writeMu.Lock()
-	defer p.writeMu.Unlock()
+	if err := lockContext(ctx, p.writeMu); err != nil {
+		return err // No bytes were sent, so the shared stream remains usable.
+	}
+	defer func() { <-p.writeMu }()
 	select {
 	case <-p.done:
 		return p.processError()
 	default:
 	}
-	return writeFrame(p.stdin, payload, p.maxMessageBytes)
+	// There is at most one pipe writer per process. Closing stdin interrupts
+	// its OS pipe write; the buffered result lets it exit even after cancellation.
+	written := make(chan error, 1)
+	go func() { written <- writeFrame(p.stdin, payload, p.maxMessageBytes) }()
+	select {
+	case err := <-written:
+		if err != nil {
+			p.finish(fmt.Errorf("write lsp message: %w", err))
+			p.forceTerminate()
+		}
+		return err
+	case <-ctx.Done():
+		p.finish(fmt.Errorf("interrupted lsp frame: %w", ctx.Err()))
+		p.forceTerminate()
+		return ctx.Err()
+	case <-p.done:
+		return p.processError()
+	}
 }
 
 func (p *Process) readLoop() {
@@ -310,7 +363,7 @@ func (p *Process) handleServerRequest(message wireMessage) {
 	if responseErr != nil {
 		resultRaw = nil
 	}
-	_ = p.writeMessage(wireMessage{
+	_ = p.writeMessage(context.Background(), wireMessage{
 		JSONRPC: "2.0",
 		ID:      append(json.RawMessage(nil), message.ID...),
 		Result:  resultRaw,
@@ -392,7 +445,9 @@ func (p *Process) processError() error {
 }
 
 func (p *Process) forceTerminate() {
-	_ = terminateProcess(p.cmd)
+	p.killOnce.Do(func() {
+		go func() { _ = terminateProcess(p.cmd) }()
+	})
 }
 
 // Close performs the LSP shutdown handshake, then force-terminates on timeout.
@@ -419,11 +474,12 @@ func (p *Process) Close(ctx context.Context) error {
 	defer cancel()
 	var ignored any
 	requestErr := p.Request(shutdownCtx, "shutdown", nil, &ignored)
-	_ = p.Notify("exit", nil)
+	_ = p.NotifyContext(shutdownCtx, "exit", nil)
 	select {
 	case <-p.done:
 		return requestErr
 	case <-shutdownCtx.Done():
+		p.finish(shutdownCtx.Err())
 		p.forceTerminate()
 		return fmt.Errorf("language server shutdown: %w (stderr: %q)", shutdownCtx.Err(), p.Stderr())
 	}

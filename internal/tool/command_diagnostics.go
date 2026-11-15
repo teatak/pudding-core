@@ -168,7 +168,7 @@ func commandVerificationKind(argv []string) string {
 	case "gradle", "gradlew":
 		return verificationTargetKind(first)
 	case "make":
-		if makeDryRun(args) {
+		if makeHasOption(args, "ntq", "--just-print", "--dry-run", "--recon", "--touch", "--question") {
 			return ""
 		}
 		return verificationTargetKind(first)
@@ -203,7 +203,9 @@ func typeScriptVerificationKind(args []string) string {
 	return "check"
 }
 
-func makeDryRun(args []string) bool {
+// Make keeps parsing options after targets. Short options can be grouped, but
+// bytes belonging to an option's value must never be interpreted as flags.
+func makeHasOption(args []string, short string, long ...string) bool {
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
 		if arg == "--" {
@@ -211,9 +213,12 @@ func makeDryRun(args []string) bool {
 		}
 		if strings.HasPrefix(arg, "--") {
 			flag, _, inline := strings.Cut(arg, "=")
+			for _, wanted := range long {
+				if flag == wanted {
+					return true
+				}
+			}
 			switch flag {
-			case "--just-print", "--dry-run", "--recon":
-				return true
 			case "--file", "--makefile", "--directory", "--include-dir", "--old-file", "--assume-old", "--new-file", "--assume-new", "--what-if", "--eval":
 				if !inline {
 					i++
@@ -225,24 +230,25 @@ func makeDryRun(args []string) bool {
 			continue
 		}
 		for at := 1; at < len(arg); at++ {
-			switch arg[at] {
-			case 'n':
+			if strings.ContainsRune(short, rune(arg[at])) {
 				return true
-			case 'f', 'C', 'I', 'o', 'W':
+			}
+			switch arg[at] {
+			case 'f', 'C', 'I', 'o', 'W', 'E':
 				if at == len(arg)-1 {
 					i++
 				}
 				at = len(arg) // The remaining bytes are an option value, not flags.
-			case 'j', 'l':
-				at = len(arg) // Optional numeric values may be attached.
+			case 'j', 'l', 'O':
+				at = len(arg) // Optional values may be attached.
 			}
 		}
 	}
 	return false
 }
 
-// Ruff still runs and emits useful diagnostics with --exit-zero, but its exit
-// status cannot establish that lint passed. Follow only the package runners
+// These commands still run and emit useful diagnostics while ignoring failures,
+// but their exit status cannot establish a pass. Follow only the package runners
 // already recognized by commandVerificationKind, never opaque named scripts.
 func commandVerificationIgnoresFailure(argv []string) bool {
 	if len(argv) == 0 {
@@ -250,6 +256,8 @@ func commandVerificationIgnoresFailure(argv []string) bool {
 	}
 	op, args := commandOperation(argv[0]), argv[1:]
 	switch op {
+	case "make":
+		return makeHasOption(args, "i", "--ignore-errors")
 	case "ruff":
 		return lowerArg(args, 0) == "check" && commandHasOption(args[1:], "--exit-zero", "-e")
 	case "npx":
@@ -418,7 +426,7 @@ func commandVerificationStatus(kind string, exitCode int, timedOut, cancelled bo
 		return "timed_out"
 	case cancelled:
 		return "cancelled"
-	case reason == "start_failed" || exitCode < 0:
+	case reason == "start_failed" || reason == "process_cleanup_failed" || exitCode < 0:
 		return "failed"
 	case exitCode == 0:
 		return "passed"

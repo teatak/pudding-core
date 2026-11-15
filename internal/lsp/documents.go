@@ -18,10 +18,12 @@ type documentState struct {
 	lastUsed   uint64
 }
 
-func (p *Process) SyncDocument(document Document) (DocumentState, error) {
-	p.documentsMu.Lock()
-	defer p.documentsMu.Unlock()
-	return p.syncDocumentLocked(document, true)
+func (p *Process) SyncDocument(ctx context.Context, document Document) (DocumentState, error) {
+	if err := lockContext(ctx, p.documentsMu); err != nil {
+		return DocumentState{}, err
+	}
+	defer func() { <-p.documentsMu }()
+	return p.syncDocumentLocked(ctx, document, true)
 }
 
 // RefreshDocuments only reloads the bounded set of documents already held by
@@ -30,8 +32,10 @@ func (p *Process) SyncDocument(document Document) (DocumentState, error) {
 // A change or close invalidates diagnostics for every open document in the
 // workspace, even if a dependent document's own text and version stay unchanged.
 func (p *Process) RefreshDocuments(ctx context.Context, load DocumentLoader) (map[string]DocumentState, error) {
-	p.documentsMu.Lock()
-	defer p.documentsMu.Unlock()
+	if err := lockContext(ctx, p.documentsMu); err != nil {
+		return nil, err
+	}
+	defer func() { <-p.documentsMu }()
 	URIs := make([]string, 0, len(p.documents))
 	generations := make(map[string]uint64, len(p.documents))
 	for uri := range p.documents {
@@ -50,13 +54,13 @@ func (p *Process) RefreshDocuments(ctx context.Context, load DocumentLoader) (ma
 			return nil, err
 		}
 		if !keep {
-			if err := p.closeDocumentLocked(uri); err != nil {
+			if err := p.closeDocumentLocked(ctx, uri); err != nil {
 				return nil, err
 			}
 			workspaceChanged = true
 			continue
 		}
-		state, err := p.syncDocumentLocked(Document{URI: uri, LanguageID: p.documents[uri].languageID, Text: text}, false)
+		state, err := p.syncDocumentLocked(ctx, Document{URI: uri, LanguageID: p.documents[uri].languageID, Text: text}, false)
 		if err != nil {
 			return nil, err
 		}
@@ -71,16 +75,16 @@ func (p *Process) RefreshDocuments(ctx context.Context, load DocumentLoader) (ma
 	return states, nil
 }
 
-func (p *Process) closeDocumentLocked(uri string) error {
+func (p *Process) closeDocumentLocked(ctx context.Context, uri string) error {
 	p.diagnostics.invalidate()
-	if err := p.Notify("textDocument/didClose", map[string]any{"textDocument": map[string]string{"uri": uri}}); err != nil {
+	if err := p.NotifyContext(ctx, "textDocument/didClose", map[string]any{"textDocument": map[string]string{"uri": uri}}); err != nil {
 		return err
 	}
 	delete(p.documents, uri)
 	return nil
 }
 
-func (p *Process) syncDocumentLocked(document Document, touch bool) (DocumentState, error) {
+func (p *Process) syncDocumentLocked(ctx context.Context, document Document, touch bool) (DocumentState, error) {
 	document.URI = strings.TrimSpace(document.URI)
 	document.LanguageID = strings.TrimSpace(document.LanguageID)
 	if document.URI == "" || document.LanguageID == "" {
@@ -112,7 +116,7 @@ func (p *Process) syncDocumentLocked(document Document, touch bool) (DocumentSta
 		}, nil
 	}
 	if exists && current.languageID != document.LanguageID {
-		if err := p.closeDocumentLocked(document.URI); err != nil {
+		if err := p.closeDocumentLocked(ctx, document.URI); err != nil {
 			return DocumentState{}, err
 		}
 		exists = false
@@ -127,7 +131,7 @@ func (p *Process) syncDocumentLocked(document Document, touch bool) (DocumentSta
 			}
 		}
 		if oldestURI != "" {
-			if err := p.closeDocumentLocked(oldestURI); err != nil {
+			if err := p.closeDocumentLocked(ctx, oldestURI); err != nil {
 				return DocumentState{}, err
 			}
 		}
@@ -151,7 +155,7 @@ func (p *Process) syncDocumentLocked(document Document, touch bool) (DocumentSta
 		}
 	}
 	p.diagnostics.invalidate()
-	if err := p.Notify(method, params); err != nil {
+	if err := p.NotifyContext(ctx, method, params); err != nil {
 		return DocumentState{}, err
 	}
 	p.documents[document.URI] = documentState{

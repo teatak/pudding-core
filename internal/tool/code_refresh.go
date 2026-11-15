@@ -14,7 +14,7 @@ import (
 // the current call's roots before reading; shared processes outlive grants.
 func (r *BuiltinRunner) refreshCodeDocuments(ctx context.Context, out Result, call Call, target resolvedCodeTarget) (map[string]lsp.DocumentState, *Result) {
 	var documentErr error
-	states, err := r.languageService.RefreshDocuments(ctx, target.spec, func(uri string) (string, bool, error) {
+	states, err := r.codeLanguageService(ctx).RefreshDocuments(ctx, target.spec, func(uri string) (string, bool, error) {
 		path, ok := codePathFromURI(uri)
 		if !ok || !pathInsideRoot(path, target.languageRoot) {
 			return "", false, nil

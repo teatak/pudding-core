@@ -426,7 +426,7 @@ func builtinRunnerDefinitions() []provider.ToolDef {
 		{
 			Name:        CodeRename,
 			Description: "Rename one project symbol through the language server and atomically apply all resulting reference edits. The operation fails without partial writes when any target is invalid or changes during application. Successful disk changes remain applied if later language-service synchronization fails; inspect languageServiceSynced and warnings instead of repeating the rename.",
-			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["project"]},"path":{"type":"string","description":"Authorized source file containing the symbol. Multiple roots require an absolute path."},"language":{"type":"string","enum":["go","typescript"],"description":"Optional language override. Use typescript for TypeScript and JavaScript."},"line":{"type":"integer","minimum":1,"description":"1-based line."},"column":{"type":"integer","minimum":1,"description":"1-based Unicode character column."},"new_name":{"type":"string","minLength":1,"maxLength":256,"description":"New symbol name. Language-specific validity is checked by the language server."}},"required":["scope","path","line","column","new_name"],"additionalProperties":false}`),
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["project"]},"path":{"type":"string","description":"Authorized source file containing the symbol. Multiple roots require an absolute path."},"language":{"type":"string","enum":["go","typescript"],"description":"Optional language override. Use typescript for TypeScript and JavaScript."},"line":{"type":"integer","minimum":1,"description":"1-based line."},"column":{"type":"integer","minimum":1,"description":"1-based Unicode character column."},"new_name":{"type":"string","minLength":1,"maxLength":256,"description":"New symbol name. TypeScript/JavaScript candidates are checked for safe identifiers and syntax before writing; fix existing syntax errors first."}},"required":["scope","path","line","column","new_name"],"additionalProperties":false}`),
 			Capability:  store.ModeCode,
 		},
 		{
@@ -809,16 +809,8 @@ func (r *BuiltinRunner) Call(ctx context.Context, call Call) (result Result) {
 		return nextPrompt(call)
 	case SetTurnTopic:
 		return turnTopic(call)
-	case CodeSymbols:
-		return r.codeSymbols(ctx, call)
-	case CodeDefinition:
-		return r.codeDefinition(ctx, call)
-	case CodeReferences:
-		return r.codeReferences(ctx, call)
-	case CodeDiagnostics:
-		return r.codeDiagnostics(ctx, call)
-	case CodeRename:
-		return r.codeRename(ctx, call)
+	case CodeSymbols, CodeDefinition, CodeReferences, CodeDiagnostics, CodeRename:
+		return r.codeOperation(ctx, call)
 	case FileList:
 		return r.fileList(ctx, call)
 	case FileRead:

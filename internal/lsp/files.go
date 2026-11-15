@@ -1,6 +1,7 @@
 package lsp
 
 import (
+	"context"
 	"fmt"
 	"path/filepath"
 	"sort"
@@ -60,7 +61,7 @@ func (m *Manager) RecordFileChanges(changes []FileChange) {
 // The per-entry lock preserves notification order across concurrent queries.
 // gopls handles didChangeWatchedFiles before the following request, so known
 // Pudding mutations do not wait for the server-side watcher's debounce timer.
-func (m *Manager) flushFileChanges(process *Process) error {
+func (m *Manager) flushFileChanges(ctx context.Context, process *Process) error {
 	m.mu.Lock()
 	entry := m.entries[process.spec.Key]
 	m.mu.Unlock()
@@ -69,8 +70,10 @@ func (m *Manager) flushFileChanges(process *Process) error {
 	}
 	// Never hold Manager.mu while waiting for a process's writer. A blocked
 	// gopls stdin must not block acquisition or mutation recording for others.
-	entry.flushMu.Lock()
-	defer entry.flushMu.Unlock()
+	if err := lockContext(ctx, entry.flushMu); err != nil {
+		return err
+	}
+	defer func() { <-entry.flushMu }()
 	m.mu.Lock()
 	if m.entries[process.spec.Key] != entry || entry.invalid.Load() {
 		m.mu.Unlock()
@@ -92,7 +95,7 @@ func (m *Manager) flushFileChanges(process *Process) error {
 		changes = append(changes, map[string]any{"uri": fileURI(path), "type": pending[path]})
 	}
 	process.diagnostics.invalidate()
-	if err := process.Notify("workspace/didChangeWatchedFiles", map[string]any{"changes": changes}); err != nil {
+	if err := process.NotifyContext(ctx, "workspace/didChangeWatchedFiles", map[string]any{"changes": changes}); err != nil {
 		entry.invalid.Store(true)
 		return err
 	}

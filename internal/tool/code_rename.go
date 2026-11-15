@@ -128,7 +128,7 @@ func (r *BuiltinRunner) codeRename(ctx context.Context, call Call) Result {
 		"newName":      args.NewName,
 	}
 	var rawEdit json.RawMessage
-	if err := r.languageService.Request(ctx, target.spec, "textDocument/rename", renameParams, &rawEdit); err != nil {
+	if err := r.codeLanguageService(ctx).Request(ctx, target.spec, "textDocument/rename", renameParams, &rawEdit); err != nil {
 		return codeRenameRequestError(out, "rename_rejected", err)
 	}
 	if err := validateCodeRenameDocument(target.path, document.Text); err != nil {
@@ -150,7 +150,7 @@ func (r *BuiltinRunner) codeRename(ctx context.Context, call Call) Result {
 	}
 	for uri, snapshot := range snapshots {
 		_, languageID := codeLanguageForPath(snapshot.Path)
-		synced, err := r.languageService.SyncDocument(ctx, target.spec, lsp.Document{URI: uri, LanguageID: languageID, Text: snapshot.Text})
+		synced, err := r.codeLanguageService(ctx).SyncDocument(ctx, target.spec, lsp.Document{URI: uri, LanguageID: languageID, Text: snapshot.Text})
 		if err != nil {
 			return codeServiceError(out, err)
 		}
@@ -161,7 +161,7 @@ func (r *BuiltinRunner) codeRename(ctx context.Context, call Call) Result {
 		return codeRenameFailure(out, err)
 	}
 	// Recompute against the captured documents, including unversioned changes.
-	if err := r.languageService.Request(ctx, target.spec, "textDocument/rename", renameParams, &rawEdit); err != nil {
+	if err := r.codeLanguageService(ctx).Request(ctx, target.spec, "textDocument/rename", renameParams, &rawEdit); err != nil {
 		return codeRenameRequestError(out, "rename_rejected", err)
 	}
 	if err := validateCodeRenameSnapshots(snapshots); err != nil {
@@ -174,6 +174,11 @@ func (r *BuiltinRunner) codeRename(ctx context.Context, call Call) Result {
 	files, editCount, err := buildCodeRenamePatchFiles(state.PositionEncoding, edits, snapshots)
 	if err != nil {
 		return codeRenameFailure(out, err)
+	}
+	if target.language == "typescript" {
+		if err := r.validateTypeScriptRename(ctx, target, args.NewName, state.PositionEncoding, edits, snapshots, files); err != nil {
+			return codeRenameFailure(out, err)
+		}
 	}
 	mutatedPaths := make([]string, 0, len(files))
 	for _, file := range files {
@@ -295,7 +300,7 @@ func validateCodeRenameName(name string) error {
 
 func (r *BuiltinRunner) prepareCodeRename(ctx context.Context, target resolvedCodeTarget, text, encoding string, params map[string]any) (string, bool, error) {
 	var raw json.RawMessage
-	err := r.languageService.Request(ctx, target.spec, "textDocument/prepareRename", params, &raw)
+	err := r.codeLanguageService(ctx).Request(ctx, target.spec, "textDocument/prepareRename", params, &raw)
 	if err != nil {
 		var responseErr *lsp.ResponseError
 		if errors.As(err, &responseErr) && responseErr.Code == -32601 {
