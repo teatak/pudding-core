@@ -241,6 +241,7 @@ func TestCommandDirectoryAndRiskUseOneApproval(t *testing.T) {
 }
 
 func TestDirectoryAccessRefreshesInProviderContext(t *testing.T) {
+	const guidance = "extra-directory instruction fixture"
 	for _, scope := range []ApprovalScope{ApprovalScopeTurn, ApprovalScopeSession} {
 		t.Run(string(scope), func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -248,6 +249,9 @@ func TestDirectoryAccessRefreshesInProviderContext(t *testing.T) {
 			ms := storetest.New(t)
 			root, extra := t.TempDir(), t.TempDir()
 			extra, _ = filepath.EvalSymlinks(extra)
+			if err := os.WriteFile(filepath.Join(extra, "AGENTS.md"), []byte(guidance), 0o600); err != nil {
+				t.Fatal(err)
+			}
 			if err := ms.CreateProject(ctx, &store.Project{ID: "p", RootDirs: []string{root}}); err != nil {
 				t.Fatal(err)
 			}
@@ -266,6 +270,10 @@ func TestDirectoryAccessRefreshesInProviderContext(t *testing.T) {
 				if visible != want {
 					t.Errorf("step %d: temporary directory visible=%v, want=%v", step, visible, want)
 					return nil, fmt.Errorf("step %d: temporary directory visible=%v, want=%v", step, visible, want)
+				}
+				if count := strings.Count(req.System, guidance); count > 1 || (count == 1) != want {
+					t.Errorf("step %d: directory instructions count=%d, want present=%v", step, count, want)
+					return nil, fmt.Errorf("step %d: stale or missing directory instructions", step)
 				}
 				switch step {
 				case 1:
@@ -439,6 +447,10 @@ func TestTurnDirectoryWorkspaceExpiresWithoutPersisting(t *testing.T) {
 	}
 	root := t.TempDir()
 	root, _ = filepath.EvalSymlinks(root)
+	const guidance = "turn-only directory instruction fixture"
+	if err := os.WriteFile(filepath.Join(root, "AGENTS.md"), []byte(guidance), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	hub := event.NewHub()
 	eng := New(st, hub, registry.Static(mock.New()), st, WithAttachmentHome(t.TempDir()))
 	events, unsubscribe := hub.Subscribe("s")
@@ -472,7 +484,22 @@ func TestTurnDirectoryWorkspaceExpiresWithoutPersisting(t *testing.T) {
 	if dirs, err := st.GetSessionDirectories(ctx, "s"); err != nil || len(dirs) != 0 {
 		t.Fatalf("turn grant persisted: %v %v", dirs, err)
 	}
+	assertInstructions := func(want bool) {
+		t.Helper()
+		req, err := eng.builder.Build(ctx, "s", "mock", string(store.ModeCode))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := eng.appendDirectoryAccess(ctx, "s", "turn", store.ModeCode, &req); err != nil {
+			t.Fatal(err)
+		}
+		if count := strings.Count(req.System, guidance); count > 1 || (count == 1) != want {
+			t.Fatalf("turn instructions count=%d, want present=%v", count, want)
+		}
+	}
+	assertInstructions(true)
 	eng.clearRunning("s", "turn")
+	assertInstructions(false)
 	workspace, err = eng.SessionWorkspace(ctx, "s", "", sessionworkspace.ScratchExisting)
 	if err != nil || len(workspace.RootDirs) != 1 || workspace.RootDirs[0] != workspace.ScratchRoot || !reflect.DeepEqual(workspace.RootSources[workspace.ScratchRoot], []string{"scratch"}) {
 		t.Fatalf("expired turn directory remained visible: %+v %v", workspace, err)

@@ -425,7 +425,7 @@ func builtinRunnerDefinitions() []provider.ToolDef {
 		},
 		{
 			Name:        CodeRename,
-			Description: "Rename one project symbol through the language server and atomically apply all resulting reference edits. The operation fails without partial writes when any target is invalid or changes during application.",
+			Description: "Rename one project symbol through the language server and atomically apply all resulting reference edits. The operation fails without partial writes when any target is invalid or changes during application. Successful disk changes remain applied if later language-service synchronization fails; inspect languageServiceSynced and warnings instead of repeating the rename.",
 			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["project"]},"path":{"type":"string","description":"Authorized source file containing the symbol. Multiple roots require an absolute path."},"language":{"type":"string","enum":["go","typescript"],"description":"Optional language override. Use typescript for TypeScript and JavaScript."},"line":{"type":"integer","minimum":1,"description":"1-based line."},"column":{"type":"integer","minimum":1,"description":"1-based Unicode character column."},"new_name":{"type":"string","minLength":1,"maxLength":256,"description":"New symbol name. Language-specific validity is checked by the language server."}},"required":["scope","path","line","column","new_name"],"additionalProperties":false}`),
 			Capability:  store.ModeCode,
 		},
@@ -456,7 +456,7 @@ func builtinRunnerDefinitions() []provider.ToolDef {
 		},
 		{
 			Name:        FileStat,
-			Description: "Return metadata for one file or directory: exists, type, size, mtime, and MIME when available.",
+			Description: "Return metadata for one file or directory: exists, type, size, mtime, and MIME when available. In project scope, a final symbolic link is reported as the link itself, including a dangling link.",
 			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["plugin","skill","temp","project","widget"],"description":"Target file area. The plugin scope is read-only and excludes connection data and hidden runtime overrides."},"widget_id":{"type":"string","description":"Widget ID for scope=widget. Requires a Code session and an opened draft."},"path":{"type":"string","description":"Relative path inside a managed area, or a project path inside authorized directories; project paths must be absolute when multiple roots are authorized."}},"required":["scope","path"],"additionalProperties":false}`),
 			Capability:  store.ModeCode,
 		},
@@ -482,13 +482,13 @@ func builtinRunnerDefinitions() []provider.ToolDef {
 		},
 		{
 			Name:        FileDelete,
-			Description: "Delete a file or, when recursive is true, a directory from a writable Pudding-managed file area or authorized project directory.",
+			Description: "Delete a file or, when recursive is true, a directory from a writable Pudding-managed file area or authorized project directory. In project scope, deleting a final symbolic link removes only the link, not its target.",
 			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["skill","temp","project"],"description":"Target writable file area. Use skill for global user Skills and project for authorized local project directories."},"path":{"type":"string","description":"Relative path inside a managed area, or a project path inside authorized directories; project paths must be absolute when multiple roots are authorized."},"recursive":{"type":"boolean","description":"Required to delete a directory."}},"required":["scope","path"],"additionalProperties":false}`),
 			Capability:  store.ModeCode,
 		},
 		{
 			Name:        FileMove,
-			Description: "Move or rename a file or directory inside the same writable managed area or authorized project directories. Existing destinations are rejected by default; set overwrite=true only when replacement is intended.",
+			Description: "Move or rename a file or directory inside the same writable managed area or authorized project directories. Existing destinations are rejected by default; set overwrite=true only when replacement is intended. In project scope, a final symbolic link is moved or replaced as a directory entry, without moving or replacing its target.",
 			InputSchema: json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["skill","temp","project"]},"from_path":{"type":"string","description":"Source path within the selected scope. For project scope, multiple authorized roots require an absolute path."},"to_path":{"type":"string","description":"Destination path within the selected scope. For project scope, multiple authorized roots require an absolute path."},"overwrite":{"type":"boolean","description":"Allow replacing an existing destination. Defaults to false, preserving both entries on a destination conflict."}},"required":["scope","from_path","to_path"],"additionalProperties":false}`),
 			Capability:  store.ModeCode,
 		},

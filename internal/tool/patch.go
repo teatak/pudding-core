@@ -324,15 +324,15 @@ func preparePatch(call Call, args filePatchArgs) (*preparedPatch, error) {
 }
 
 func preparePatchFile(projectDirs []string, requested patchFileArg) (preparedPatchFile, string, error) {
-	path := strings.TrimSpace(requested.Path)
-	if path == "" {
+	path := requested.Path
+	if strings.TrimSpace(path) == "" {
 		return preparedPatchFile{}, "", newPatchError("path_required", "patch file path is required")
 	}
 	action := strings.TrimSpace(requested.Action)
 	if len(requested.Hunks) > patchMaxHunksPerFile {
 		return preparedPatchFile{}, "", newPatchLimitError("too_many_hunks", "patch files support at most 64 hunks: "+path, "hunks", "hunks", int64(len(requested.Hunks)), patchMaxHunksPerFile)
 	}
-	root, target, rel, err := resolveProjectPath(projectDirs, path, false, true)
+	root, target, rel, err := resolveProjectEntryPath(projectDirs, path, false, true)
 	if err != nil {
 		return preparedPatchFile{}, "", &patchError{reason: patchPathReason(err), detail: err.Error(), path: err}
 	}

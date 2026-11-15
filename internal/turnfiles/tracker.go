@@ -249,15 +249,20 @@ func mergeFileChangeOrigin(current, next store.FileChangeOrigin) store.FileChang
 	return store.FileChangeOriginStructured
 }
 
+func sameFileContentAndType(left, right fileSnapshot) bool {
+	// A symlink's link text can have the same digest as regular file bytes.
+	return left.digest == right.digest && left.typeName == right.typeName
+}
+
 func changedFileKeys(before, after map[fileKey]fileSnapshot) []fileKey {
 	keys := make(map[fileKey]struct{}, len(before)+len(after))
 	for key, file := range before {
-		if next, ok := after[key]; !ok || file.digest != next.digest {
+		if next, ok := after[key]; !ok || !sameFileContentAndType(file, next) {
 			keys[key] = struct{}{}
 		}
 	}
 	for key, file := range after {
-		if previous, ok := before[key]; !ok || file.digest != previous.digest {
+		if previous, ok := before[key]; !ok || !sameFileContentAndType(file, previous) {
 			keys[key] = struct{}{}
 		}
 	}
@@ -278,7 +283,7 @@ func normalizeRoots(roots []string) []string {
 	normalized := make([]string, 0, len(roots))
 	seen := make(map[string]struct{}, len(roots))
 	for _, raw := range roots {
-		root := filepath.Clean(strings.TrimSpace(raw))
+		root := filepath.Clean(raw)
 		if root == "." || root == "" {
 			continue
 		}
@@ -323,11 +328,10 @@ func normalizeExactFiles(roots, targets []string) []string {
 	normalized := make([]string, 0, len(targets))
 	seen := make(map[string]struct{}, len(targets))
 	for _, raw := range targets {
-		raw = strings.TrimSpace(raw)
 		if raw == "" || !filepath.IsAbs(raw) {
 			continue
 		}
-		root, target, _, err := projectpath.Resolve(roots, raw, true, true)
+		root, target, _, err := projectpath.ResolveEntry(roots, raw, true, true)
 		if err != nil {
 			continue
 		}
@@ -544,7 +548,7 @@ func compareSnapshots(before, after map[fileKey]fileSnapshot) []store.TurnFileCh
 			deleted[key] = oldFile
 			continue
 		}
-		if oldFile.digest == newFile.digest {
+		if sameFileContentAndType(oldFile, newFile) {
 			continue
 		}
 		changes = append(changes, buildChange(store.FileChangeModified, key, "", oldFile, newFile))
@@ -563,7 +567,7 @@ func compareSnapshots(before, after map[fileKey]fileSnapshot) []store.TurnFileCh
 		var renamedKey *fileKey
 		for _, newKey := range addedKeys {
 			newFile := added[newKey]
-			if oldKey.root != newKey.root || oldFile.digest == "" || oldFile.digest != newFile.digest {
+			if oldKey.root != newKey.root || oldFile.digest == "" || !sameFileContentAndType(oldFile, newFile) {
 				continue
 			}
 			if _, used := usedAdded[newKey]; used {

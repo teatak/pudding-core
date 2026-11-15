@@ -62,6 +62,17 @@ func (c *diagnosticsCache) generationForURI(uri string) uint64 {
 	return snapshot.Generation
 }
 
+// A document change can invalidate diagnostics in any dependent open file.
+// Keep the monotonic generation, but never let a later query reuse a snapshot
+// that predates the change merely because that query's own text is unchanged.
+func (c *diagnosticsCache) invalidate() {
+	c.mu.Lock()
+	c.byURI = make(map[string]DiagnosticSnapshot)
+	close(c.changed)
+	c.changed = make(chan struct{})
+	c.mu.Unlock()
+}
+
 func (c *diagnosticsCache) wait(ctx context.Context, uri string, afterGeneration uint64) (DiagnosticSnapshot, bool, error) {
 	uri = diagnosticURIKey(uri)
 	for {

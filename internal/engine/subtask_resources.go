@@ -15,8 +15,9 @@ import (
 // Permission waiting happens before acquisition, so an unanswered approval cannot
 // monopolize a project or the desktop.
 func (e *Engine) acquireToolResources(ctx context.Context, call tool.Call) (func(), error) {
-	// Background processes retain resource locks until exit. Reject cleanup
-	// before waiting on their lock so the agent can stop the process first.
+	// The process registry protects scratch lifetime without giving persistent
+	// background services exclusive ownership of the project or its artifacts.
+	// Check before waiting; the runner checks again after the lock is acquired.
 	if call.Name == tool.TempWorkspace && e.BackgroundProcessCount(call.SessionID) > 0 {
 		var args struct {
 			Action string `json:"action"`
@@ -80,8 +81,9 @@ func (e *Engine) acquireToolResources(ctx context.Context, call tool.Call) (func
 	return func() { once.Do(releaseAll) }, nil
 }
 
-// A command returning a process handle has not released the shared resource.
-// Keep ownership until the process manager reports actual exit/stop/removal.
+// Yielded foreground commands still own their mutation baseline and output
+// capture, so retain their locks until actual completion. Explicit background
+// services must allow later edits, commands and artifact reads while running.
 func (e *Engine) releaseToolResources(ctx context.Context, call tool.Call, release func()) {
 	if call.Name != tool.CommandRun {
 		release()
@@ -96,7 +98,11 @@ func (e *Engine) releaseToolResources(ctx context.Context, call tool.Call, relea
 			ids = append(ids, process.ProcessID)
 		}
 	}
-	if len(ids) == 0 {
+	var args struct {
+		Background bool `json:"background"`
+	}
+	_ = json.Unmarshal(call.Args, &args)
+	if len(ids) == 0 || args.Background {
 		release()
 		return
 	}

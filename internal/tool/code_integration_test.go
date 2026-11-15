@@ -142,4 +142,76 @@ func assertRealCodeRename(t *testing.T, ctx context.Context, runner *BuiltinRunn
 	if string(afterApply) != expected || strings.Count(string(afterApply), newName) != 2 {
 		t.Fatalf("real rename did not update declaration and reference: %q", afterApply)
 	}
+	symbolArgs, _ := json.Marshal(map[string]any{"scope": "project", "path": path, "query": newName})
+	symbols := runner.Call(ctx, Call{Name: CodeSymbols, Args: symbolArgs, ProjectDirs: []string{root}})
+	symbolPayload := decodeToolResult(t, symbols)
+	symbolCount, ok := symbolPayload["resultCount"].(float64)
+	if !symbols.Ok || !ok || symbolCount < 1 {
+		t.Fatalf("symbols retained the pre-rename overlay: %s", symbols.Content)
+	}
+}
+
+func TestCodeCrossFileDiagnosticsWithLanguageServers(t *testing.T) {
+	tests := []struct {
+		name        string
+		environment string
+		dependency  string
+		dependent   string
+		before      string
+		after       string
+		use         string
+	}{
+		{
+			name: "Go", environment: "PUDDING_LSP_INTEGRATION", dependency: "a.go", dependent: "b.go",
+			before: "package demo\nfunc Value() int { return 1 }\n",
+			after:  "package demo\nfunc Value() string { return \"x\" }\n",
+			use:    "package demo\nvar X int = Value()\n",
+		},
+		{
+			name: "TypeScript", environment: "PUDDING_LSP_TS_INTEGRATION", dependency: "a.ts", dependent: "b.ts",
+			before: "export function value(): number { return 1 }\n",
+			after:  "export function value(): string { return 'x' }\n",
+			use:    "import { value } from './a'\nexport const x: number = value()\n",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if os.Getenv(test.environment) != "1" {
+				t.Skip("set " + test.environment + "=1 to test the installed language server")
+			}
+			root := t.TempDir()
+			if test.name == "Go" {
+				writeCodeTestFile(t, filepath.Join(root, "go.mod"), "module example.com/crossfile\n\ngo 1.25\n")
+			} else {
+				writeCodeTestFile(t, filepath.Join(root, "package.json"), `{"private":true}`)
+				writeCodeTestFile(t, filepath.Join(root, "tsconfig.json"), `{"compilerOptions":{"strict":true},"include":["*.ts"]}`)
+			}
+			writeCodeTestFile(t, filepath.Join(root, test.dependency), test.before)
+			writeCodeTestFile(t, filepath.Join(root, test.dependent), test.use)
+			manager := lsp.NewManager(lsp.WithIdleTimeout(0), lsp.WithReapInterval(0))
+			t.Cleanup(func() {
+				ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+				defer cancel()
+				_ = manager.Close(ctx)
+			})
+			runner := NewBuiltinRunner(WithLanguageService(manager))
+			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+			defer cancel()
+			check := func(paths []string, wantError bool) {
+				t.Helper()
+				args, _ := json.Marshal(map[string]any{"scope": "project", "paths": paths, "severity": []string{"error"}})
+				result := runner.Call(ctx, Call{Name: CodeDiagnostics, Args: args, ProjectDirs: []string{root}})
+				payload := decodeToolResult(t, result)
+				count, ok := payload["diagnosticCount"].(float64)
+				if !result.Ok || !ok || payload["fresh"] != true || (count > 0) != wantError {
+					t.Fatalf("cross-file diagnostics, want error=%v: %s", wantError, result.Content)
+				}
+			}
+			check([]string{test.dependency, test.dependent}, false)
+			writeCodeTestFile(t, filepath.Join(root, test.dependency), test.after)
+			check([]string{test.dependent}, true)
+			writeCodeTestFile(t, filepath.Join(root, test.dependency), test.before)
+			check([]string{test.dependent, test.dependency}, false)
+		})
+	}
 }

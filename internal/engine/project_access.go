@@ -10,10 +10,10 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/teatak/pudding-core/internal/contextbuilder"
 	"github.com/teatak/pudding-core/internal/event"
-	"github.com/teatak/pudding-core/internal/sessionworkspace"
-
 	"github.com/teatak/pudding-core/internal/provider"
+	"github.com/teatak/pudding-core/internal/sessionworkspace"
 	"github.com/teatak/pudding-core/internal/store"
 )
 
@@ -175,6 +175,11 @@ func (e *Engine) appendDirectoryAccess(ctx context.Context, sessionID, turnID st
 	if err != nil {
 		return err
 	}
+	workspace, err := e.SessionWorkspace(ctx, sessionID, turnID, sessionworkspace.ScratchExisting)
+	if err != nil {
+		return err
+	}
+	req.System = contextbuilder.AppendProjectContext(req.System, workspace.RootDirs)
 	req.System += "\n\n## Current Directory Access\n\n" +
 		"These directories are authorized alongside any Project roots. The session list is saved for this conversation across restarts until explicitly revoked or the conversation is deleted. The turn list expires when this turn ends. " +
 		"Use this current snapshot, not historical approval results. Directory consent does not grant host command execution; fixed-command approvals are separate and retain their existing lifetime.\n" + string(data)

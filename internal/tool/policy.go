@@ -151,8 +151,8 @@ func classifyToolCall(name string, raw json.RawMessage, projectDirs []string, ma
 		paths := make([]string, 0, len(args.Files))
 		destructive := false
 		for _, file := range args.Files {
-			path := strings.TrimSpace(file.Path)
-			if path == "" {
+			path := file.Path
+			if strings.TrimSpace(path) == "" {
 				return baseRisk, true
 			}
 			paths = append(paths, path)
@@ -193,8 +193,8 @@ func classifyToolCall(name string, raw json.RawMessage, projectDirs []string, ma
 	args.Scope = managedScopeProject
 	switch name {
 	case AttachmentExport:
-		path := strings.TrimSpace(args.Path)
-		if path == "" || strings.TrimSpace(args.AttachmentKey) == "" {
+		path := args.Path
+		if strings.TrimSpace(path) == "" || strings.TrimSpace(args.AttachmentKey) == "" {
 			return ToolRisk{}, false
 		}
 		summary := "Export a session attachment to a project file."
@@ -203,10 +203,10 @@ func classifyToolCall(name string, raw json.RawMessage, projectDirs []string, ma
 		}
 		return ToolRisk{Class: RiskClassWrite, Operation: "attachment_export", Scope: args.Scope, Paths: compactRiskPaths(path), Summary: summary, LowRisk: true}, true
 	case FileWrite:
-		path := strings.TrimSpace(args.Path)
+		path := args.Path
 		return ToolRisk{Class: RiskClassWrite, Operation: "write", Scope: args.Scope, Paths: compactRiskPaths(path), Summary: "Overwrite a project file.", LowRisk: true}, true
 	case FileDelete:
-		path := strings.TrimSpace(args.Path)
+		path := args.Path
 		summary := "Delete a project file."
 		if args.Recursive {
 			summary = "Delete a project path recursively."
@@ -233,7 +233,7 @@ func classifyCodeReadCall(name string, raw json.RawMessage) (ToolRisk, bool) {
 		return ToolRisk{}, false
 	}
 	paths := args.Paths
-	if path := strings.TrimSpace(args.Path); path != "" {
+	if path := args.Path; strings.TrimSpace(path) != "" {
 		paths = append(paths, path)
 	}
 	if name == CodeRename {
@@ -1688,8 +1688,7 @@ func compactRiskPaths(paths ...string) []string {
 	out := make([]string, 0, len(paths))
 	seen := make(map[string]bool, len(paths))
 	for _, path := range paths {
-		path = strings.TrimSpace(path)
-		if path == "" || seen[path] {
+		if strings.TrimSpace(path) == "" || seen[path] {
 			continue
 		}
 		seen[path] = true

@@ -221,9 +221,12 @@ func (r *BuiltinRunner) codeRename(ctx context.Context, call Call) Result {
 		}
 		return applied
 	}
+	_, syncFailure := r.refreshCodeDocuments(ctx, out, call, target)
 	var payload map[string]any
 	if err := json.Unmarshal([]byte(applied.Content), &payload); err != nil {
-		return toolJSONError(out, "rename_failed", "rename result could not be encoded")
+		// Application already succeeded, so even a result-formatting failure
+		// must preserve that outcome rather than invite another rename.
+		return applied
 	}
 	payload["operation"] = "rename"
 	payload["newName"] = args.NewName
@@ -234,9 +237,17 @@ func (r *BuiltinRunner) codeRename(ctx context.Context, call Call) Result {
 	if oldName != "" {
 		payload["oldName"] = oldName
 	}
+	payload["languageServiceSynced"] = syncFailure == nil
+	if syncFailure != nil {
+		// Disk application already succeeded. Do not turn a refresh failure into
+		// a failed rename that the model might retry against modified source.
+		payload["languageServiceSyncError"] = json.RawMessage(syncFailure.Content)
+		warnings, _ := payload["warnings"].([]any)
+		payload["warnings"] = append(warnings, "Rename was applied, but the language service could not be refreshed. The next code query will retry synchronization; do not repeat the rename.")
+	}
 	encoded, err := json.Marshal(payload)
 	if err != nil {
-		return toolJSONError(out, "rename_failed", err.Error())
+		return applied
 	}
 	applied.Content = string(encoded)
 	return applied

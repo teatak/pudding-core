@@ -25,6 +25,7 @@ const (
 type Service interface {
 	Request(ctx context.Context, spec ServerSpec, method string, params, result any) error
 	SyncDocument(ctx context.Context, spec ServerSpec, document Document) (DocumentState, error)
+	RefreshDocuments(ctx context.Context, spec ServerSpec, load DocumentLoader) (map[string]DocumentState, error)
 	PublishedDiagnostics(ctx context.Context, spec ServerSpec, uri string, afterGeneration uint64) (DiagnosticSnapshot, bool, error)
 	PositionEncoding(ctx context.Context, spec ServerSpec) (string, error)
 }
@@ -145,6 +146,17 @@ func (m *Manager) SyncDocument(ctx context.Context, spec ServerSpec, document Do
 	state, err := process.SyncDocument(document)
 	m.touch(process.spec.Key, process)
 	return state, err
+}
+
+func (m *Manager) RefreshDocuments(ctx context.Context, spec ServerSpec, load DocumentLoader) (map[string]DocumentState, error) {
+	process, err := m.Acquire(ctx, spec)
+	if err != nil {
+		return nil, err
+	}
+	m.touch(process.spec.Key, process)
+	states, err := process.RefreshDocuments(ctx, load)
+	m.touch(process.spec.Key, process)
+	return states, err
 }
 
 func (m *Manager) PublishedDiagnostics(ctx context.Context, spec ServerSpec, uri string, afterGeneration uint64) (DiagnosticSnapshot, bool, error) {

@@ -90,6 +90,11 @@ type Document struct {
 	Text       string
 }
 
+// DocumentLoader reloads an already-open document from an authorized source.
+// keep=false closes the document, for example after deletion or revoked access.
+// The caller owns path authorization; the language service never walks the disk.
+type DocumentLoader func(uri string) (text string, keep bool, err error)
+
 type DocumentState struct {
 	URI                          string
 	Version                      int

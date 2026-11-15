@@ -245,7 +245,7 @@ func unifiedPatchPath(header string, line int) (string, *toolArgumentError) {
 	} else {
 		name, _, _ = strings.Cut(header, "\t")
 	}
-	if name == "" || name != strings.TrimSpace(name) || strings.ContainsAny(name, "\r\n") || !isToolText([]byte(name)) {
+	if strings.TrimSpace(name) == "" || strings.ContainsAny(name, "\r\n") || !isToolText([]byte(name)) {
 		return "", unifiedPatchError(line, "invalid file path")
 	}
 	return name, nil
