@@ -6,11 +6,13 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log/slog"
 	"math"
 	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
+	"time"
 	"unicode/utf8"
 )
 
@@ -21,18 +23,27 @@ type launchRecord struct {
 	pid      int32
 }
 
+// A lease survives only while it owns launches or an app entry is in flight.
+// Releasing a session detaches it immediately, so late app entries cannot
+// recreate ownership or affect a new lease for the same session ID.
+type launchLease struct {
+	owned    map[string]launchRecord
+	uses     int
+	released bool
+}
+
 type Manager struct {
 	service  Service
 	write    chan struct{}
 	mu       sync.Mutex
-	launches map[string]map[string]launchRecord
+	launches map[string]*launchLease
 }
 
 func NewManager(service Service) *Manager {
 	return &Manager{
 		service:  service,
 		write:    make(chan struct{}, 1),
-		launches: map[string]map[string]launchRecord{},
+		launches: map[string]*launchLease{},
 	}
 }
 
@@ -64,10 +75,18 @@ func (m *Manager) UseApp(ctx context.Context, sessionID, appID string, foregroun
 	if err := ValidateAppSelection(selection); err != nil {
 		return UseResult{}, err
 	}
+	lease := m.beginAppUse(sessionID)
+	defer m.endAppUse(sessionID, lease)
 	if err := m.acquireWrite(ctx, "app use"); err != nil {
 		return UseResult{}, err
 	}
 	defer m.releaseWrite()
+	m.mu.Lock()
+	released := lease.released
+	m.mu.Unlock()
+	if released {
+		return UseResult{}, &OperationError{Code: "computer_action_cancelled", Message: "Computer Use session was released before app entry", Outcome: "not_started", Cause: context.Canceled}
+	}
 	candidateLaunchID, err := newLaunchID()
 	if err != nil {
 		return UseResult{}, err
@@ -88,23 +107,36 @@ func (m *Manager) UseApp(ctx context.Context, sessionID, appID string, foregroun
 			return UseResult{}, &OperationError{Code: "computer_invalid_response", Message: "Computer Use app entry returned an invalid window", Outcome: "unknown"}
 		}
 	}
+	m.mu.Lock()
+	if lease.released {
+		m.mu.Unlock()
+		failure := &OperationError{Code: "computer_action_cancelled", Message: "Computer Use app entry completed after its session was released", Outcome: "unknown", Cause: context.Canceled}
+		if native.NewlyLaunched {
+			// The app entry already owns the global write slot. Cleanup gets its
+			// own bounded budget even if the old turn has already been cancelled.
+			cleanupCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			if err := m.quitReleasedLaunch(cleanupCtx, sessionID, launchRecord{appID: native.AppID, pid: native.PID}); err != nil {
+				slog.Warn("computer: late app launch cleanup failed", "sessionID", sessionID, "err", err)
+				failure.Message += ": " + err.Error()
+				failure.Cause = errors.Join(context.Canceled, err)
+			}
+		}
+		return UseResult{}, failure
+	}
+	defer m.mu.Unlock()
 	if !native.NewlyLaunched {
-		if record, ok := m.findLaunch(sessionID, native.AppID, native.PID); ok {
-			existingLaunchID := record.launchID
-			return UseResult{LaunchID: &existingLaunchID, AppID: record.appID, Name: record.name, PID: record.pid, WindowStatus: native.WindowStatus, WindowError: native.WindowError, Windows: native.Windows}, nil
+		for _, record := range lease.owned {
+			if record.appID == native.AppID && record.pid == native.PID {
+				existingLaunchID := record.launchID
+				return UseResult{LaunchID: &existingLaunchID, AppID: record.appID, Name: record.name, PID: record.pid, WindowStatus: native.WindowStatus, WindowError: native.WindowError, Windows: native.Windows}, nil
+			}
 		}
 		return UseResult{AppID: native.AppID, Name: native.Name, PID: native.PID, WindowStatus: native.WindowStatus, WindowError: native.WindowError, Windows: native.Windows}, nil
 	}
 	launchID := candidateLaunchID
 	record := launchRecord{launchID: launchID, appID: native.AppID, name: native.Name, pid: native.PID}
-	m.mu.Lock()
-	launches := m.launches[sessionID]
-	if launches == nil {
-		launches = map[string]launchRecord{}
-		m.launches[sessionID] = launches
-	}
-	launches[launchID] = record
-	m.mu.Unlock()
+	lease.owned[launchID] = record
 	return UseResult{LaunchID: &launchID, AppID: native.AppID, Name: native.Name, PID: native.PID, WindowStatus: native.WindowStatus, WindowError: native.WindowError, Windows: native.Windows}, nil
 }
 
@@ -121,7 +153,7 @@ func (m *Manager) QuitApp(ctx context.Context, sessionID, launchID string) (Quit
 	}
 	defer m.releaseWrite()
 
-	record, ok := m.getLaunch(sessionID, launchID)
+	record, lease, ok := m.getLaunch(sessionID, launchID)
 	if !ok {
 		return QuitResult{}, &OperationError{Code: "computer_launch_not_owned", Message: "application launch is not owned by this session", Outcome: "not_started"}
 	}
@@ -133,13 +165,13 @@ func (m *Manager) QuitApp(ctx context.Context, sessionID, launchID string) (Quit
 		return QuitResult{}, &OperationError{Code: "computer_invalid_response", Message: "Computer Use quit returned an invalid result", Outcome: "unknown"}
 	}
 	if native.Closed {
-		m.deleteLaunch(sessionID, launchID)
+		m.deleteLaunch(sessionID, lease, launchID)
 	}
 	return QuitResult{LaunchID: launchID, AppID: record.appID, Name: record.name, PID: record.pid, Closed: native.Closed}, nil
 }
 
 func (m *Manager) OwnedLaunchAppID(sessionID, launchID string) (string, bool) {
-	record, ok := m.getLaunch(strings.TrimSpace(sessionID), strings.TrimSpace(launchID))
+	record, _, ok := m.getLaunch(strings.TrimSpace(sessionID), strings.TrimSpace(launchID))
 	if !ok {
 		return "", false
 	}
@@ -413,21 +445,61 @@ func (m *Manager) ReleaseSession(ctx context.Context, sessionID string) error {
 	if err := validateSessionID(sessionID); err != nil {
 		return err
 	}
+	m.mu.Lock()
+	lease := m.launches[sessionID]
+	if lease == nil {
+		m.mu.Unlock()
+		return nil
+	}
+	delete(m.launches, sessionID)
+	lease.released = true
+	hasLaunches := len(lease.owned) > 0
+	m.mu.Unlock()
+	if !hasLaunches {
+		return nil
+	}
 	if err := m.acquireWrite(ctx, "release"); err != nil {
-		return err
+		var errs []error
+		for _, record := range m.takeReleasedLaunches(lease) {
+			errs = append(errs, fmt.Errorf("release app %s (PID %d): %w", record.appID, record.pid, err))
+		}
+		return errors.Join(errs...)
 	}
 	defer m.releaseWrite()
-	m.mu.Lock()
-	owned := m.launches[sessionID]
-	delete(m.launches, sessionID)
-	m.mu.Unlock()
 	var errs []error
-	for _, record := range owned {
-		if _, err := m.service.QuitApp(ctx, sessionID, record.appID, record.pid); err != nil {
+	for _, record := range m.takeReleasedLaunches(lease) {
+		if err := m.quitReleasedLaunch(ctx, sessionID, record); err != nil {
 			errs = append(errs, err)
 		}
 	}
 	return errors.Join(errs...)
+}
+
+func (m *Manager) takeReleasedLaunches(lease *launchLease) map[string]launchRecord {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	owned := lease.owned
+	lease.owned = nil
+	return owned
+}
+
+func (m *Manager) quitReleasedLaunch(ctx context.Context, sessionID string, record launchRecord) error {
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("release app %s (PID %d): %w", record.appID, record.pid, err)
+	}
+	native, err := m.service.QuitApp(ctx, sessionID, record.appID, record.pid)
+	if err == nil {
+		switch {
+		case native.AppID != record.appID || native.PID != record.pid:
+			err = &OperationError{Code: "computer_invalid_response", Message: "Computer Use quit returned an invalid result", Outcome: "unknown"}
+		case !native.Closed:
+			err = errors.New("application did not close and may require user attention")
+		}
+	}
+	if err != nil {
+		return fmt.Errorf("release app %s (PID %d): %w", record.appID, record.pid, err)
+	}
+	return nil
 }
 
 func validWindowDiscovery(status string, failure *Failure, windowCount int) bool {
@@ -456,29 +528,43 @@ func (m *Manager) releaseWrite() {
 	<-m.write
 }
 
-func (m *Manager) findLaunch(sessionID, appID string, pid int32) (launchRecord, bool) {
+func (m *Manager) beginAppUse(sessionID string) *launchLease {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	for _, record := range m.launches[sessionID] {
-		if record.appID == appID && record.pid == pid {
-			return record, true
-		}
+	lease := m.launches[sessionID]
+	if lease == nil {
+		lease = &launchLease{owned: map[string]launchRecord{}}
+		m.launches[sessionID] = lease
 	}
-	return launchRecord{}, false
+	lease.uses++
+	return lease
 }
 
-func (m *Manager) getLaunch(sessionID, launchID string) (launchRecord, bool) {
+func (m *Manager) endAppUse(sessionID string, lease *launchLease) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	record, ok := m.launches[sessionID][launchID]
-	return record, ok
+	lease.uses--
+	if lease.uses == 0 && len(lease.owned) == 0 && m.launches[sessionID] == lease {
+		delete(m.launches, sessionID)
+	}
 }
 
-func (m *Manager) deleteLaunch(sessionID, launchID string) {
+func (m *Manager) getLaunch(sessionID, launchID string) (launchRecord, *launchLease, bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	delete(m.launches[sessionID], launchID)
-	if len(m.launches[sessionID]) == 0 {
+	lease := m.launches[sessionID]
+	if lease == nil {
+		return launchRecord{}, nil, false
+	}
+	record, ok := lease.owned[launchID]
+	return record, lease, ok
+}
+
+func (m *Manager) deleteLaunch(sessionID string, lease *launchLease, launchID string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(lease.owned, launchID)
+	if len(lease.owned) == 0 && lease.uses == 0 && m.launches[sessionID] == lease {
 		delete(m.launches, sessionID)
 	}
 }

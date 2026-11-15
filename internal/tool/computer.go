@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -426,5 +427,7 @@ func (r *BuiltinRunner) releaseComputerSession(sessionID string) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	_ = r.computer.ReleaseSession(ctx, sessionID)
+	if err := r.computer.ReleaseSession(ctx, sessionID); err != nil {
+		slog.Warn("tool: Computer Use session cleanup incomplete", "sessionID", sessionID, "err", err)
+	}
 }
