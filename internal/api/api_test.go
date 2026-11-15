@@ -319,6 +319,26 @@ func TestUndoRedoTurnFileChanges(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		// Another session/command owns the files until its end snapshot is taken.
+		release, err := eng.AcquireWorkspaceWrite(ctx, []string{root})
+		if err != nil {
+			t.Fatal(err)
+		}
+		blockedCtx, cancel := context.WithTimeout(ctx, 50*time.Millisecond)
+		blocked := httptest.NewRequest(http.MethodPost, "/sessions/session/turns/turn/file-changes/"+action.name, strings.NewReader(fmt.Sprintf(`{"expectedRevision":%d}`, turn.FileChangeRevision))).WithContext(blockedCtx)
+		blocked.Header.Set("Authorization", "Bearer "+testToken)
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, blocked)
+		release()
+		if response.Code == http.StatusOK || blockedCtx.Err() == nil {
+			cancel()
+			t.Fatalf("replay bypassed active writer: %d %s", response.Code, response.Body.String())
+		}
+		cancel()
+		unchanged, err := ms.GetConversationTurn(ctx, "session", "turn")
+		if err != nil || unchanged.FileChangeRevision != turn.FileChangeRevision {
+			t.Fatalf("canceled replay changed state: %+v %v", unchanged, err)
+		}
 		req := httptest.NewRequest(http.MethodPost, "/sessions/session/turns/turn/file-changes/"+action.name, strings.NewReader(fmt.Sprintf(`{"expectedRevision":%d}`, turn.FileChangeRevision)))
 		req.Header.Set("Authorization", "Bearer "+testToken)
 		recorder := httptest.NewRecorder()

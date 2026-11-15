@@ -433,8 +433,25 @@ func TestBackgroundProcessEnforcesPerSessionLimit(t *testing.T) {
 	if overflow.Ok || !strings.Contains(overflow.Content, `"reason":"session_process_limit"`) {
 		t.Fatalf("session process limit was not enforced: %+v", overflow)
 	}
+	// Four persistent services must leave capacity for foreground verification.
+	raw, _ := json.Marshal(map[string]any{"scope": "project", "command": commandHelperCommand("exit", "0")})
+	foreground := runner.Call(context.Background(), Call{SessionID: "sess_limit", TurnID: "turn_foreground", CallID: "verify", Name: CommandRun, Args: raw, ProjectDirs: []string{root}})
+	if payload := decodeToolResult(t, foreground); !foreground.Ok || payload["exitCode"] != float64(0) {
+		t.Fatalf("background services blocked foreground command: %s", foreground.Content)
+	}
+	for i := 0; i < foregroundProcessPerSessionLimit; i++ {
+		raw, _ = json.Marshal(map[string]any{"scope": "project", "command": commandHelperCommand("sleep", "60000"), "yield_ms": 0})
+		result := runner.Call(context.Background(), Call{SessionID: "sess_limit", TurnID: "turn_foreground", Name: CommandRun, Args: raw, ProjectDirs: []string{root}})
+		if payload := decodeToolResult(t, result); !result.Ok || payload["yielded"] != true {
+			t.Fatalf("start foreground %d: %s", i, result.Content)
+		}
+	}
+	foreground = runner.Call(context.Background(), Call{SessionID: "sess_limit", TurnID: "turn_foreground", Name: CommandRun, Args: raw, ProjectDirs: []string{root}})
+	if foreground.Ok || !strings.Contains(foreground.Content, `"reason":"session_process_limit"`) {
+		t.Fatalf("foreground limit not enforced: %s", foreground.Content)
+	}
 	runner.CloseSession("sess_limit")
-	if runner.processes.runningTotal != 0 {
+	if runner.processes.runningTotal != 0 || runner.processes.foregroundTotal != 0 || len(runner.processes.foregroundBySession) != 0 {
 		t.Fatalf("session cleanup left running processes: %d", runner.processes.runningTotal)
 	}
 }

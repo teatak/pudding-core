@@ -21,6 +21,8 @@ import (
 const (
 	backgroundProcessPerSessionLimit = 4
 	backgroundProcessGlobalLimit     = 32
+	foregroundProcessPerSessionLimit = 4
+	foregroundProcessGlobalLimit     = 32
 	backgroundProcessOutputLimit     = 1 << 20
 	backgroundProcessPollDefault     = 64 << 10
 	backgroundProcessPollMin         = 1 << 10
@@ -98,14 +100,16 @@ type commandSessionArgs struct {
 }
 
 type backgroundProcessManager struct {
-	mu               sync.Mutex
-	commands         commandRunner
-	processes        map[string]*backgroundProcess
-	runningBySession map[string]int
-	runningTotal     int
-	closed           bool
-	retentionTTL     time.Duration
-	events           func(BackgroundProcessEvent)
+	mu                  sync.Mutex
+	commands            commandRunner
+	processes           map[string]*backgroundProcess
+	runningBySession    map[string]int
+	runningTotal        int
+	foregroundBySession map[string]int
+	foregroundTotal     int
+	closed              bool
+	retentionTTL        time.Duration
+	events              func(BackgroundProcessEvent)
 }
 
 type backgroundProcess struct {
@@ -179,10 +183,11 @@ func newBackgroundProcessManager(retentionTTL time.Duration, runners ...commandR
 		commands = runners[0]
 	}
 	return &backgroundProcessManager{
-		commands:         commands,
-		processes:        make(map[string]*backgroundProcess),
-		runningBySession: make(map[string]int),
-		retentionTTL:     retentionTTL,
+		commands:            commands,
+		processes:           make(map[string]*backgroundProcess),
+		runningBySession:    make(map[string]int),
+		foregroundBySession: make(map[string]int),
+		retentionTTL:        retentionTTL,
 	}
 }
 
@@ -379,12 +384,23 @@ func (m *backgroundProcessManager) startPrepared(sessionID, turnID, callID, cwd,
 		process.closeInput()
 		return nil, errors.New("background process manager is closed")
 	}
-	if m.runningBySession[sessionID] >= backgroundProcessPerSessionLimit {
+	// Foreground work, including yielded commands, has a separate bounded
+	// allowance so persistent services cannot consume its execution slots.
+	if foreground != nil && m.foregroundBySession[sessionID] >= foregroundProcessPerSessionLimit {
+		m.mu.Unlock()
+		return nil, errors.New("foreground process limit reached for this session")
+	}
+	if foreground != nil && m.foregroundTotal >= foregroundProcessGlobalLimit {
+		m.mu.Unlock()
+		return nil, errors.New("global foreground process limit reached")
+	}
+	backgroundCount := m.runningBySession[sessionID] - m.foregroundBySession[sessionID]
+	if foreground == nil && backgroundCount >= backgroundProcessPerSessionLimit {
 		m.mu.Unlock()
 		process.closeInput()
 		return nil, errors.New("background process limit reached for this session")
 	}
-	if m.runningTotal >= backgroundProcessGlobalLimit {
+	if foreground == nil && m.runningTotal-m.foregroundTotal >= backgroundProcessGlobalLimit {
 		m.mu.Unlock()
 		process.closeInput()
 		return nil, errors.New("global background process limit reached")
@@ -410,6 +426,10 @@ func (m *backgroundProcessManager) startPrepared(sessionID, turnID, callID, cwd,
 	m.processes[process.id] = process
 	m.runningBySession[sessionID]++
 	m.runningTotal++
+	if foreground != nil {
+		m.foregroundBySession[sessionID]++
+		m.foregroundTotal++
+	}
 	if tty {
 		configureCommandPTY(cmd)
 		ptmx, startErr := pty.StartWithSize(cmd, &pty.Winsize{Cols: backgroundProcessTTYColumns, Rows: backgroundProcessTTYRows})
@@ -624,6 +644,14 @@ func (m *backgroundProcessManager) releaseCountLocked(process *backgroundProcess
 		return
 	}
 	process.counted = false
+	if process.foreground != nil {
+		m.foregroundTotal--
+		if m.foregroundBySession[process.sessionID] <= 1 {
+			delete(m.foregroundBySession, process.sessionID)
+		} else {
+			m.foregroundBySession[process.sessionID]--
+		}
+	}
 	if m.runningTotal > 0 {
 		m.runningTotal--
 	}
@@ -1177,9 +1205,9 @@ func backgroundProcessError(out Result, err error) Result {
 	switch err.Error() {
 	case "background process manager is closed":
 		reason = "process_manager_closed"
-	case "background process limit reached for this session":
+	case "background process limit reached for this session", "foreground process limit reached for this session":
 		reason = "session_process_limit"
-	case "global background process limit reached":
+	case "global background process limit reached", "global foreground process limit reached":
 		reason = "global_process_limit"
 	}
 	return toolJSONError(out, reason, err.Error())

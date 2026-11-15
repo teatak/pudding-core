@@ -54,6 +54,50 @@ func TestCodeToolsWithGopls(t *testing.T) {
 	assertRealCodeRename(t, ctx, runner, root, "main.go", 5, 14, "Target", "RenamedTarget")
 }
 
+func TestCodeSymbolsTypeScriptConfiguredProjects(t *testing.T) {
+	if os.Getenv("PUDDING_LSP_TS_INTEGRATION") != "1" {
+		t.Skip("set PUDDING_LSP_TS_INTEGRATION=1 to test the installed TypeScript language server")
+	}
+	for _, references := range []bool{false, true} {
+		name := "include"
+		if references {
+			name = "references"
+		}
+		t.Run(name, func(t *testing.T) {
+			root := t.TempDir()
+			writeCodeTestFile(t, filepath.Join(root, "eslint.config.js"), "export default []\n")
+			writeCodeTestFile(t, filepath.Join(root, "src/main.ts"), "export function BusinessNeedle() { return 42 }\n")
+			config := `{"compilerOptions":{"strict":true},"include":["src/**/*.ts"]}`
+			if references {
+				config = `{"files":[],"references":[{"path":"./src"}]}`
+				writeCodeTestFile(t, filepath.Join(root, "src/tsconfig.json"), `{"compilerOptions":{"composite":true},"include":["*.ts"]}`)
+			}
+			writeCodeTestFile(t, filepath.Join(root, "tsconfig.json"), config)
+			manager := lsp.NewManager(lsp.WithIdleTimeout(0), lsp.WithReapInterval(0))
+			t.Cleanup(func() {
+				ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+				defer cancel()
+				_ = manager.Close(ctx)
+			})
+			runner := NewBuiltinRunner(WithLanguageService(manager))
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			// Repeat to cover a warm server whose first open document is still the config script.
+			for range 2 {
+				result := runner.Call(ctx, Call{Name: CodeSymbols, Args: json.RawMessage(`{"scope":"project","path":".","language":"typescript","query":"BusinessNeedle"}`), ProjectDirs: []string{root}})
+				payload := decodeToolResult(t, result)
+				if !result.Ok || payload["resultCount"] != float64(1) {
+					t.Fatalf("business symbol missing: %s", result.Content)
+				}
+				symbol := payload["symbols"].([]any)[0].(map[string]any)
+				if symbol["relativePath"] != "src/main.ts" || symbol["kind"] != "function" || symbol["line"] != float64(1) {
+					t.Fatalf("incorrect symbol: %+v", symbol)
+				}
+			}
+		})
+	}
+}
+
 func TestCodeToolsWithTypeScriptLanguageServer(t *testing.T) {
 	if os.Getenv("PUDDING_LSP_TS_INTEGRATION") != "1" {
 		t.Skip("set PUDDING_LSP_TS_INTEGRATION=1 to test the installed TypeScript language server")

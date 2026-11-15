@@ -117,6 +117,11 @@ func (s *Server) initializeProjectGit(c *cart.Context) error {
 	if !ok {
 		return nil
 	}
+	release, err := s.engine.AcquireWorkspaceWrite(c.Request.Context(), []string{root.Path})
+	if err != nil {
+		return s.fail(c, err)
+	}
+	defer release()
 	repo, err := projectgit.Initialize(c.Request.Context(), root.Path)
 	if err != nil {
 		return projectGitError(c, err)
@@ -153,6 +158,11 @@ func (s *Server) mutateProjectGitPaths(
 	if !ok {
 		return nil
 	}
+	release, err := s.engine.AcquireWorkspaceWrite(c.Request.Context(), []string{repo.Root})
+	if err != nil {
+		return s.fail(c, err)
+	}
+	defer release()
 	status, err := operation(c.Request.Context(), repo, req.Paths)
 	if err != nil {
 		return projectGitError(c, err)
@@ -171,6 +181,11 @@ func (s *Server) commitProjectGit(c *cart.Context) error {
 		return nil
 	}
 	sessionID, _ := c.Param("id")
+	release, err := s.engine.AcquireWorkspaceWrite(c.Request.Context(), []string{repo.Root})
+	if err != nil {
+		return s.fail(c, err)
+	}
+	defer release()
 	status, err := projectgit.CommitOnce(c.Request.Context(), repo, req.Message, req.StageAll, projectgit.MutationRequest{ID: req.ClientRequestID, Scope: sessionID, ExpectedRevision: req.ExpectedRevision})
 	if err != nil {
 		return projectGitError(c, err)
@@ -264,6 +279,11 @@ func (s *Server) createProjectGitBranch(c *cart.Context) error {
 		return nil
 	}
 	sessionID, _ := c.Param("id")
+	release, err := s.engine.AcquireWorkspaceWrite(c.Request.Context(), []string{repo.Root})
+	if err != nil {
+		return s.fail(c, err)
+	}
+	defer release()
 	status, err := projectgit.CreateBranchOnce(c.Request.Context(), repo, req.Name, projectgit.MutationRequest{
 		ID: req.ClientRequestID, Scope: sessionID, ExpectedRevision: req.ExpectedRevision,
 	})
@@ -298,6 +318,11 @@ func (s *Server) mutateProjectGitBranch(
 	if !ok {
 		return nil
 	}
+	release, err := s.engine.AcquireWorkspaceWrite(c.Request.Context(), []string{repo.Root})
+	if err != nil {
+		return s.fail(c, err)
+	}
+	defer release()
 	status, err := operation(c.Request.Context(), repo, req.Name)
 	if err != nil {
 		return projectGitError(c, err)
@@ -326,6 +351,11 @@ func (s *Server) mutateProjectGitRoot(
 	if !ok {
 		return nil
 	}
+	release, err := s.engine.AcquireWorkspaceWrite(c.Request.Context(), []string{repo.Root})
+	if err != nil {
+		return s.fail(c, err)
+	}
+	defer release()
 	status, err := operation(c.Request.Context(), repo)
 	if err != nil {
 		return projectGitError(c, err)

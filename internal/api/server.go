@@ -1500,6 +1500,11 @@ func (s *Server) replayTurnFileChanges(c *cart.Context, direction turnfiles.Repl
 	if err := decode(c, &req); err != nil || req.ExpectedRevision <= 0 || req.ExpectedRevision > 9007199254740991 {
 		return badRequest(c, "turn_file_changes_invalid_revision")
 	}
+	release, err := s.engine.AcquireWorkspaceWrite(c.Request.Context(), paths)
+	if err != nil {
+		return s.fail(c, err)
+	}
+	defer release()
 	result, err := s.turnFiles.Apply(c.Request.Context(), id, turnID, direction, paths, req.ExpectedRevision)
 	if err != nil {
 		switch {

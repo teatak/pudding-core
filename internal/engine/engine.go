@@ -114,6 +114,7 @@ type Engine struct {
 
 	collaborationMu           sync.Mutex
 	resourceMu                sync.Mutex
+	workspaceWrites           workspaceWriteLocks
 	resourceLocks             map[string]chan struct{}
 	mu                        sync.Mutex
 	running                   map[string]*activeTurn // sessionID → 当前 turn

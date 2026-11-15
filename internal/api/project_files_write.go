@@ -64,6 +64,11 @@ func (s *Server) createProjectEntry(c *cart.Context) error {
 	if err != nil {
 		return projectFileError(c, http.StatusForbidden, "path_not_authorized")
 	}
+	release, err := s.engine.AcquireWorkspaceWrite(c.Request.Context(), []string{root.Path})
+	if err != nil {
+		return s.fail(c, err)
+	}
+	defer release()
 	entry, err := projectfs.Create(root.Path, parent, req.Name, req.Type)
 	if err != nil {
 		return s.projectMutationError(c, err)
@@ -94,6 +99,11 @@ func (s *Server) renameProjectEntry(c *cart.Context) error {
 	if err != nil {
 		return projectFileError(c, http.StatusForbidden, "path_not_authorized")
 	}
+	release, err := s.engine.AcquireWorkspaceWrite(c.Request.Context(), []string{root.Path})
+	if err != nil {
+		return s.fail(c, err)
+	}
+	defer release()
 	entry, err := projectfs.Rename(root.Path, rel, req.Name)
 	if err != nil {
 		return s.projectMutationError(c, err)
@@ -121,6 +131,11 @@ func (s *Server) copyProjectEntry(c *cart.Context) error {
 	if !ok {
 		return nil
 	}
+	release, err := s.engine.AcquireWorkspaceWrite(c.Request.Context(), []string{sourceRoot.Path, targetRoot.Path})
+	if err != nil {
+		return s.fail(c, err)
+	}
+	defer release()
 	entry, err := projectfs.Copy(sourceRoot.Path, sourcePath, targetRoot.Path, targetParentPath, req.Name, req.Unique)
 	if err != nil {
 		return s.projectMutationError(c, err)
@@ -142,6 +157,11 @@ func (s *Server) moveProjectEntry(c *cart.Context) error {
 	if !ok {
 		return nil
 	}
+	release, err := s.engine.AcquireWorkspaceWrite(c.Request.Context(), []string{sourceRoot.Path, targetRoot.Path})
+	if err != nil {
+		return s.fail(c, err)
+	}
+	defer release()
 	entry, err := projectfs.Move(sourceRoot.Path, sourcePath, targetRoot.Path, targetParentPath, req.Name)
 	if err != nil {
 		return s.projectMutationError(c, err)
@@ -188,6 +208,11 @@ func (s *Server) deleteProjectEntry(c *cart.Context) error {
 	if err != nil {
 		return projectFileError(c, http.StatusForbidden, "path_not_authorized")
 	}
+	release, err := s.engine.AcquireWorkspaceWrite(c.Request.Context(), []string{root.Path})
+	if err != nil {
+		return s.fail(c, err)
+	}
+	defer release()
 	if err := projectfs.Remove(root.Path, rel); err != nil {
 		return s.projectMutationError(c, err)
 	}
@@ -216,6 +241,11 @@ func (s *Server) putProjectFile(c *cart.Context) error {
 	if !utf8.Valid(content) || containsBinaryNUL(content) {
 		return projectFileError(c, http.StatusUnsupportedMediaType, "project_file_not_text")
 	}
+	release, err := s.engine.AcquireWorkspaceWrite(c.Request.Context(), []string{root.Path})
+	if err != nil {
+		return s.fail(c, err)
+	}
+	defer release()
 	saved, err := projectfs.Save(root.Path, rel, content, strings.TrimSpace(req.ExpectedRevision))
 	if err != nil {
 		return s.projectMutationError(c, err)

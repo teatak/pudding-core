@@ -3,8 +3,10 @@ package tool
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -158,6 +160,43 @@ func TestBackgroundProcessSplitUTF8RetainsValidRingOffsets(t *testing.T) {
 }
 
 type backgroundRejectedCommandRunner struct{ cmd *exec.Cmd }
+
+func TestBackgroundProcessForegroundGlobalQuotaIsolation(t *testing.T) {
+	for _, occupiedForeground := range []bool{false, true} {
+		t.Run(fmt.Sprintf("foreground_pool_full_%v", occupiedForeground), func(t *testing.T) {
+			manager := newBackgroundProcessManager(time.Hour)
+			manager.runningTotal = backgroundProcessGlobalLimit
+			if occupiedForeground {
+				manager.foregroundTotal = foregroundProcessGlobalLimit
+			}
+			// A missing executable tests admission and failed-start cleanup without
+			// creating dozens of persistent processes just to fill the global pool.
+			for _, foreground := range []bool{false, true} {
+				var command *foregroundCommand
+				if foreground {
+					command = &foregroundCommand{}
+				}
+				execution := &commandExecution{Cmd: exec.Command(filepath.Join(t.TempDir(), "missing-executable"))}
+				_, err := manager.startPrepared("new-session", "", "", "", "", "", false, execution, command)
+				if foreground == occupiedForeground {
+					payload := decodeToolResult(t, backgroundProcessError(Result{}, err))
+					if payload["reason"] != "global_process_limit" {
+						t.Fatalf("full pool admitted command: %v", err)
+					}
+				} else if !errors.Is(err, os.ErrNotExist) {
+					t.Fatalf("other pool blocked command admission: %v", err)
+				}
+				wantForeground := 0
+				if occupiedForeground {
+					wantForeground = foregroundProcessGlobalLimit
+				}
+				if manager.runningTotal != backgroundProcessGlobalLimit || manager.foregroundTotal != wantForeground || len(manager.runningBySession) != 0 || len(manager.foregroundBySession) != 0 {
+					t.Fatal("failed start leaked process quota")
+				}
+			}
+		})
+	}
+}
 
 func (r *backgroundRejectedCommandRunner) Prepare(commandSpec) (*commandExecution, error) {
 	r.cmd = exec.Command(os.Args[0])

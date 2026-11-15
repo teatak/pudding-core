@@ -633,13 +633,21 @@ func TestTypeScriptSymbolsOpenSeedDocumentBeforeWorkspaceQuery(t *testing.T) {
 		synced = true
 		return lsp.DocumentState{URI: document.URI, Version: 1, Changed: true, PositionEncoding: "utf-16"}, nil
 	}
-	service.request = func(method string, _ any, result any) error {
-		if method != "workspace/symbol" || !synced {
+	service.request = func(method string, params any, result any) error {
+		if method != "workspace/executeCommand" || !synced {
 			t.Fatalf("workspace symbols requested before seed sync: method=%s synced=%v", method, synced)
 		}
-		return assignCodeTestResult(result, []map[string]any{{
-			"name": "target", "kind": 12, "location": testLocation(resolvedSource, 0, 16, 22),
-		}})
+		arguments := params.(map[string]any)["arguments"].([]any)
+		if arguments[0] == "projectInfo" {
+			return assignCodeTestResult(result, map[string]any{"success": true, "body": map[string]any{"fileNames": []string{resolvedSource}}})
+		}
+		if arguments[0] != "navto" || arguments[1].(map[string]any)["file"] != nil {
+			t.Fatalf("symbol query must search projects: %+v", params)
+		}
+		return assignCodeTestResult(result, map[string]any{"success": true, "body": []map[string]any{{
+			"name": "target", "kind": "function", "file": resolvedSource,
+			"start": map[string]int{"line": 1, "offset": 17}, "end": map[string]int{"line": 1, "offset": 23},
+		}}})
 	}
 	runner := testCodeRunner(service)
 	result := runner.Call(context.Background(), Call{
@@ -653,6 +661,58 @@ func TestTypeScriptSymbolsOpenSeedDocumentBeforeWorkspaceQuery(t *testing.T) {
 	payload := decodeToolResult(t, result)
 	if payload["resultCount"] != float64(1) {
 		t.Fatalf("unexpected symbols payload: %+v", payload)
+	}
+}
+
+func TestTypeScriptSymbolsBoundProjectDiscovery(t *testing.T) {
+	for _, shared := range []bool{false, true} {
+		t.Run(fmt.Sprintf("shared_project_%v", shared), func(t *testing.T) {
+			root := t.TempDir()
+			writeCodeTestFile(t, filepath.Join(root, "tsconfig.json"), `{}`)
+			var members []string
+			for i := 0; i < maxCodeBootstrapProjects+1; i++ {
+				path := filepath.Join(root, fmt.Sprintf("file%02d.ts", i))
+				writeCodeTestFile(t, path, "export {}\n")
+				canonical, err := filepath.EvalSymlinks(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				members = append(members, canonical)
+			}
+			opened := 0
+			service := &fakeCodeLanguageService{encoding: "utf-16"}
+			service.sync = func(document lsp.Document) (lsp.DocumentState, error) {
+				opened++
+				return lsp.DocumentState{URI: document.URI, Version: 1}, nil
+			}
+			service.request = func(method string, params, result any) error {
+				arguments := params.(map[string]any)["arguments"].([]any)
+				if method != "workspace/executeCommand" {
+					t.Fatalf("unexpected request: %s", method)
+				}
+				if arguments[0] == "projectInfo" {
+					files := []string{}
+					if shared {
+						files = members
+					}
+					return assignCodeTestResult(result, map[string]any{"success": true, "body": map[string]any{"fileNames": files}})
+				}
+				return assignCodeTestResult(result, map[string]any{"success": true, "body": []any{}})
+			}
+			runner := testCodeRunner(service)
+			result := runner.Call(context.Background(), Call{Name: CodeSymbols, Args: json.RawMessage(`{"scope":"project","path":".","language":"typescript","query":"Absent","max_results":1}`), ProjectDirs: []string{root}})
+			payload := decodeToolResult(t, result)
+			if !result.Ok || payload["truncated"] != !shared || payload["resultCount"] != float64(0) {
+				t.Fatalf("wrong discovery completeness: %s", result.Content)
+			}
+			want := maxCodeBootstrapProjects
+			if shared {
+				want = 1
+			}
+			if opened != want {
+				t.Fatalf("opened %d files; want %d", opened, want)
+			}
+		})
 	}
 }
 

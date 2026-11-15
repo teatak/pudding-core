@@ -28,6 +28,7 @@ const (
 	maxCodeDiagnosticRunes   = 2000
 	maxCodeMetadataRunes     = 200
 	maxCodeBootstrapFiles    = 2048
+	maxCodeBootstrapProjects = 32
 	codeDiagnosticWait       = 750 * time.Millisecond
 )
 
@@ -113,16 +114,22 @@ func (r *BuiltinRunner) codeSymbols(ctx context.Context, call Call) Result {
 	if _, failed := r.refreshCodeDocuments(ctx, out, call, target); failed != nil {
 		return *failed
 	}
+	var rawSymbols []rawCodeSymbol
+	bootstrapTruncated := false
 	if target.language == "typescript" {
-		if err := r.syncCodeSymbolSeed(ctx, target); err != nil {
+		var err error
+		bootstrapTruncated, err = r.syncCodeSymbolSeeds(ctx, target)
+		if err != nil {
 			if strings.Contains(err.Error(), "language_root_not_found") {
 				return toolJSONError(out, "language_root_not_found", err.Error())
 			}
 			return codeServiceError(out, err)
 		}
-	}
-	var rawSymbols []rawCodeSymbol
-	if err := r.codeLanguageService(ctx).Request(ctx, target.spec, "workspace/symbol", map[string]any{"query": args.Query}, &rawSymbols); err != nil {
+		rawSymbols, err = r.typeScriptWorkspaceSymbols(ctx, target, args.Query)
+		if err != nil {
+			return codeServiceError(out, err)
+		}
+	} else if err := r.codeLanguageService(ctx).Request(ctx, target.spec, "workspace/symbol", map[string]any{"query": args.Query}, &rawSymbols); err != nil {
 		return codeServiceError(out, err)
 	}
 	converter := newCodeLocationConverter(call.ProjectDirs, "utf-16")
@@ -159,8 +166,8 @@ func (r *BuiltinRunner) codeSymbols(ctx context.Context, call Call) Result {
 		}
 		return left.Name < right.Name
 	})
-	truncated := len(symbols) > maxResults
-	if truncated {
+	truncated := bootstrapTruncated || len(symbols) > maxResults
+	if len(symbols) > maxResults {
 		symbols = symbols[:maxResults]
 	}
 	payload := codeBasePayload(target)
@@ -174,12 +181,17 @@ func (r *BuiltinRunner) codeSymbols(ctx context.Context, call Call) Result {
 	return withResultSummary(toolJSON(out, true, payload), SummaryReturnedItems, len(symbols))
 }
 
-func (r *BuiltinRunner) syncCodeSymbolSeed(ctx context.Context, target resolvedCodeTarget) error {
+func (r *BuiltinRunner) syncCodeSymbolSeeds(ctx context.Context, target resolvedCodeTarget) (bool, error) {
 	searchRoot := target.path
 	if info, err := os.Stat(searchRoot); err != nil || !info.IsDir() {
 		searchRoot = target.languageRoot
 	}
-	var document lsp.Document
+	// A seed can belong to a config script's inferred project. Ask tsserver for
+	// each discovered project's members, then seed only files it has not covered.
+	// This also discovers referenced configs without parsing JSONC/extends here.
+	covered := map[string]bool{}
+	seedCount := 0
+	truncated := false
 	filesScanned := 0
 	err := filepath.WalkDir(searchRoot, func(path string, entry os.DirEntry, walkErr error) error {
 		if ctxErr := ctx.Err(); ctxErr != nil {
@@ -204,27 +216,54 @@ func (r *BuiltinRunner) syncCodeSymbolSeed(ctx context.Context, target resolvedC
 		}
 		filesScanned++
 		if filesScanned > maxCodeBootstrapFiles {
+			truncated = true
 			return filepath.SkipAll
 		}
 		language, documentID := codeLanguageForPath(path)
-		if language != target.language {
+		if language != target.language || covered[path] {
 			return nil
+		}
+		if seedCount >= maxCodeBootstrapProjects {
+			truncated = true
+			return filepath.SkipAll
 		}
 		text, _, readErr := readCodeDocument(path)
 		if readErr != nil {
 			return nil
 		}
-		document = lsp.Document{URI: codeFileURI(path), LanguageID: documentID, Text: text}
-		return filepath.SkipAll
+		document := lsp.Document{URI: codeFileURI(path), LanguageID: documentID, Text: text}
+		service := r.codeLanguageService(ctx)
+		if _, err := service.SyncDocument(ctx, target.spec, document); err != nil {
+			return err
+		}
+		seedCount++
+		var response struct {
+			Success bool
+			Message string
+			Body    struct{ FileNames []string }
+		}
+		if err := service.Request(ctx, target.spec, "workspace/executeCommand", map[string]any{
+			"command":   "typescript.tsserverRequest",
+			"arguments": []any{"projectInfo", map[string]any{"file": document.URI, "needFileNameList": true}, map[string]any{"executionTarget": 0}},
+		}, &response); err != nil {
+			return err
+		}
+		if !response.Success {
+			return fmt.Errorf("TypeScript projectInfo failed: %s", response.Message)
+		}
+		covered[path] = true
+		for _, member := range response.Body.FileNames {
+			covered[filepath.Clean(member)] = true
+		}
+		return nil
 	})
 	if err != nil {
-		return err
+		return false, err
 	}
-	if document.URI == "" {
-		return errors.New("language_root_not_found: no TypeScript or JavaScript source file found in the language root")
+	if seedCount == 0 {
+		return false, errors.New("language_root_not_found: no TypeScript or JavaScript source file found in the language root")
 	}
-	_, err = r.codeLanguageService(ctx).SyncDocument(ctx, target.spec, document)
-	return err
+	return truncated, nil
 }
 
 func (r *BuiltinRunner) codeDefinition(ctx context.Context, call Call) Result {

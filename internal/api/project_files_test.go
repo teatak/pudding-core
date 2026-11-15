@@ -2,19 +2,102 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/teatak/pudding-core/internal/engine"
+	"github.com/teatak/pudding-core/internal/event"
 	"github.com/teatak/pudding-core/internal/home"
+	"github.com/teatak/pudding-core/internal/projectfs"
+	"github.com/teatak/pudding-core/internal/provider/mock"
+	"github.com/teatak/pudding-core/internal/provider/registry"
 	"github.com/teatak/pudding-core/internal/store"
+	"github.com/teatak/pudding-core/internal/store/storetest"
 )
+
+func TestProjectMutationsWaitForWorkspaceWriter(t *testing.T) {
+	st := storetest.New(t)
+	root, homeDir := t.TempDir(), t.TempDir()
+	createProjectSession(t, st, "project", "session", root)
+	runProjectGit(t, root, "init", "--quiet")
+	path := filepath.Join(root, "main.txt")
+	if err := os.WriteFile(path, []byte("original"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	hub := event.NewHub()
+	eng := engine.New(st, hub, registry.Static(mock.New()), st, engine.WithAttachmentHome(homeDir))
+	handler := New(eng, st, st, hub).WithHome(homeDir).Handler(testToken, nil)
+	rootID := projectRootViews([]string{root})[0].ID
+	for _, tc := range []struct {
+		name, method, route string
+		body                map[string]any
+	}{
+		{"create", http.MethodPost, "entries", map[string]any{"name": "added.txt", "type": "file", "parentPath": "."}},
+		{"save", http.MethodPut, "file", map[string]any{"path": "main.txt", "content": "saved", "expectedRevision": projectfs.Revision([]byte("original"))}},
+		{"rename", http.MethodPatch, "entries", map[string]any{"path": "main.txt", "name": "renamed.txt"}},
+		{"copy", http.MethodPost, "entries/copy", map[string]any{"sourceRootID": rootID, "targetRootID": rootID, "sourcePath": "main.txt", "targetParentPath": ".", "name": "copy.txt"}},
+		{"move", http.MethodPost, "entries/move", map[string]any{"sourceRootID": rootID, "targetRootID": rootID, "sourcePath": "main.txt", "targetParentPath": ".", "name": "moved.txt"}},
+		{"delete", http.MethodDelete, "entries?rootID=" + rootID + "&path=main.txt", nil},
+		{"git_init", http.MethodPost, "git/init", nil},
+		{"git_stage", http.MethodPost, "git/stage", map[string]any{"paths": []string{"main.txt"}}},
+		{"git_commit", http.MethodPost, "git/commit", map[string]any{"message": "test", "stageAll": true}},
+		{"git_branch_create", http.MethodPost, "git/branches", map[string]any{"name": "new-branch"}},
+		{"git_branch_switch", http.MethodPost, "git/branches/switch", map[string]any{"name": "other-branch"}},
+		{"git_sync", http.MethodPost, "git/sync", nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			release, err := eng.AcquireWorkspaceWrite(context.Background(), []string{root})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer release()
+			body := tc.body
+			if body == nil {
+				body = map[string]any{}
+			}
+			body["rootID"] = rootID
+			raw, err := json.Marshal(body)
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+			defer cancel()
+			request := httptest.NewRequest(tc.method, "/sessions/session/project/"+tc.route, strings.NewReader(string(raw))).WithContext(ctx)
+			request.Header.Set("Authorization", "Bearer "+testToken)
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, request)
+			if !errors.Is(ctx.Err(), context.DeadlineExceeded) || response.Code < 400 {
+				t.Fatalf("mutation bypassed active writer: %d %s", response.Code, response.Body.String())
+			}
+			content, err := os.ReadFile(path)
+			if err != nil || string(content) != "original" {
+				t.Fatalf("canceled writer changed file: %q %v", content, err)
+			}
+		})
+	}
+	// A save that waited must still compare against the new disk revision.
+	if err := os.WriteFile(path, []byte("command result"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := json.Marshal(map[string]any{"rootID": rootID, "path": "main.txt", "content": "stale draft", "expectedRevision": projectfs.Revision([]byte("original"))})
+	request := httptest.NewRequest(http.MethodPut, "/sessions/session/project/file", strings.NewReader(string(raw)))
+	request.Header.Set("Authorization", "Bearer "+testToken)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusConflict {
+		t.Fatalf("stale save not rejected: %d %s", response.Code, response.Body.String())
+	}
+}
 
 func TestSessionWorkspaceListsTemporaryFilesWithoutProject(t *testing.T) {
 	srv, st, homeDir := newTestServerWithHome(t)

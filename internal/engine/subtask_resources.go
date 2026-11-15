@@ -36,13 +36,15 @@ func (e *Engine) acquireToolResources(ctx context.Context, call tool.Call) (func
 		return nil, err
 	}
 	_, mutation := tool.MutationTrackingForCall(call)
+	var releases []func()
 	if mutation || call.Name == tool.CommandRun || classified && risk.Class != tool.RiskClassRead && risk.Scope != "computer" {
-		for _, dir := range call.ProjectDirs {
-			keys = append(keys, "directory:"+dir)
+		release, err := e.AcquireWorkspaceWrite(ctx, call.ProjectDirs)
+		if err != nil {
+			return nil, err
 		}
+		releases = append(releases, release)
 	}
 	sort.Strings(keys)
-	var releases []func()
 	releaseAll := func() {
 		for i := len(releases) - 1; i >= 0; i-- {
 			releases[i]()
