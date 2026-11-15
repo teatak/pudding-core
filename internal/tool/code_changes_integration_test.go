@@ -26,6 +26,24 @@ func (s *unopenedCodeLanguageService) SyncDocument(ctx context.Context, spec lsp
 	return s.Manager.SyncDocument(ctx, spec, document)
 }
 
+type unopenedCodeOperation struct {
+	lsp.Operation
+	opens *atomic.Int32
+}
+
+func (s *unopenedCodeLanguageService) BeginOperation(ctx context.Context, spec lsp.ServerSpec) (lsp.Operation, error) {
+	op, err := s.Manager.BeginOperation(ctx, spec)
+	if err != nil {
+		return nil, err
+	}
+	return &unopenedCodeOperation{Operation: op, opens: &s.opens}, nil
+}
+
+func (o *unopenedCodeOperation) SyncDocument(ctx context.Context, spec lsp.ServerSpec, document lsp.Document) (lsp.DocumentState, error) {
+	o.opens.Add(1)
+	return o.Operation.SyncDocument(ctx, spec, document)
+}
+
 func TestCodeSymbolsTracksUnopenedGoFiles(t *testing.T) {
 	if os.Getenv("PUDDING_LSP_INTEGRATION") != "1" {
 		t.Skip("set PUDDING_LSP_INTEGRATION=1 to test the installed gopls")

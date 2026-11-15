@@ -91,7 +91,7 @@ func TestWindowsTypeScriptPublishedDiagnostics(t *testing.T) {
 		t.Fatal(err)
 	}
 	uri := fileURI(file)
-	state, err := process.SyncDocument(Document{URI: uri, LanguageID: "typescript", Text: source})
+	state, err := process.SyncDocument(ctx, Document{URI: uri, LanguageID: "typescript", Text: source})
 	if err != nil {
 		t.Fatal(err)
 	}

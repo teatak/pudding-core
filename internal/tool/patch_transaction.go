@@ -157,6 +157,9 @@ func validatePatchFileState(projectDirs []string, projectRoot string, file prepa
 	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
 		return newPatchError("patch_stale", "file type changed after patch validation: "+file.Path)
 	}
+	if info.Mode().Perm() != file.Mode.Perm() {
+		return newPatchError("patch_stale", "file permissions changed after patch validation: "+file.Path)
+	}
 	if info.Size() > patchMaxFileBytes {
 		return newPatchError("patch_stale", "file grew beyond the patch size limit: "+file.Path)
 	}

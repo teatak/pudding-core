@@ -33,8 +33,8 @@ func TestManagerBlockedFileFlushDoesNotBlockOtherWorkspaces(t *testing.T) {
 	manager.mu.Lock()
 	entry := manager.entries[first.spec.Key]
 	manager.mu.Unlock()
-	entry.flushMu.Lock()
-	defer entry.flushMu.Unlock()
+	entry.flushMu <- struct{}{}
+	defer func() { <-entry.flushMu }()
 	done := make(chan error, 1)
 	go func() {
 		manager.RecordFileChanges([]FileChange{

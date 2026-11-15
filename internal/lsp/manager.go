@@ -68,7 +68,7 @@ type managerEntry struct {
 	ready    chan struct{}
 	err      error
 	lastUsed time.Time
-	flushMu  sync.Mutex
+	flushMu  chan struct{}
 	files    map[string]int // guarded by Manager.mu; never held during protocol IO
 	invalid  atomic.Bool
 }
@@ -131,7 +131,7 @@ func (m *Manager) Request(ctx context.Context, spec ServerSpec, method string, p
 			return err
 		}
 		m.touch(process.spec.Key, process)
-		if err := m.flushFileChanges(process); err != nil {
+		if err := m.flushFileChanges(requestCtx, process); err != nil {
 			m.discard(process.spec.Key, process)
 			return err
 		}
@@ -151,7 +151,7 @@ func (m *Manager) SyncDocument(ctx context.Context, spec ServerSpec, document Do
 		return DocumentState{}, err
 	}
 	m.touch(process.spec.Key, process)
-	state, err := process.SyncDocument(document)
+	state, err := process.SyncDocument(ctx, document)
 	m.touch(process.spec.Key, process)
 	return state, err
 }
@@ -162,7 +162,7 @@ func (m *Manager) RefreshDocuments(ctx context.Context, spec ServerSpec, load Do
 		return nil, err
 	}
 	m.touch(process.spec.Key, process)
-	if err := m.flushFileChanges(process); err != nil {
+	if err := m.flushFileChanges(ctx, process); err != nil {
 		m.discard(process.spec.Key, process)
 		return nil, err
 	}
@@ -236,7 +236,7 @@ func (m *Manager) Acquire(ctx context.Context, spec ServerSpec) (*Process, error
 			m.mu.Unlock()
 			return nil, ErrCapacity
 		}
-		entry := &managerEntry{spec: normalized, ready: make(chan struct{}), lastUsed: time.Now()}
+		entry := &managerEntry{spec: normalized, ready: make(chan struct{}), lastUsed: time.Now(), flushMu: make(chan struct{}, 1)}
 		ready := entry.ready
 		m.entries[key] = entry
 		m.mu.Unlock()
@@ -284,7 +284,7 @@ func (m *Manager) removeLRUVictimLocked() (*Process, bool) {
 	var victimKey ProcessKey
 	var victim *managerEntry
 	for key, entry := range m.entries {
-		if entry.ready != nil || entry.process == nil || entry.process.Pending() != 0 {
+		if entry.ready != nil || entry.process == nil || (entry.process.Pending() != 0 || entry.process.leases.Load() != 0) {
 			continue
 		}
 		if victim == nil || entry.lastUsed.Before(victim.lastUsed) {
@@ -313,6 +313,8 @@ func (m *Manager) discard(key ProcessKey, process *Process) {
 		delete(m.entries, key)
 	}
 	m.mu.Unlock()
+	process.finish(ErrProcessClosed)
+	process.forceTerminate()
 }
 
 func (m *Manager) watchProcess(key ProcessKey, entry *managerEntry, process *Process) {
@@ -346,7 +348,7 @@ func (m *Manager) ReapIdle(ctx context.Context) error {
 	m.mu.Lock()
 	var processes []*Process
 	for key, entry := range m.entries {
-		if entry.ready != nil || entry.process == nil || entry.process.Pending() != 0 || entry.lastUsed.After(cutoff) {
+		if entry.ready != nil || entry.process == nil || (entry.process.Pending() != 0 || entry.process.leases.Load() != 0) || entry.lastUsed.After(cutoff) {
 			continue
 		}
 		delete(m.entries, key)

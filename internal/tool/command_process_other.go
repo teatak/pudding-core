@@ -10,7 +10,7 @@ func configureCommandPTY(_ *exec.Cmd) {}
 
 func attachCommandProcess(*exec.Cmd) error { return nil }
 
-func releaseCommandProcess(*exec.Cmd) {}
+func releaseCommandProcess(*exec.Cmd) error { return nil }
 
 func commandProcessSignal(*exec.Cmd) string { return "" }
 

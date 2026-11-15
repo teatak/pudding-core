@@ -119,6 +119,31 @@ func TestReplayerRejectsOldSnapshotsAndFormerRoots(t *testing.T) {
 	}
 }
 
+func TestReplayerRejectsIncompleteExistingSnapshots(t *testing.T) {
+	for _, incomplete := range []string{"before", "after", "both"} {
+		t.Run(incomplete, func(t *testing.T) {
+			root := t.TempDir()
+			writeReplayTestFile(t, root, "file.txt", []byte("new"))
+			change := replayTestChange(t, root, "file.txt", "", store.FileChangeModified, []byte("old"), []byte("new"), false)
+			if incomplete != "after" {
+				change.OldDigest, change.OldContent = "", ""
+			}
+			if incomplete != "before" {
+				change.NewDigest, change.NewContent = "", ""
+			}
+			mem := replayTestStore(t, root, []store.TurnFileChangeInput{change})
+			turn, err := mem.GetConversationTurn(context.Background(), "session", "turn")
+			if err != nil || len(turn.FileChanges) != 1 || turn.FileChanges[0].Reversible {
+				t.Fatalf("incomplete existing snapshot became reversible: %+v %v", turn, err)
+			}
+			if _, err := NewReplayer(mem).Apply(context.Background(), "session", "turn", ReplayUndo, []string{root}, replayTestRevision(t, mem)); !errors.Is(err, ErrReplayNotReversible) {
+				t.Fatalf("incomplete snapshot was applied: %v", err)
+			}
+			assertReplayTestFile(t, root, "file.txt", []byte("new"))
+		})
+	}
+}
+
 func TestReplayerRejectsActionWhileSessionTurnIsRunning(t *testing.T) {
 	root := t.TempDir()
 	writeReplayTestFile(t, root, "file.txt", []byte("new"))

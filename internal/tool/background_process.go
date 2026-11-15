@@ -656,7 +656,8 @@ func (p *backgroundProcess) wait() {
 	waitErr = errors.Join(waitErr, p.cmd.Wait())
 	p.signalMu.Lock()
 	p.signalsDone = true
-	releaseCommandProcess(p.cmd)
+	cleanupErr := releaseCommandProcess(p.cmd)
+	waitErr = errors.Join(waitErr, cleanupErr)
 	p.signalMu.Unlock()
 	if p.ptyReadDone != nil {
 		// exec.Cmd joins its pipe writers, but the PTY reader is ours. Drain
@@ -688,6 +689,8 @@ func (p *backgroundProcess) wait() {
 	switch {
 	case stopped:
 		reason = p.requestedStopReason
+	case cleanupErr != nil:
+		reason = "process_cleanup_failed"
 	case waitErr != nil:
 		reason = "non_zero_exit"
 	}

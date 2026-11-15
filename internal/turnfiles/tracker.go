@@ -289,7 +289,9 @@ func mergeFileChangeOrigin(current, next store.FileChangeOrigin) store.FileChang
 
 func sameFileContentAndType(left, right fileSnapshot) bool {
 	// A symlink's link text can have the same digest as regular file bytes.
-	return left.digest == right.digest && left.typeName == right.typeName
+	// An existing entry without a digest was not captured completely. Two
+	// failed reads cannot establish that its content stayed unchanged.
+	return left.digest != "" && left.digest == right.digest && left.typeName == right.typeName
 }
 
 func sameFileState(left, right fileSnapshot) bool {
@@ -500,12 +502,19 @@ func snapshotPath(out map[fileKey]fileSnapshot, root, target string, remainingCo
 func readSnapshotFile(path string, remainingContentBytes *int64) (fileSnapshot, bool) {
 	info, err := os.Lstat(path)
 	if err != nil {
-		return fileSnapshot{}, false
+		if errors.Is(err, os.ErrNotExist) {
+			return fileSnapshot{}, false
+		}
+		// A failed lookup is not evidence of absence. An unknown existing
+		// entry must not become a reversible addition on the next capture.
+		return fileSnapshot{typeName: "unknown"}, true
 	}
+	incomplete := fileSnapshot{mode: uint32(info.Mode().Perm()), size: info.Size(), typeName: "file"}
 	if info.Mode()&os.ModeSymlink != 0 {
+		incomplete.typeName = "symlink"
 		target, err := os.Readlink(path)
 		if err != nil {
-			return fileSnapshot{}, false
+			return incomplete, true
 		}
 		data := []byte(target)
 		snapshot := snapshotFromBytes(data, remainingContentBytes)
@@ -518,16 +527,16 @@ func readSnapshotFile(path string, remainingContentBytes *int64) (fileSnapshot, 
 	}
 	file, err := os.Open(path)
 	if err != nil {
-		return fileSnapshot{}, false
+		return incomplete, true
 	}
 	defer file.Close()
 	openedInfo, err := file.Stat()
 	if err != nil || !openedInfo.Mode().IsRegular() {
-		return fileSnapshot{}, false
+		return incomplete, true
 	}
 	currentInfo, err := os.Lstat(path)
 	if err != nil || currentInfo.Mode()&os.ModeSymlink != 0 || !os.SameFile(currentInfo, openedInfo) {
-		return fileSnapshot{}, false
+		return incomplete, true
 	}
 	if openedInfo.Size() > maxSnapshotContentBytes {
 		identity := fmt.Sprintf("large:%d:%d", openedInfo.Size(), openedInfo.ModTime().UnixNano())
@@ -535,7 +544,7 @@ func readSnapshotFile(path string, remainingContentBytes *int64) (fileSnapshot, 
 	}
 	data, err := io.ReadAll(io.LimitReader(file, maxSnapshotContentBytes+1))
 	if err != nil {
-		return fileSnapshot{}, false
+		return incomplete, true
 	}
 	if len(data) > maxSnapshotContentBytes {
 		latestInfo, statErr := file.Stat()
@@ -686,7 +695,7 @@ func buildChange(kind store.FileChangeKind, key fileKey, originalPath string, ol
 		if !newFile.binary {
 			change.NewContent = newFile.content
 		}
-		if !change.Binary {
+		if !change.Binary && (oldFile.typeName == "" || oldFile.digest != "") && (newFile.typeName == "" || newFile.digest != "") {
 			change.Additions, change.Deletions = lineStats(change.OldContent, change.NewContent)
 		}
 	}

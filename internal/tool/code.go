@@ -122,11 +122,11 @@ func (r *BuiltinRunner) codeSymbols(ctx context.Context, call Call) Result {
 		}
 	}
 	var rawSymbols []rawCodeSymbol
-	if err := r.languageService.Request(ctx, target.spec, "workspace/symbol", map[string]any{"query": args.Query}, &rawSymbols); err != nil {
+	if err := r.codeLanguageService(ctx).Request(ctx, target.spec, "workspace/symbol", map[string]any{"query": args.Query}, &rawSymbols); err != nil {
 		return codeServiceError(out, err)
 	}
 	converter := newCodeLocationConverter(call.ProjectDirs, "utf-16")
-	processEncoding, err := r.languageService.PositionEncoding(ctx, target.spec)
+	processEncoding, err := r.codeLanguageService(ctx).PositionEncoding(ctx, target.spec)
 	if err != nil {
 		return codeServiceError(out, err)
 	}
@@ -223,7 +223,7 @@ func (r *BuiltinRunner) syncCodeSymbolSeed(ctx context.Context, target resolvedC
 	if document.URI == "" {
 		return errors.New("language_root_not_found: no TypeScript or JavaScript source file found in the language root")
 	}
-	_, err = r.languageService.SyncDocument(ctx, target.spec, document)
+	_, err = r.codeLanguageService(ctx).SyncDocument(ctx, target.spec, document)
 	return err
 }
 
@@ -243,7 +243,7 @@ func (r *BuiltinRunner) codeDefinition(ctx context.Context, call Call) Result {
 	}
 	var raw json.RawMessage
 	params := map[string]any{"textDocument": map[string]string{"uri": document.URI}, "position": position}
-	if err := r.languageService.Request(ctx, target.spec, "textDocument/definition", params, &raw); err != nil {
+	if err := r.codeLanguageService(ctx).Request(ctx, target.spec, "textDocument/definition", params, &raw); err != nil {
 		return codeServiceError(out, err)
 	}
 	rawLocations, err := parseLocationResponse(raw)
@@ -295,7 +295,7 @@ func (r *BuiltinRunner) codeReferences(ctx context.Context, call Call) Result {
 		"position":     position,
 		"context":      map[string]bool{"includeDeclaration": includeDeclaration},
 	}
-	if err := r.languageService.Request(ctx, target.spec, "textDocument/references", params, &rawLocations); err != nil {
+	if err := r.codeLanguageService(ctx).Request(ctx, target.spec, "textDocument/references", params, &rawLocations); err != nil {
 		return codeServiceError(out, err)
 	}
 	locations, external, truncated := convertCodeLocations(call.ProjectDirs, state.PositionEncoding, rawLocations, maxResults)
@@ -358,7 +358,7 @@ func (r *BuiltinRunner) codeDiagnostics(ctx context.Context, call Call) Result {
 			return codeDocumentError(out, err)
 		}
 		item.document = lsp.Document{URI: codeFileURI(item.target.path), LanguageID: item.target.documentLanguageID, Text: text}
-		state, err := r.languageService.SyncDocument(ctx, item.target.spec, item.document)
+		state, err := r.codeLanguageService(ctx).SyncDocument(ctx, item.target.spec, item.document)
 		if err != nil {
 			return codeServiceError(out, err)
 		}
@@ -445,7 +445,7 @@ func (r *BuiltinRunner) prepareCodePosition(ctx context.Context, out Result, cal
 		return resolvedCodeTarget{}, lsp.Document{}, nil, lsp.DocumentState{}, &result
 	}
 	document := lsp.Document{URI: codeFileURI(target.path), LanguageID: target.documentLanguageID, Text: text}
-	state, err := r.languageService.SyncDocument(ctx, target.spec, document)
+	state, err := r.codeLanguageService(ctx).SyncDocument(ctx, target.spec, document)
 	if err != nil {
 		result := codeServiceError(out, err)
 		return resolvedCodeTarget{}, lsp.Document{}, nil, lsp.DocumentState{}, &result
@@ -462,7 +462,7 @@ func (r *BuiltinRunner) codeDocumentDiagnostics(ctx context.Context, target reso
 		Kind  string           `json:"kind"`
 		Items []lsp.Diagnostic `json:"items"`
 	}
-	err := r.languageService.Request(ctx, target.spec, "textDocument/diagnostic", map[string]any{
+	err := r.codeLanguageService(ctx).Request(ctx, target.spec, "textDocument/diagnostic", map[string]any{
 		"textDocument": map[string]string{"uri": uri},
 	}, &report)
 	if err == nil && report.Kind != "unchanged" {
@@ -478,7 +478,7 @@ func (r *BuiltinRunner) codeDocumentDiagnostics(ctx context.Context, target reso
 	}
 	waitCtx, cancel := context.WithTimeout(ctx, codeDiagnosticWait)
 	defer cancel()
-	snapshot, ok, waitErr := r.languageService.PublishedDiagnostics(waitCtx, target.spec, uri, afterGeneration)
+	snapshot, ok, waitErr := r.codeLanguageService(ctx).PublishedDiagnostics(waitCtx, target.spec, uri, afterGeneration)
 	if errors.Is(waitErr, context.DeadlineExceeded) {
 		return nil, false, nil
 	}
