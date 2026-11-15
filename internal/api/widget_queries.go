@@ -47,18 +47,7 @@ func (s *Server) bindWidget(c *cart.Context) error {
 	if err := decodeStudioRequest(c, &req); err != nil {
 		return badRequest(c, err.Error())
 	}
-	w, err := s.store.GetStudioItem(c.Request.Context(), id)
-	if err != nil {
-		return s.studioItemError(c, err)
-	}
-	if _, err = s.store.GetStudioItemRevision(c.Request.Context(), id, req.RevisionHash); err != nil {
-		return s.studioItemError(c, err)
-	}
-	p, err := widget.ReadPackage(s.home, id, req.RevisionHash)
-	if err != nil {
-		return s.studioItemError(c, err)
-	}
-	m, _, err := p.Validate()
+	w, m, err := s.widgetManifest(c.Request.Context(), id, req.RevisionHash)
 	if err != nil {
 		return s.studioItemError(c, err)
 	}
@@ -90,19 +79,24 @@ func (s *Server) bindWidget(c *cart.Context) error {
 	return nil
 }
 
-func (s *Server) widgetOperation(ctx context.Context, id, hash, operationID string) (*store.StudioItem, widget.Operation, *plugin.EndpointBinding, string, error) {
+func (s *Server) widgetManifest(ctx context.Context, id, hash string) (*store.StudioItem, widget.Manifest, error) {
 	w, err := s.store.GetStudioItem(ctx, id)
 	if err != nil {
-		return nil, widget.Operation{}, nil, "", err
+		return nil, widget.Manifest{}, err
 	}
 	if _, err = s.store.GetStudioItemRevision(ctx, id, hash); err != nil {
-		return nil, widget.Operation{}, nil, "", err
+		return nil, widget.Manifest{}, err
 	}
 	p, err := widget.ReadPackage(s.home, id, hash)
 	if err != nil {
-		return nil, widget.Operation{}, nil, "", err
+		return nil, widget.Manifest{}, err
 	}
 	m, _, err := p.Validate()
+	return w, m, err
+}
+
+func (s *Server) widgetOperation(ctx context.Context, id, hash, operationID string) (*store.StudioItem, widget.Operation, *plugin.EndpointBinding, string, error) {
+	w, m, err := s.widgetManifest(ctx, id, hash)
 	if err != nil {
 		return nil, widget.Operation{}, nil, "", err
 	}

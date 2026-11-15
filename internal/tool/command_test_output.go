@@ -45,15 +45,32 @@ var testLocationPattern = regexp.MustCompile(`^(.+?):(\d+)(?::(\d+))?$`)
 
 func newCommandTestCollector(argv []string, cwd string, roots []string) *commandTestCollector {
 	c := &commandTestCollector{cwd: cwd, roots: roots, pending: make(map[string]string)}
-	if len(argv) > 1 && commandOperation(argv[0]) == "go" && argv[1] == "test" {
-		for _, arg := range argv[2:] {
-			if arg == "-json" {
-				c.goJSON = true
+	c.execution = newCommandTestExecution(argv)
+	c.goJSON = c.execution.goJSON
+	return c
+}
+
+func finishCommandTests(first, second *commandTestCollector) (string, []commandTestFailure, bool) {
+	first.execution.merge(second.execution)
+	var failures []commandTestFailure
+	seen := make(map[commandTestFailure]bool)
+	truncated := false
+	for _, c := range []*commandTestCollector{first, second} {
+		c.finishTAP()
+		truncated = truncated || c.truncated
+		for _, failure := range c.failures {
+			if seen[failure] {
+				continue
 			}
+			if len(failures) == commandMaxTestFailures {
+				truncated = true
+				break
+			}
+			seen[failure] = true
+			failures = append(failures, failure)
 		}
 	}
-	c.execution = newCommandTestExecution(argv, c.goJSON)
-	return c
+	return first.execution.status(), failures, truncated
 }
 
 func (c *commandTestCollector) line(line string) {

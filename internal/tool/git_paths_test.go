@@ -5,9 +5,57 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 )
+
+func TestGitWritePreservesFileNameWhitespace(t *testing.T) {
+	for _, path := range []string{" note.txt", "note.txt "} {
+		t.Run(path, func(t *testing.T) {
+			if runtime.GOOS == "windows" && strings.HasSuffix(path, " ") {
+				t.Skip("Windows does not preserve trailing spaces in ordinary file names")
+			}
+			root := newGitTestRepository(t, true)
+			writePatchTestFile(t, filepath.Join(root, path), "selected file\n")
+			writePatchTestFile(t, filepath.Join(root, strings.TrimSpace(path)), "other file\n")
+			runner := NewBuiltinRunner()
+			defer runner.Close()
+			for _, name := range []string{GitStage, GitUnstage} {
+				call := projectContractCall(name, []string{root}, map[string]any{
+					"scope": "project", "paths": []string{path, filepath.Join(root, path)},
+				})
+				details, err := runner.ApprovalDetails(context.Background(), call)
+				if err != nil || !reflect.DeepEqual(details["paths"], []string{path}) {
+					t.Fatalf("approval changed the file name: details=%v err=%v", details, err)
+				}
+				result := runner.Call(context.Background(), call)
+				payload := decodeGitPayload[gitWritePayload](t, result)
+				if !result.Ok || !reflect.DeepEqual(payload.Paths, []string{path}) {
+					t.Fatalf("execution changed the file name: %s", result.Content)
+				}
+				entries := runGit(context.Background(), root, 4096, "diff", "--cached", "--name-only", "-z")
+				want := ""
+				if name == GitStage {
+					want = path + "\x00"
+					blob := runGit(context.Background(), root, 4096, "show", ":"+path)
+					if blob.err != nil || blob.stdout.String() != "selected file\n" {
+						t.Fatalf("staged wrong content: %q %v", blob.stdout.String(), blob.err)
+					}
+				}
+				if entries.err != nil || entries.stdout.String() != want {
+					t.Fatalf("wrong staged entries: %q want %q err=%v", entries.stdout.String(), want, entries.err)
+				}
+			}
+			if got := readPatchTestFile(t, filepath.Join(root, path)); got != "selected file\n" {
+				t.Fatalf("worktree content changed: %q", got)
+			}
+			if got := readPatchTestFile(t, filepath.Join(root, strings.TrimSpace(path))); got != "other file\n" {
+				t.Fatalf("neighbor content changed: %q", got)
+			}
+		})
+	}
+}
 
 func TestGitRepositoryAuthorizationDoesNotDependOnNestedRootOrder(t *testing.T) {
 	root := newGitTestRepository(t, false)

@@ -4,16 +4,19 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/json"
+	"strings"
 
 	"github.com/teatak/pudding-core/internal/store"
 	"github.com/teatak/pudding-core/internal/tool"
 )
 
-// Only identical failed batches count. Successful reads and explicit process
-// polling are legitimate repeated work, not evidence that the model is stuck.
+// Identical failed batches count; changing read tools or search terms for the
+// same missing path is also not progress. Successful reads and explicit process
+// polling remain legitimate repeated work.
 type repeatedToolFailures struct {
-	previous [32]byte
-	count    int
+	previous    [32]byte
+	count       int
+	missingPath bool
 }
 
 func (f *repeatedToolFailures) reset() { *f = repeatedToolFailures{} }
@@ -26,6 +29,7 @@ func (f *repeatedToolFailures) observe(calls []tool.Call, parts []store.ContentP
 		}
 	}
 	batch := make([]any, 0, len(calls))
+	missingPathBatch := len(calls) > 0
 	for _, call := range calls {
 		result, found := results[call.CallID]
 		outcome, failed := repeatedFailureOutcome(call, result)
@@ -33,7 +37,12 @@ func (f *repeatedToolFailures) observe(calls []tool.Call, parts []store.ContentP
 			f.reset()
 			return false
 		}
-		batch = append(batch, []any{call.Name, normalizedFailureJSON(string(call.Args)), outcome})
+		if target, missing := missingReadTarget(call, result); missing {
+			batch = append(batch, []any{"missing_path", target})
+		} else {
+			missingPathBatch = false
+			batch = append(batch, []any{call.Name, normalizedFailureJSON(string(call.Args)), outcome})
+		}
 	}
 	if len(batch) == 0 {
 		f.reset()
@@ -46,14 +55,43 @@ func (f *repeatedToolFailures) observe(calls []tool.Call, parts []store.ContentP
 	} else {
 		f.count++
 	}
+	f.missingPath = missingPathBatch
 	return f.count >= 4
 }
 
 func (f *repeatedToolFailures) reminder() string {
+	if f.missingPath {
+		reminder := "The requested path was confirmed missing. Switching between read, slice, search, list or stat on that same unchanged path will not recover it. Locate the intended file in an existing parent directory, correct the path, or report the missing input. Do not recreate it without task authorization. Retry after the path or filesystem has changed."
+		if f.count >= 3 {
+			reminder += " Three consecutive attempts reached the same missing target. Another unchanged attempt will stop this turn."
+		}
+		return reminder
+	}
 	if f.count < 3 {
 		return ""
 	}
 	return "The same tool calls have failed three times with unchanged arguments and results. Do not repeat this batch unchanged. Inspect the error, correct the inputs, or use another approach. If blocked, explain the specific blocker. Another identical failure will stop this turn."
+}
+
+func missingReadTarget(call tool.Call, result store.ContentPart) (any, bool) {
+	switch call.Name {
+	case tool.FileRead, tool.FileSlice, tool.FileSearch, tool.FileList:
+	default:
+		return nil, false
+	}
+	var output struct{ Reason string }
+	if result.Ok || json.Unmarshal([]byte(result.Content), &output) != nil || output.Reason != "path_not_found" {
+		return nil, false
+	}
+	var args struct {
+		Scope    string `json:"scope"`
+		Path     string `json:"path"`
+		WidgetID string `json:"widget_id"`
+	}
+	if json.Unmarshal(call.Args, &args) != nil || strings.TrimSpace(args.Path) == "" {
+		return nil, false
+	}
+	return []string{strings.TrimSpace(args.Scope), args.Path, args.WidgetID}, true
 }
 
 func normalizedFailureJSON(value string) any {

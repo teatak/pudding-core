@@ -83,7 +83,7 @@ func (s *Server) searchProjectFiles(c *cart.Context) error {
 	if !ok {
 		return nil
 	}
-	query := strings.TrimSpace(c.Request.URL.Query().Get("q"))
+	query := c.Request.URL.Query().Get("q")
 	if query == "" {
 		return projectFileError(c, http.StatusBadRequest, "project_search_query_required")
 	}

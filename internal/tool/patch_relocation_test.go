@@ -10,22 +10,32 @@ import (
 )
 
 func TestFilePatchRelocation(t *testing.T) {
+	enabled, disabled := true, false
 	for _, tc := range []struct {
 		name, original string
 		start          int
 		old, next      []string
-		relocate       bool
+		relocate       *bool
 		want, reason   string
 		actual         int
 	}{
-		{name: "stale line requires opt in", original: "head\nold\ntail\n", start: 3, old: []string{"old"}, next: []string{"new"}, reason: "hunk_lines_mismatch"},
-		{name: "unique exact block", original: "head\nold\ntail\n", start: 3, old: []string{"old"}, next: []string{"new"}, relocate: true, want: "head\nnew\ntail\n", actual: 2},
-		{name: "out of range CRLF and EOF", original: "head\r\nold\r\ntail", start: 20, old: []string{"old", "tail"}, next: []string{"new"}, relocate: true, want: "head\r\nnew", actual: 2},
-		{name: "ambiguous block", original: "old\nhead\nold\n", start: 2, old: []string{"old"}, next: []string{"new"}, relocate: true, reason: "hunk_lines_mismatch"},
-		{name: "no fuzzy whitespace", original: "head\n old\n", start: 1, old: []string{"old"}, next: []string{"new"}, relocate: true, reason: "hunk_lines_mismatch"},
-		{name: "empty insertion cannot relocate", original: "head\n", start: 20, old: []string{}, next: []string{"new"}, relocate: true, reason: "hunk_line_out_of_range"},
-		{name: "positioned duplicate still valid", original: "old\nold\n", start: 2, old: []string{"old"}, next: []string{"new"}, relocate: true, want: "old\nnew\n"},
-		{name: "delete unique block", original: "head\nold\ntail\n", start: 1, old: []string{"old"}, next: []string{}, relocate: true, want: "head\ntail\n", actual: 2},
+		{name: "strict stale line", relocate: &disabled, original: "head\nold\ntail\n", start: 3, old: []string{"old"}, next: []string{"new"}, reason: "hunk_lines_mismatch"},
+		{name: "explicit relocation", original: "head\nold\ntail\n", start: 3, old: []string{"old"}, next: []string{"new"}, relocate: &enabled, want: "head\nnew\ntail\n", actual: 2},
+		{name: "content only", original: "head\nold\ntail\n", old: []string{"old"}, next: []string{"new"}, want: "head\nnew\ntail\n", actual: 2},
+		{name: "content only first line", original: "old\n", old: []string{"old"}, next: []string{"new"}, want: "new\n", actual: 1},
+		{name: "content only ambiguous at first line", original: "old\nold\n", old: []string{"old"}, next: []string{"new"}, reason: "hunk_lines_mismatch"},
+		{name: "content only missing", original: "other\n", old: []string{"old"}, next: []string{"new"}, reason: "hunk_lines_mismatch"},
+		{name: "content only empty file", original: "", old: []string{"old"}, next: []string{"new"}, reason: "hunk_lines_mismatch"},
+		{name: "content only CRLF and EOF", original: "head\r\nold\r\ntail", old: []string{"old", "tail"}, next: []string{"new"}, want: "head\r\nnew", actual: 2},
+		{name: "anchored insertion", original: "head\nanchor\n", old: []string{"anchor"}, next: []string{"new", "anchor"}, want: "head\nnew\nanchor\n", actual: 2},
+		{name: "strict exact coordinate", original: "old\nold\n", start: 2, old: []string{"old"}, next: []string{"new"}, relocate: &disabled, want: "old\nnew\n"},
+		{name: "unique exact block", original: "head\nold\ntail\n", start: 3, old: []string{"old"}, next: []string{"new"}, want: "head\nnew\ntail\n", actual: 2},
+		{name: "out of range CRLF and EOF", original: "head\r\nold\r\ntail", start: 20, old: []string{"old", "tail"}, next: []string{"new"}, want: "head\r\nnew", actual: 2},
+		{name: "ambiguous block", original: "old\nhead\nold\n", start: 2, old: []string{"old"}, next: []string{"new"}, reason: "hunk_lines_mismatch"},
+		{name: "no fuzzy whitespace", original: "head\n old\n", start: 1, old: []string{"old"}, next: []string{"new"}, reason: "hunk_lines_mismatch"},
+		{name: "empty insertion cannot relocate", original: "head\n", start: 20, old: []string{}, next: []string{"new"}, reason: "hunk_line_out_of_range"},
+		{name: "positioned duplicate still valid", original: "old\nold\n", start: 2, old: []string{"old"}, next: []string{"new"}, want: "old\nnew\n"},
+		{name: "delete unique block", original: "head\nold\ntail\n", start: 1, old: []string{"old"}, next: []string{}, want: "head\ntail\n", actual: 2},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root := t.TempDir()
@@ -33,7 +43,14 @@ func TestFilePatchRelocation(t *testing.T) {
 			writePatchTestFile(t, path, tc.original)
 			runner := NewBuiltinRunner()
 			defer runner.Close()
-			result := patchTestCall(runner, "relocation", root, FilePatch, map[string]any{"scope": "project", "files": []map[string]any{{"path": "note.txt", "action": "edit", "hunks": []map[string]any{{"start_line": tc.start, "old_lines": tc.old, "new_lines": tc.next, "relocate": tc.relocate}}}}})
+			hunk := map[string]any{"old_lines": tc.old, "new_lines": tc.next}
+			if tc.start != 0 {
+				hunk["start_line"] = tc.start
+			}
+			if tc.relocate != nil {
+				hunk["relocate"] = *tc.relocate
+			}
+			result := patchTestCall(runner, "relocation", root, FilePatch, map[string]any{"scope": "project", "files": []map[string]any{{"path": "note.txt", "action": "edit", "hunks": []map[string]any{hunk}}}})
 			if tc.reason != "" {
 				if result.Ok || decodeToolResult(t, result)["reason"] != tc.reason {
 					t.Fatalf("unexpected failure: %s", result.Content)
@@ -54,6 +71,9 @@ func TestFilePatchRelocation(t *testing.T) {
 			if !slices.Equal(moves, want) {
 				t.Fatalf("relocations=%+v want=%+v", moves, want)
 			}
+			if tc.start == 0 && strings.Contains(result.Content, "requestedStartLine") {
+				t.Fatalf("content-only match invented a requested coordinate: %s", result.Content)
+			}
 		})
 	}
 }
@@ -73,7 +93,7 @@ func TestFilePatchRelocationAfterEarlierDeletion(t *testing.T) {
 	}
 	// Reuse the old position, as in the reported HTML task. A second hunk inserts
 	// ahead of the target; both hunks must still resolve against the pre-patch file.
-	result := patch(map[string]any{"start_line": 3, "old_lines": []string{"<g>", "old", "</g>"}, "new_lines": []string{"<g>", "new", "</g>"}, "relocate": true}, map[string]any{"start_line": 1, "old_lines": []string{}, "new_lines": []string{"inserted"}})
+	result := patch(map[string]any{"start_line": 3, "old_lines": []string{"<g>", "old", "</g>"}, "new_lines": []string{"<g>", "new", "</g>"}}, map[string]any{"start_line": 1, "old_lines": []string{}, "new_lines": []string{"inserted"}})
 	if !result.Ok || readPatchTestFile(t, path) != "inserted\nbody\n<g>\nnew\n</g>\n" {
 		t.Fatalf("stale coordinates not recovered: %s", result.Content)
 	}
@@ -97,7 +117,7 @@ func TestFilePatchRelocationOverlapRejectsWholeBatch(t *testing.T) {
 	result := patchTestCall(runner, "relocation", root, FilePatch, map[string]any{"scope": "project", "files": []map[string]any{
 		{"path": "other.txt", "action": "replace", "expected_hash": patchContentHash([]byte("untouched\n")), "content": "changed\n"},
 		{"path": "note.txt", "action": "edit", "hunks": []map[string]any{
-			{"start_line": 1, "old_lines": []string{"old", "tail"}, "new_lines": []string{"new"}, "relocate": true},
+			{"old_lines": []string{"old", "tail"}, "new_lines": []string{"new"}},
 			{"start_line": 3, "old_lines": []string{"tail"}, "new_lines": []string{"end"}},
 		}},
 	}})
@@ -110,28 +130,39 @@ func TestFilePatchRelocationOverlapRejectsWholeBatch(t *testing.T) {
 }
 
 func TestFilePatchRelocationKeepsApprovalSnapshot(t *testing.T) {
-	root := t.TempDir()
-	path := filepath.Join(root, "note.txt")
-	writePatchTestFile(t, path, "head\nold\n")
-	runner := NewBuiltinRunner()
-	defer runner.Close()
-	args := json.RawMessage(`{"scope":"project","files":[{"path":"note.txt","action":"edit","hunks":[{"start_line":1,"old_lines":["old"],"new_lines":["new"],"relocate":true}]}]}`)
-	call := Call{SessionID: "relocation", TurnID: "turn", CallID: "call", Name: FilePatch, Args: args, ProjectDirs: []string{root}}
-	details, err := runner.ApprovalDetails(context.Background(), call)
-	if err != nil {
-		t.Fatal(err)
-	}
-	files := details["files"].([]patchFileView)
-	if !slices.Equal(files[0].Relocations, []patchHunkRelocation{{Hunk: 1, RequestedStartLine: 1, StartLine: 2}}) || !strings.Contains(details["diff"].(string), "+new") {
-		t.Fatalf("review missing resolved change: %+v", details)
-	}
-	writePatchTestFile(t, path, "inserted\nhead\nold\n")
-	result := runner.Call(context.Background(), call)
-	if result.Ok || decodeToolResult(t, result)["reason"] != "patch_stale" {
-		t.Fatalf("approved relocation was recomputed: %s", result.Content)
-	}
-	if readPatchTestFile(t, path) != "inserted\nhead\nold\n" {
-		t.Fatal("external change overwritten")
+	for name, startLine := range map[string]int{"stale coordinate": 1, "content only": 0} {
+		t.Run(name, func(t *testing.T) {
+			root := t.TempDir()
+			path := filepath.Join(root, "note.txt")
+			writePatchTestFile(t, path, "head\nold\n")
+			runner := NewBuiltinRunner()
+			defer runner.Close()
+			hunk := map[string]any{"old_lines": []string{"old"}, "new_lines": []string{"new"}}
+			if startLine != 0 {
+				hunk["start_line"] = startLine
+			}
+			args, err := json.Marshal(map[string]any{"scope": "project", "files": []map[string]any{{"path": "note.txt", "action": "edit", "hunks": []map[string]any{hunk}}}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			call := Call{SessionID: "relocation", TurnID: "turn", CallID: "call", Name: FilePatch, Args: args, ProjectDirs: []string{root}}
+			details, err := runner.ApprovalDetails(context.Background(), call)
+			if err != nil {
+				t.Fatal(err)
+			}
+			files := details["files"].([]patchFileView)
+			if !slices.Equal(files[0].Relocations, []patchHunkRelocation{{Hunk: 1, RequestedStartLine: startLine, StartLine: 2}}) || !strings.Contains(details["diff"].(string), "+new") {
+				t.Fatalf("review missing resolved change: %+v", details)
+			}
+			writePatchTestFile(t, path, "inserted\nhead\nold\n")
+			result := runner.Call(context.Background(), call)
+			if result.Ok || decodeToolResult(t, result)["reason"] != "patch_stale" {
+				t.Fatalf("approved relocation was recomputed: %s", result.Content)
+			}
+			if readPatchTestFile(t, path) != "inserted\nhead\nold\n" {
+				t.Fatal("external change overwritten")
+			}
+		})
 	}
 }
 
@@ -150,7 +181,7 @@ func TestFilePatchRecoveryReadGuidance(t *testing.T) {
 			writePatchTestFile(t, filepath.Join(root, "note.txt"), tc.content)
 			runner := NewBuiltinRunner()
 			defer runner.Close()
-			result := patchTestCall(runner, "recovery", root, FilePatch, map[string]any{"scope": "project", "files": []map[string]any{{"path": "note.txt", "action": "edit", "hunks": []map[string]any{{"start_line": 1, "old_lines": []string{tc.old}, "new_lines": []string{"new"}}}}}})
+			result := patchTestCall(runner, "recovery", root, FilePatch, map[string]any{"scope": "project", "files": []map[string]any{{"path": "note.txt", "action": "edit", "hunks": []map[string]any{{"start_line": 1, "old_lines": []string{tc.old}, "new_lines": []string{"new"}, "relocate": false}}}}})
 			payload := decodePatchRecovery(t, result)
 			if strings.Contains(payload.Hint, "no extra read is needed") != tc.direct {
 				t.Fatalf("wrong read guidance: %s", payload.Hint)

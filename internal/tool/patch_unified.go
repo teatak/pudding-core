@@ -126,7 +126,7 @@ func parseUnifiedPatch(diff string, relocate bool) ([]patchFileArg, *toolArgumen
 		if file.Action == "edit" {
 			file.Hunks = hunks
 		} else {
-			if len(hunks) != 1 || hunks[0].StartLine != 1 {
+			if len(hunks) != 1 || hunks[0].requestedStartLine() != 1 {
 				return nil, unifiedPatchError(at, "creation and deletion must describe the complete file in one hunk")
 			}
 			h := hunks[0]
@@ -151,7 +151,7 @@ func parseUnifiedPatch(diff string, relocate bool) ([]patchFileArg, *toolArgumen
 
 func parseUnifiedHunk(lines []string, at, start, oldCount, newCount int, relocate bool) (patchHunkArg, int, *toolArgumentError) {
 	oldLines, newLines := []string{}, []string{}
-	h := patchHunkArg{StartLine: start, Relocate: relocate, OldLines: &oldLines, NewLines: &newLines, oldEndings: []string{}, newEndings: []string{}}
+	h := patchHunkArg{StartLine: &start, Relocate: &relocate, OldLines: &oldLines, NewLines: &newLines, oldEndings: []string{}, newEndings: []string{}}
 	var previous byte
 	changed := false
 	for at < len(lines) {

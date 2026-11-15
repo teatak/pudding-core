@@ -242,6 +242,22 @@ func TestProjectBrowserSearchReusesBuiltinTextSearch(t *testing.T) {
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("missing query status = %d", resp.StatusCode)
 	}
+	if err := os.WriteFile(filepath.Join(root, "spacing.txt"), []byte("needle\n needle\nneedle \n needle \n\tneedle\t\n  \n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		query string
+		line  int
+	}{{" needle ", 4}, {"\t", 5}, {"  ", 6}} {
+		query := url.Values{"q": {tc.query}}
+		result := decodeJSON[struct {
+			Query   string                   `json:"query"`
+			Matches []projectSearchMatchView `json:"matches"`
+		}](t, req(t, http.MethodGet, srv.URL+"/sessions/sess_search/project/search?"+query.Encode(), nil))
+		if result.Query != tc.query || len(result.Matches) != 1 || result.Matches[0].Path != "spacing.txt" || result.Matches[0].Line != tc.line {
+			t.Fatalf("API rewrote whitespace query %q: %+v", tc.query, result)
+		}
+	}
 }
 
 func TestProjectBrowserRejectsTraversalAndOtherProjectRoot(t *testing.T) {

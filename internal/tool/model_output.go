@@ -28,7 +28,7 @@ func builtinModelOutput(name string) *modeloutput.Spec {
 	var fields []modeloutput.TextField
 	switch name {
 	case CommandRun, CommandSession:
-		fields = []modeloutput.TextField{field("/stdout", "Standard output"), field("/stderr", "Standard error")}
+		fields = []modeloutput.TextField{field("/stdout", "Standard output"), field("/stderr", "Standard error"), array("/output", "/content", "Process output")}
 	case FileSlice:
 		fields = []modeloutput.TextField{field("/numberedContent", "Source lines (line prefixes are not source text)")}
 	case FileSearch:

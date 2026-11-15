@@ -50,12 +50,23 @@ type patchFileArg struct {
 }
 
 type patchHunkArg struct {
-	StartLine  int       `json:"start_line"`
-	Relocate   bool      `json:"relocate,omitempty"`
+	StartLine  *int      `json:"start_line,omitempty"`
+	Relocate   *bool     `json:"relocate,omitempty"`
 	OldLines   *[]string `json:"old_lines"`
 	NewLines   *[]string `json:"new_lines"`
 	oldEndings []string  // Non-nil only for unified diff; JSON hunks preserve existing endings.
 	newEndings []string
+}
+
+func (h patchHunkArg) requestedStartLine() int {
+	if h.StartLine == nil {
+		return 0
+	}
+	return *h.StartLine
+}
+
+func (h patchHunkArg) allowsRelocation() bool {
+	return h.Relocate == nil || *h.Relocate
 }
 
 type preparedPatch struct {
@@ -99,11 +110,12 @@ type patchFileView struct {
 	Relocations []patchHunkRelocation `json:"relocations,omitempty"`
 }
 
-// Only moved hunks are reported. Both coordinates refer to the pre-patch file;
-// hunk is one-based in the caller's original hunk array.
+// Moved hunks and hunks located without a line hint are reported. Coordinates
+// refer to the pre-patch file; an omitted requestedStartLine means no hint was
+// supplied. Hunk is one-based in the caller's original hunk array.
 type patchHunkRelocation struct {
 	Hunk               int `json:"hunk"`
-	RequestedStartLine int `json:"requestedStartLine"`
+	RequestedStartLine int `json:"requestedStartLine,omitempty"`
 	StartLine          int `json:"startLine"`
 }
 
@@ -157,7 +169,7 @@ func decodeFilePatchArgs(raw json.RawMessage) (filePatchArgs, *toolArgumentError
 	case args.Diff != nil && args.Files != nil:
 		err = &toolArgumentError{kind: "conflicting_fields", field: "diff", detail: "files and diff are mutually exclusive", hint: "Provide either files or diff, not both."}
 	case args.Diff != nil:
-		args.Files, err = parseUnifiedPatch(*args.Diff, args.Relocate != nil && *args.Relocate)
+		args.Files, err = parseUnifiedPatch(*args.Diff, args.Relocate == nil || *args.Relocate)
 	case args.Relocate != nil:
 		err = &toolArgumentError{kind: "invalid_value", field: "relocate", detail: "top-level relocate applies only to diff input", hint: "For files input, set relocate on individual hunks."}
 	case args.Files == nil:
@@ -211,7 +223,7 @@ func validateFilePatchArgs(args filePatchArgs) *toolArgumentError {
 			}
 			for hunkIndex, hunk := range file.Hunks {
 				hunkField := fieldPrefix + ".hunks[" + strconv.Itoa(hunkIndex) + "]"
-				if hunk.StartLine < 1 {
+				if hunk.StartLine != nil && *hunk.StartLine < 1 {
 					return &toolArgumentError{kind: "hunk_line_invalid", detail: "hunk start_line must be at least 1", hint: "Use a one-based line number from the original file.", field: hunkField + ".start_line", expected: "integer >= 1"}
 				}
 				if hunk.NewLines == nil {
@@ -219,6 +231,9 @@ func validateFilePatchArgs(args filePatchArgs) *toolArgumentError {
 				}
 				if hunk.OldLines == nil {
 					return &toolArgumentError{kind: "hunk_old_lines_required", detail: "hunk old_lines is required", hint: "Provide exact original lines, or an empty array to insert new_lines.", field: hunkField + ".old_lines", expected: "array"}
+				}
+				if hunk.StartLine == nil && (len(*hunk.OldLines) == 0 || !hunk.allowsRelocation()) {
+					return &toolArgumentError{kind: "hunk_line_required", detail: "start_line is required for an insertion without source context or when relocate=false", hint: "Provide a one-based start_line, or supply non-empty old_lines with relocation enabled.", field: hunkField + ".start_line", expected: "integer >= 1"}
 				}
 				if len(*hunk.OldLines) == 0 && len(*hunk.NewLines) == 0 {
 					return &toolArgumentError{kind: "empty_hunk", detail: "hunk old_lines and new_lines cannot both be empty", hint: "Provide old lines to remove or new lines to insert.", field: hunkField, expected: "a non-empty old_lines or new_lines array"}
@@ -428,24 +443,27 @@ func applyPatchHunks(content, filePath string, hunks []patchHunkArg) (string, []
 	var relocations []patchHunkRelocation
 	for index, hunk := range hunks {
 		oldLines := *hunk.OldLines
-		start := hunk.StartLine - 1
+		requestedStart := hunk.requestedStartLine()
+		start := requestedStart - 1
 		var matchErr *patchError
-		if start > len(lines) || len(oldLines) > len(lines)-start {
+		if hunk.StartLine == nil {
+			matchErr = newPatchHunkError("hunk_lines_mismatch", "hunk "+strconv.Itoa(index+1)+" old_lines must match exactly once when start_line is omitted: "+filePath, filePath, index, hunk, lines, -1)
+		} else if start > len(lines) || len(oldLines) > len(lines)-start {
 			matchErr = newPatchHunkError("hunk_line_out_of_range", "hunk "+strconv.Itoa(index+1)+" range is outside the original file: "+filePath, filePath, index, hunk, lines, -1)
 		} else {
 			for offset, expected := range oldLines {
 				if lines[start+offset].text != expected || (hunk.oldEndings != nil && lines[start+offset].ending != hunk.oldEndings[offset]) {
-					matchErr = newPatchHunkError("hunk_lines_mismatch", "hunk "+strconv.Itoa(index+1)+" old_lines do not match at start_line "+strconv.Itoa(hunk.StartLine)+": "+filePath, filePath, index, hunk, lines, offset)
+					matchErr = newPatchHunkError("hunk_lines_mismatch", "hunk "+strconv.Itoa(index+1)+" old_lines do not match at start_line "+strconv.Itoa(requestedStart)+": "+filePath, filePath, index, hunk, lines, offset)
 					break
 				}
 			}
 		}
 		if matchErr != nil {
-			if !hunk.Relocate || len(oldLines) == 0 || matchErr.recovery.ExactMatchCount != 1 {
+			if !hunk.allowsRelocation() || len(oldLines) == 0 || matchErr.recovery.ExactMatchCount != 1 {
 				return "", nil, matchErr
 			}
 			start = matchErr.recovery.Candidates[0].StartLine - 1
-			relocations = append(relocations, patchHunkRelocation{Hunk: index + 1, RequestedStartLine: hunk.StartLine, StartLine: start + 1})
+			relocations = append(relocations, patchHunkRelocation{Hunk: index + 1, RequestedStartLine: requestedStart, StartLine: start + 1})
 		}
 		end := start + len(oldLines)
 		resolved = append(resolved, resolvedHunk{index: index, start: start, end: end, newLines: *hunk.NewLines, newEndings: hunk.newEndings})

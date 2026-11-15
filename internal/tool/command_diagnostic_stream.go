@@ -139,6 +139,7 @@ func newCommandOutputBuffers(args commandRunArgs, cwd string, projectDirs []stri
 		stderr.diagnostics = newCommandDiagnosticCollector(cwd, projectDirs)
 		if kind == "test" {
 			stdout.diagnostics.tests = newCommandTestCollector(argv, cwd, projectDirs)
+			stderr.diagnostics.tests = newCommandTestCollector(argv, cwd, projectDirs)
 		}
 	}
 	return stdout, stderr

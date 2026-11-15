@@ -6,12 +6,12 @@ const (
 	patchRecoveryLineBytes     = 1024
 )
 
-// Candidate matching is shared by recovery diagnostics and explicitly opted-in
+// Candidate matching is shared by recovery diagnostics and default exact
 // relocation. Only a unique exact non-empty block can be relocated.
 type patchHunkRecovery struct {
 	Path                string                     `json:"path"`
 	Hunk                int                        `json:"hunk"` // One-based, within this file.
-	StartLine           int                        `json:"startLine"`
+	StartLine           int                        `json:"startLine,omitempty"`
 	FileLineCount       int                        `json:"fileLineCount"`
 	ExactMatchCount     int                        `json:"exactMatchCount"`
 	Candidates          []patchRecoveryCandidate   `json:"candidates"`
@@ -45,7 +45,7 @@ func newPatchHunkError(reason, detail, path string, index int, hunk patchHunkArg
 	recovery := &patchHunkRecovery{
 		Path:                path,
 		Hunk:                index + 1,
-		StartLine:           hunk.StartLine,
+		StartLine:           hunk.requestedStartLine(),
 		FileLineCount:       len(lines),
 		Candidates:          make([]patchRecoveryCandidate, 0, len(candidates)),
 		ExactMatchCount:     count,
@@ -54,7 +54,7 @@ func newPatchHunkError(reason, detail, path string, index int, hunk patchHunkArg
 	for _, start := range candidates {
 		recovery.Candidates = append(recovery.Candidates, patchRecoveryCandidate{StartLine: start, Context: patchRecoveryContext(lines, start-1)})
 	}
-	center := hunk.StartLine - 1
+	center := hunk.requestedStartLine() - 1
 	if mismatchOffset >= 0 {
 		center += mismatchOffset
 		mismatch := &patchHunkMismatch{Line: center + 1}

@@ -63,8 +63,16 @@ func TestVerificationPipelineWarningUsesShellStructure(t *testing.T) {
 		warn    bool
 	}{
 		{"npm --prefix web test | tail -n 1", true},
+		{"vitest run | tail -n 1", true},
+		{"npx jest --runInBand | tee test.log", true},
+		{"pnpm exec vitest run || true", true},
+		{"npm exec -- jest | cat", true},
+		{"vitest list | cat", false},
+		{"jest --showConfig | cat", false},
 		{"npx tsc | tee build.log | tail", true},
 		{"node --test test.js 2>&1 | cat", true},
+		{"node --import tsx --test test.ts | cat", true},
+		{"node --test-name-pattern --test script.js | cat", false},
 		{"cd web && (go test ./...) | tail", true},
 		{"! go test ./... | cat", true},
 		{"env TEST=1 go test ./... | cat", true},

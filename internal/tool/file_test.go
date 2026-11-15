@@ -3,11 +3,13 @@ package tool
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"mime"
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"sort"
 	"strings"
 	"testing"
@@ -358,6 +360,32 @@ func TestBuiltinFileSearchReportsReadErrors(t *testing.T) {
 	}
 }
 
+func TestBuiltinFileSearchDistinguishesUnreadableRootFromPartialScan(t *testing.T) {
+	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
+		t.Skip("requires Unix directory permissions and a non-root user")
+	}
+	root := t.TempDir()
+	blocked := filepath.Join(root, "blocked")
+	writePatchTestFile(t, filepath.Join(blocked, "hidden.txt"), "needle\n")
+	writePatchTestFile(t, filepath.Join(root, "visible.txt"), "needle\n")
+	if err := os.Chmod(blocked, 0); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chmod(blocked, 0o700); err != nil {
+			t.Error(err)
+		}
+	})
+	options := TextFileSearchOptions{Query: "needle", IncludeIgnored: true}
+	if result, err := SearchTextFiles(context.Background(), blocked, options); !errors.Is(err, os.ErrPermission) {
+		t.Fatalf("unreadable root reported as a search result: %+v, %v", result, err)
+	}
+	result, err := SearchTextFiles(context.Background(), root, options)
+	if err != nil || result.Complete || result.Skipped["read_error"] != 1 || len(result.Matches) != 1 || result.Matches[0].Path != filepath.Join(root, "visible.txt") {
+		t.Fatalf("partial search lost available matches or failure status: %+v, %v", result, err)
+	}
+}
+
 func TestBuiltinFileSkillWriteRead(t *testing.T) {
 	home := t.TempDir()
 	runner := NewBuiltinRunner(WithHomeDir(home))
@@ -383,6 +411,97 @@ func TestBuiltinFileSkillWriteRead(t *testing.T) {
 	payload := decodeToolResult(t, read)
 	if payload["content"] != "hello\nworld\n" {
 		t.Fatalf("unexpected content: %+v", payload)
+	}
+}
+
+func TestFileMissingTargetsRemainUnavailableUntilCreated(t *testing.T) {
+	for _, scope := range []string{"project", "skill"} {
+		for _, operation := range []struct {
+			name      string
+			recursive bool
+		}{{FileRead, false}, {FileSlice, false}, {FileSearch, false}, {FileList, false}, {FileList, true}} {
+			t.Run(fmt.Sprintf("%s/%s/recursive=%t", scope, operation.name, operation.recursive), func(t *testing.T) {
+				homeDir := t.TempDir()
+				root := filepath.Join(homeDir, "skills")
+				if err := os.MkdirAll(root, 0o700); err != nil {
+					t.Fatal(err)
+				}
+				runner := NewBuiltinRunner(WithHomeDir(homeDir))
+				t.Cleanup(func() { _ = runner.Close() })
+				args := map[string]any{"scope": scope, "path": "missing"}
+				if operation.name == FileSearch {
+					args["query"] = "needle"
+				}
+				if operation.recursive {
+					args["recursive"] = true
+				}
+				call := Call{Name: operation.name, ProjectDirs: []string{root}, Args: resultJSON(args)}
+				result := runner.Call(context.Background(), call)
+				payload := decodeToolResult(t, result)
+				if result.Ok || payload["ok"] != false || payload["reason"] != "path_not_found" || payload["exists"] != false || payload["detail"] == "" || payload["hint"] == "" {
+					t.Fatalf("missing target lost its unavailable state: %+v", result)
+				}
+				stat := runner.Call(context.Background(), Call{Name: FileStat, ProjectDirs: []string{root}, Args: resultJSON(map[string]any{"scope": scope, "path": "missing"})})
+				if !stat.Ok || decodeToolResult(t, stat)["exists"] != false {
+					t.Fatalf("existence query should succeed: %+v", stat)
+				}
+				if operation.name == FileList {
+					if err := os.Mkdir(filepath.Join(root, "missing"), 0o700); err != nil {
+						t.Fatal(err)
+					}
+				} else if err := os.WriteFile(filepath.Join(root, "missing"), []byte("needle\n"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				result = runner.Call(context.Background(), call)
+				if !result.Ok || decodeToolResult(t, result)["reason"] != nil {
+					t.Fatalf("creation did not recover the same call: %+v", result)
+				}
+				if operation.name == FileSearch {
+					if decodeToolResult(t, result)["matchCount"] != float64(1) {
+						t.Fatalf("created content was not searched: %+v", result)
+					}
+					args["query"] = "absent-pattern"
+					call.Args = resultJSON(args)
+					result = runner.Call(context.Background(), call)
+					payload = decodeToolResult(t, result)
+					if !result.Ok || payload["matchCount"] != float64(0) || payload["reason"] != nil || payload["complete"] != true {
+						t.Fatalf("empty completed search is not a missing path: %+v", result)
+					}
+				}
+			})
+		}
+	}
+}
+
+func TestFileIOErrorSeparatesMissingFromExecutionFailure(t *testing.T) {
+	t.Run("missing auxiliary file does not imply missing search target", func(t *testing.T) {
+		root := t.TempDir()
+		err := &os.PathError{Op: "open", Path: filepath.Join(root, ".gitignore"), Err: os.ErrNotExist}
+		result := fileIOError(Result{}, "search_failed", root, err)
+		payload := decodeToolResult(t, result)
+		if result.Ok || payload["reason"] != "search_failed" || payload["exists"] != nil {
+			t.Fatalf("auxiliary file failure claimed absence of the search target: %+v", result)
+		}
+	})
+	for _, test := range []struct {
+		name, reason string
+		err          error
+	}{
+		{"missing", "path_not_found", os.ErrNotExist},
+		{"permission", "read_failed", os.ErrPermission},
+		{"io", "read_failed", fmt.Errorf("device I/O error")},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			err := fmt.Errorf("read: %w", &os.PathError{Op: "open", Path: "target", Err: test.err})
+			result := fileIOError(Result{}, "read_failed", "target", err)
+			payload := decodeToolResult(t, result)
+			if result.Ok || payload["reason"] != test.reason || payload["detail"] != err.Error() {
+				t.Fatalf("wrong failure classification: %+v", result)
+			}
+			if test.reason != "path_not_found" && payload["exists"] != nil {
+				t.Fatalf("execution failure claimed absence: %+v", result)
+			}
+		})
 	}
 }
 
@@ -964,6 +1083,7 @@ func TestBuiltinFileSearchRejectsInvalidPatterns(t *testing.T) {
 		args   string
 		reason string
 	}{
+		{name: "empty query", args: `{"scope":"project","path":".","query":""}`, reason: "query_required"},
 		{name: "regex", args: `{"scope":"project","path":".","query":"[","mode":"regex"}`, reason: "invalid_regex"},
 		{name: "glob", args: `{"scope":"project","path":".","query":"main","include_globs":["["]}`, reason: "invalid_glob"},
 	} {
@@ -977,6 +1097,63 @@ func TestBuiltinFileSearchRejectsInvalidPatterns(t *testing.T) {
 				t.Fatalf("reason=%v want %s", payload["reason"], tt.reason)
 			}
 		})
+	}
+}
+
+func TestFileSearchPreservesWhitespacePatternsAndCursors(t *testing.T) {
+	root := t.TempDir()
+	writePatchTestFile(t, filepath.Join(root, "source.txt"), "needle\n needle\nneedle \n needle \n\tneedle\t\n  \n")
+	runner := NewBuiltinRunner(WithHomeDir(t.TempDir()))
+	defer runner.Close()
+	for _, tc := range []struct {
+		mode, query string
+		lines       []int
+	}{
+		{"literal", " needle", []int{2, 4}},
+		{"literal", "needle ", []int{3, 4}},
+		{"literal", " needle ", []int{4}},
+		{"literal", "\t", []int{5}},
+		{"literal", "  ", []int{6}},
+		{"regex", "^needle ", []int{3}},
+		{"regex", "^ needle ", []int{4}},
+		{"regex", "  ", []int{6}},
+	} {
+		t.Run(tc.mode+"/"+fmt.Sprintf("%q", tc.query), func(t *testing.T) {
+			result := runner.Call(context.Background(), Call{Name: FileSearch, ProjectDirs: []string{root}, Args: resultJSON(map[string]any{
+				"scope": "project", "path": ".", "query": tc.query, "mode": tc.mode,
+			})})
+			fields := decodeToolResult(t, result)
+			if !result.Ok || fields["query"] != tc.query {
+				t.Fatalf("query was rejected or rewritten: %s", result.Content)
+			}
+			var lines []int
+			for _, item := range fields["matches"].([]any) {
+				lines = append(lines, int(item.(map[string]any)["line"].(float64)))
+			}
+			if !reflect.DeepEqual(lines, tc.lines) {
+				t.Fatalf("matched lines %v, want %v", lines, tc.lines)
+			}
+		})
+	}
+	options := TextFileSearchOptions{Query: "needle ", MaxResults: 1}
+	first, err := SearchTextFiles(context.Background(), root, options)
+	if err != nil || first.NextCursor == "" || len(first.Matches) != 1 || first.Matches[0].Line != 3 {
+		t.Fatalf("first whitespace page: %+v, %v", first, err)
+	}
+	options.Cursor = first.NextCursor
+	second, err := SearchTextFiles(context.Background(), root, options)
+	if err != nil || len(second.Matches) != 1 || second.Matches[0].Line != 4 || second.NextCursor != "" {
+		t.Fatalf("second whitespace page: %+v, %v", second, err)
+	}
+	options.Query = "needle"
+	_, err = SearchTextFiles(context.Background(), root, options)
+	var cursorErr *TextFileSearchError
+	if !errors.As(err, &cursorErr) || cursorErr.Code != "invalid_cursor" {
+		t.Fatalf("cursor accepted a different whitespace query: %v", err)
+	}
+	files, err := SearchTextFiles(context.Background(), root, TextFileSearchOptions{Query: "  ", OutputMode: "files"})
+	if err != nil || len(files.Matches) != 1 || files.Matches[0].Path != filepath.Join(root, "source.txt") {
+		t.Fatalf("files-only whitespace search: %+v, %v", files, err)
 	}
 }
 

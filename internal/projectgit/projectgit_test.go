@@ -5,8 +5,59 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 )
+
+func TestGitFileOperationsPreserveFileNameWhitespace(t *testing.T) {
+	requireGit(t)
+	for _, path := range []string{" note.txt", "note.txt "} {
+		t.Run(path, func(t *testing.T) {
+			if runtime.GOOS == "windows" && strings.HasSuffix(path, " ") {
+				t.Skip("Windows does not preserve trailing spaces in ordinary file names")
+			}
+			root := newRepository(t)
+			neighbor := strings.TrimSpace(path)
+			writeFile(t, root, path, "selected base\n")
+			writeFile(t, root, neighbor, "neighbor base\n")
+			git(t, root, "add", ".")
+			git(t, root, "commit", "-m", "base")
+			writeFile(t, root, path, "selected edit\n")
+			writeFile(t, root, neighbor, "neighbor edit\n")
+			ctx := context.Background()
+			repo, err := Discover(ctx, root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, staged := range []bool{false, true} {
+				if staged {
+					if _, err := Stage(ctx, repo, []string{path}); err != nil {
+						t.Fatal(err)
+					}
+				}
+				diff, err := ReadFileDiff(ctx, repo, path, staged, 1<<20)
+				if err != nil || diff.Path != path || diff.OldContent != "selected base\n" || diff.NewContent != "selected edit\n" {
+					t.Fatalf("diff changed the selected file: %+v err=%v", diff, err)
+				}
+			}
+			status, err := Unstage(ctx, repo, []string{path})
+			if err != nil || status.Staged != 0 || status.Unstaged != 2 {
+				t.Fatalf("unstage: %+v err=%v", status, err)
+			}
+			status, err = Discard(ctx, repo, []string{path})
+			if err != nil || len(status.Files) != 1 || status.Files[0].Path != neighbor {
+				t.Fatalf("discard changed wrong file: %+v err=%v", status, err)
+			}
+			for file, want := range map[string]string{path: "selected base\n", neighbor: "neighbor edit\n"} {
+				content, err := os.ReadFile(filepath.Join(root, file))
+				if err != nil || string(content) != want {
+					t.Fatalf("worktree %q: %q want %q err=%v", file, content, want, err)
+				}
+			}
+		})
+	}
+}
 
 func TestStatusAndFileDiff(t *testing.T) {
 	requireGit(t)
@@ -63,6 +114,34 @@ func TestDiscoverRejectsRepositoryOutsideProjectRoot(t *testing.T) {
 	_, err := Discover(context.Background(), subdir)
 	if ErrorCode(err) != CodeRepositoryOutsideRoot {
 		t.Fatalf("error = %v, code = %q", err, ErrorCode(err))
+	}
+}
+
+func TestUnstageEditedFilesBeforeFirstCommit(t *testing.T) {
+	requireGit(t)
+	root := newRepository(t)
+	writeFile(t, root, "new.txt", "staged\n")
+	writeFile(t, root, "keep.txt", "keep staged\n")
+	repo, err := Discover(context.Background(), root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Stage(context.Background(), repo, []string{"new.txt", "keep.txt"}); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, root, "new.txt", "edited after staging\n")
+	status, err := Unstage(context.Background(), repo, []string{"new.txt"})
+	if err != nil || status.Staged != 1 || status.Untracked != 1 {
+		t.Fatalf("unstage edited file: status=%+v err=%v", status, err)
+	}
+	for _, file := range status.Files {
+		if (file.Path == "new.txt" && file.Kind != "untracked") || (file.Path == "keep.txt" && file.IndexStatus != "A") {
+			t.Fatalf("unstage changed the wrong index entry: %+v", file)
+		}
+	}
+	content, err := os.ReadFile(filepath.Join(root, "new.txt"))
+	if err != nil || string(content) != "edited after staging\n" {
+		t.Fatalf("unstage changed worktree: %q %v", content, err)
 	}
 }
 

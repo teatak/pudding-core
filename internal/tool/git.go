@@ -3,7 +3,6 @@ package tool
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"os"
 	"os/exec"
@@ -71,8 +70,8 @@ type gitCommit struct {
 func (r *BuiltinRunner) gitStatus(ctx context.Context, call Call) Result {
 	out := Result{CallID: call.CallID, Name: call.Name}
 	var args gitBaseArgs
-	if len(call.Args) == 0 || json.Unmarshal(call.Args, &args) != nil {
-		return toolJSONError(out, "invalid_arguments", "git status arguments must be a JSON object")
+	if err := decodeToolArgumentObject(call.Args, &args, toolArgumentField{"scope", "string"}); err != nil {
+		return toolArgumentFailure(out, err)
 	}
 	repo, failed := resolveGitRepository(ctx, call, args.Scope, args.CWD)
 	if failed != nil {
@@ -157,8 +156,8 @@ func projectGitFailure(out Result, err error, fallback string) Result {
 func (r *BuiltinRunner) gitLog(ctx context.Context, call Call) Result {
 	out := Result{CallID: call.CallID, Name: call.Name}
 	var args gitLogArgs
-	if len(call.Args) == 0 || json.Unmarshal(call.Args, &args) != nil {
-		return toolJSONError(out, "invalid_arguments", "git log arguments must be a JSON object")
+	if err := decodeToolArgumentObject(call.Args, &args, toolArgumentField{"scope", "string"}); err != nil {
+		return toolArgumentFailure(out, err)
 	}
 	if args.Limit == 0 {
 		args.Limit = gitDefaultLogLimit

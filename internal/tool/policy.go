@@ -213,7 +213,11 @@ func classifyToolCall(name string, raw json.RawMessage, projectDirs []string, ma
 		}
 		return ToolRisk{Class: RiskClassDestructive, Operation: "delete", Scope: args.Scope, Paths: compactRiskPaths(path), Summary: summary}, true
 	case FileMove:
-		return ToolRisk{Class: RiskClassWrite, Operation: "move", Scope: args.Scope, Paths: compactRiskPaths(args.FromPath, args.ToPath), Summary: "Move or rename a project path.", LowRisk: true}, true
+		summary := "Move or rename a project path."
+		if args.Overwrite {
+			summary = "Move a project path and overwrite the destination."
+		}
+		return ToolRisk{Class: RiskClassWrite, Operation: "move", Scope: args.Scope, Paths: compactRiskPaths(args.FromPath, args.ToPath), Summary: summary, LowRisk: true}, true
 	default:
 		return ToolRisk{}, false
 	}

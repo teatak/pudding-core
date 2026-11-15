@@ -385,12 +385,12 @@ func TestAssembleModeLayersAndAllModesShowPlugins(t *testing.T) {
 			t.Fatalf("missing Code verification or recovery guidance %q", guidance)
 		}
 	}
-	if !strings.Contains(code.SystemInstruction, "builtin_file_slice.numberedContent") ||
-		!strings.Contains(code.SystemInstruction, "direct line counting is acceptable") ||
-		!strings.Contains(code.SystemInstruction, "read a fresh numbered slice") ||
+	if !strings.Contains(code.SystemInstruction, "builtin_file_slice") ||
+		!strings.Contains(code.SystemInstruction, "may omit `start_line`") ||
+		!strings.Contains(code.SystemInstruction, "Unique exact relocation is enabled by default") ||
 		!strings.Contains(code.SystemInstruction, "recovery.candidates") ||
-		!strings.Contains(code.SystemInstruction, "multiple matches require surrounding context") ||
-		!strings.Contains(code.SystemInstruction, "copy truncated diagnostic text") {
+		!strings.Contains(code.SystemInstruction, "Ambiguous matches need accurate coordinates or more source context") ||
+		!strings.Contains(code.SystemInstruction, "Never use fuzzy matching or truncated diagnostic text") {
 		t.Fatalf("code prompt missing line-safe patch workflow:\n%s", code.SystemInstruction)
 	}
 	if !strings.Contains(code.SystemInstruction, "Treat verification as part of the implementation") ||

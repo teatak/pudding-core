@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"github.com/teatak/cart/v3"
 	"github.com/teatak/pudding-core/internal/store"
-	"github.com/teatak/pudding-core/internal/widget"
 	"net/http"
 	"time"
 )
@@ -42,18 +41,7 @@ func (s *Server) putWidgetLink(c *cart.Context) error {
 	if !req.Confirm {
 		return badRequest(c, "link confirmation required")
 	}
-	w, err := s.store.GetStudioItem(c.Request.Context(), id)
-	if err != nil {
-		return s.studioItemError(c, err)
-	}
-	if _, err = s.store.GetStudioItemRevision(c.Request.Context(), id, req.RevisionHash); err != nil {
-		return s.studioItemError(c, err)
-	}
-	p, err := widget.ReadPackage(s.home, id, req.RevisionHash)
-	if err != nil {
-		return s.studioItemError(c, err)
-	}
-	m, _, err := p.Validate()
+	w, m, err := s.widgetManifest(c.Request.Context(), id, req.RevisionHash)
 	if err != nil {
 		return s.studioItemError(c, err)
 	}

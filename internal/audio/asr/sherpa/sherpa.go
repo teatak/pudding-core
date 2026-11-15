@@ -277,8 +277,6 @@ func (c *Client) Stop(context.Context) error {
 	return nil
 }
 
-func (c *Client) DroppedSegments() uint64 { return c.droppedSegs.Load() }
-
 func (c *Client) decodeLoop() {
 	defer c.wg.Done()
 	for {

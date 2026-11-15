@@ -583,8 +583,8 @@ func normalizeKeyboard(action ActionInput) (ActionInput, error) {
 	}
 	if action.Type == ActionPressKey {
 		action.Key = strings.ToLower(action.Key)
-		if action.Key == "" || action.Value != nil {
-			return action, invalid("press_key requires key and no value")
+		if !supportedPhysicalKey(action.Key) || action.Value != nil {
+			return action, invalid("press_key requires a supported physical key and no value; put command/shift/option/control in modifiers")
 		}
 		seen := map[string]bool{}
 		for _, modifier := range action.Modifiers {
@@ -597,4 +597,17 @@ func normalizeKeyboard(action ActionInput) (ActionInput, error) {
 		return action, invalid("type_text/paste require 1–20000 characters and no key/modifiers")
 	}
 	return action, nil
+}
+
+// Keep the public physical-key contract aligned with the native Helper. Reject
+// static key errors while validating the whole batch, before any prefix runs.
+func supportedPhysicalKey(key string) bool {
+	if len(key) == 1 {
+		return key[0] >= 'a' && key[0] <= 'z' || key[0] >= '0' && key[0] <= '9' ||
+			strings.ContainsRune("`-=[]\\;',./", rune(key[0]))
+	}
+	return slices.Contains([]string{
+		"enter", "tab", "space", "backspace", "escape", "home", "pageup", "delete", "end", "pagedown",
+		"left", "right", "down", "up", "f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9", "f10", "f11", "f12",
+	}, key)
 }

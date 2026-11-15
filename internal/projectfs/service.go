@@ -28,6 +28,12 @@ type Entry struct {
 	Type string
 }
 
+// RenameNoReplace moves an entry without replacing an existing destination.
+// Callers must resolve and authorize both paths before calling this primitive.
+func RenameNoReplace(source, target string) error {
+	return renameNoReplace(source, target)
+}
+
 func Create(root, parentPath, name, entryType string) (Entry, error) {
 	name, err := validateName(name)
 	if err != nil {

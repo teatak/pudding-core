@@ -104,7 +104,7 @@ func testWidgetFileScopeReadsAndPatchesOneDraftFile(t *testing.T, unified bool) 
 	}
 	patchArgs := map[string]any{
 		"scope": "widget", "widget_id": id, "expectedDraftHash": draft.DraftHash,
-		"files": []any{map[string]any{"path": "src/App.tsx", "action": "edit", "hunks": []any{map[string]any{"start_line": 1, "old_lines": []string{"export default 1;"}, "new_lines": []string{"export default 2;"}}}}},
+		"files": []any{map[string]any{"path": "src/App.tsx", "action": "edit", "hunks": []any{map[string]any{"old_lines": []string{"export default 1;"}, "new_lines": []string{"export default 2;"}}}}},
 	}
 	patchCall := call(FilePatch, "patch", patchArgs)
 	if unified {

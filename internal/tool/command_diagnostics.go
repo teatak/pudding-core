@@ -45,6 +45,9 @@ func commandVerificationKind(argv []string) string {
 	}
 	op := commandOperation(argv[0])
 	args := argv[1:]
+	if op == "node" {
+		return nodeVerificationKind(args)
+	}
 	for _, arg := range args {
 		if arg == "--" {
 			break
@@ -74,6 +77,16 @@ func commandVerificationKind(argv []string) string {
 		}
 		args = packageManagerVerificationArgs(op, args)
 		first, second = lowerArg(args, 0), lowerArg(args, 1)
+		if (op != "bun" && first == "exec") || (op == "bun" && first == "x") {
+			args = args[1:]
+			if len(args) > 0 && args[0] == "--" {
+				args = args[1:]
+			}
+			if len(args) == 0 || strings.HasPrefix(args[0], "-") {
+				return ""
+			}
+			return commandVerificationKind(args)
+		}
 		if first == "test" {
 			return "test"
 		}
@@ -89,15 +102,6 @@ func commandVerificationKind(argv []string) string {
 			return ""
 		}
 		return commandVerificationKind(args)
-	case "node":
-		for _, arg := range args {
-			if arg == "--test" {
-				return "test"
-			}
-			if !strings.HasPrefix(arg, "-") || arg == "--" || arg == "-e" || arg == "--eval" || arg == "-p" || arg == "--print" {
-				break
-			}
-		}
 	case "cargo":
 		switch first {
 		case "test":
@@ -110,6 +114,26 @@ func commandVerificationKind(argv []string) string {
 			return "check"
 		}
 	case "pytest":
+		return "test"
+	case "vitest", "jest":
+		// Listing tests, inspecting config and clearing caches do not execute
+		// tests. Unrecognized reporter output remains unknown, not passed.
+		if op == "vitest" && (first == "list" || first == "init" || first == "bench") {
+			return ""
+		}
+		for _, arg := range args {
+			if arg == "--" {
+				break
+			}
+			flag, value, hasValue := strings.Cut(arg, "=")
+			if hasValue && value == "false" {
+				continue
+			}
+			switch flag {
+			case "--listTests", "--list-tests", "--showConfig", "--show-config", "--clearCache", "--clear-cache", "--listTags", "--list-tags", "--standalone":
+				return ""
+			}
+		}
 		return "test"
 	case "python", "python3":
 		if first == "-m" && second == "pytest" {
@@ -127,6 +151,52 @@ func commandVerificationKind(argv []string) string {
 		return verificationTargetKind(first)
 	}
 	return ""
+}
+
+func nodeVerificationKind(args []string) string {
+	kind := ""
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if arg == "--" || !strings.HasPrefix(arg, "-") {
+			return kind
+		}
+		flag, _, inline := strings.Cut(arg, "=")
+		switch flag {
+		case "--help", "-h", "--version", "-v", "--eval", "-e", "--print", "-p", "--run":
+			return ""
+		case "--test":
+			if inline {
+				return ""
+			}
+			kind = "test"
+		case "--no-test":
+			kind = ""
+		case "--import", "--require", "-r", "--loader", "--experimental-loader",
+			"--conditions", "-C", "--input-type", "--experimental-default-type",
+			"--experimental-config-file", "--env-file", "--env-file-if-exists",
+			"--test-name-pattern", "--test-skip-pattern", "--test-reporter", "--test-reporter-destination",
+			"--test-concurrency", "--test-shard", "--test-timeout", "--test-isolation", "--experimental-test-isolation",
+			"--test-global-setup", "--test-coverage-branches", "--test-coverage-functions", "--test-coverage-lines",
+			"--test-coverage-exclude", "--test-coverage-include", "--watch-path", "--disable-warning":
+			if !inline {
+				i++ // A value such as --test or --help is not a Node option.
+				if i == len(args) {
+					return ""
+				}
+			}
+		case "--experimental-strip-types", "--no-experimental-strip-types", "--experimental-transform-types",
+			"--enable-source-maps", "--no-enable-source-maps", "--no-warnings", "--trace-warnings", "--trace-uncaught",
+			"--test-only", "--test-force-exit", "--test-update-snapshots", "--experimental-test-coverage",
+			"--watch", "--watch-preserve-output", "--expose-gc", "--inspect", "--inspect-brk":
+		default:
+			// Inline values and attached preload options have unambiguous arity.
+			// Do not guess whether an unknown separate option consumes --test.
+			if !inline && !(strings.HasPrefix(arg, "-r") && len(arg) > 2) {
+				return ""
+			}
+		}
+	}
+	return kind
 }
 
 // Skip only known directory selectors, whose values cannot be script names.

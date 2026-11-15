@@ -114,6 +114,29 @@ func TestCoreDefinitionsUseSmallStableCodeSurface(t *testing.T) {
 	}
 }
 
+func TestFilePatchSchemaAllowsContentLocationByDefault(t *testing.T) {
+	def := definitionByName(t, BuiltinDefinitions(), FilePatch)
+	var schema map[string]any
+	if err := json.Unmarshal(def.InputSchema, &schema); err != nil {
+		t.Fatal(err)
+	}
+	properties := schema["properties"].(map[string]any)
+	file := properties["files"].(map[string]any)["items"].(map[string]any)
+	hunk := file["properties"].(map[string]any)["hunks"].(map[string]any)["items"].(map[string]any)
+	if !reflect.DeepEqual(hunk["required"], []any{"old_lines", "new_lines"}) {
+		t.Fatalf("content-only hunks must not require a position: %v", hunk["required"])
+	}
+	hunkProperties := hunk["properties"].(map[string]any)
+	for name, option := range map[string]any{"diff": properties["relocate"], "hunk": hunkProperties["relocate"]} {
+		if option.(map[string]any)["default"] != true {
+			t.Fatalf("%s must advertise relocation enabled by default: %v", name, option)
+		}
+	}
+	if hunkProperties["start_line"].(map[string]any)["minimum"] != float64(1) {
+		t.Fatal("explicit line hints must remain one-based")
+	}
+}
+
 func TestFileToolDescriptionsExplainLineSafePatchWorkflow(t *testing.T) {
 	descriptions := make(map[string]string)
 	for _, definition := range BuiltinDefinitions() {

@@ -49,7 +49,7 @@ func TestPatchCandidateContextKeepsUTF8TruncationMarkers(t *testing.T) {
 	runner := NewBuiltinRunner()
 	defer runner.Close()
 	result := patchTestCall(runner, "feedback", root, FilePatch, map[string]any{
-		"scope": "project", "files": []map[string]any{{"path": "notes.txt", "action": "edit", "hunks": []map[string]any{{"start_line": 1, "old_lines": []string{"old"}, "new_lines": []string{"new"}}}}},
+		"scope": "project", "files": []map[string]any{{"path": "notes.txt", "action": "edit", "hunks": []map[string]any{{"start_line": 1, "relocate": false, "old_lines": []string{"old"}, "new_lines": []string{"new"}}}}},
 	})
 	recovery := decodePatchRecovery(t, result).Recovery
 	context := recovery.Candidates[0].Context

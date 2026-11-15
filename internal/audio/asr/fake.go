@@ -41,16 +41,8 @@ func (f *Fake) Stop(context.Context) error {
 	return nil
 }
 
-func (f *Fake) EmitPartial(text string) {
-	f.Emit(Event{Kind: EventPartial, Text: text})
-}
-
 func (f *Fake) EmitSentence(text string) {
 	f.Emit(Event{Kind: EventSentence, Text: text})
-}
-
-func (f *Fake) EmitError(err error) {
-	f.Emit(Event{Kind: EventError, Err: err})
 }
 
 func (f *Fake) Emit(event Event) {

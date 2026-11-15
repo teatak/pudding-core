@@ -147,7 +147,7 @@ func (f *fileDiscoveryFilter) accept(path string, entry fs.DirEntry) (bool, erro
 func (r *BuiltinRunner) fileListRecursive(ctx context.Context, out Result, resolved resolvedFilePath, maxEntries int, include, exclude []string, includeIgnored bool, cursor string) Result {
 	filter, err := newFileDiscoveryFilter(resolved.root, includeIgnored, !resolved.project)
 	if err != nil {
-		return toolJSONError(out, "read_dir_failed", err.Error())
+		return fileIOError(out, "read_dir_failed", resolved.target, err)
 	}
 	defer filter.close()
 	page, err := newFilePage(resolved.target, cursor, []any{"list", resolved.target, filter.baseRoot, filter.skipHidden, include, exclude, includeIgnored, resolved.widgetID})
@@ -164,6 +164,9 @@ func (r *BuiltinRunner) fileListRecursive(ctx context.Context, out Result, resol
 			return err
 		}
 		if walkErr != nil {
+			if path == resolved.target {
+				return walkErr
+			}
 			skipped["read_error"]++
 			return nil
 		}
@@ -233,7 +236,7 @@ func (r *BuiltinRunner) fileListRecursive(ctx context.Context, out Result, resol
 		if errors.As(err, &searchErr) {
 			return toolJSONError(out, searchErr.Code, searchErr.Detail)
 		}
-		return toolJSONError(out, "read_dir_failed", err.Error())
+		return fileIOError(out, "read_dir_failed", resolved.target, err)
 	}
 	nextCursor := ""
 	if capped {

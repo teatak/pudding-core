@@ -48,7 +48,12 @@ func TestFilePatchArgumentErrorsAreSpecific(t *testing.T) {
 		{name: "null hunks", args: `{"scope":"project","files":[{"path":"notes.txt","action":"delete","hunks":null}]}`, kind: "invalid_type", field: "files[0].hunks", expected: "array", hasOffset: true},
 		{name: "null hunk", args: `{"scope":"project","files":[{"path":"notes.txt","action":"edit","hunks":[null]}]}`, kind: "invalid_type", field: "files[0].hunks[0]", expected: "object", hasOffset: true},
 		{name: "invalid relocate type", args: `{"scope":"project","files":[{"path":"notes.txt","action":"edit","hunks":[{"start_line":1,"old_lines":["old"],"new_lines":["new"],"relocate":"true"}]}]}`, kind: "invalid_type", field: "files[0].hunks[0].relocate", expected: "boolean", hasOffset: true},
-		{name: "missing hunk line", args: `{"scope":"project","files":[{"path":"notes.txt","action":"edit","hunks":[{"old_lines":["old"],"new_lines":["new"]}]}]}`, kind: "hunk_line_invalid", field: "files[0].hunks[0].start_line", expected: "integer >= 1"},
+		{name: "missing insertion line", args: `{"scope":"project","files":[{"path":"notes.txt","action":"edit","hunks":[{"old_lines":[],"new_lines":["new"]}]}]}`, kind: "hunk_line_required", field: "files[0].hunks[0].start_line", expected: "integer >= 1"},
+		{name: "missing strict line", args: `{"scope":"project","files":[{"path":"notes.txt","action":"edit","hunks":[{"relocate":false,"old_lines":["old"],"new_lines":["new"]}]}]}`, kind: "hunk_line_required", field: "files[0].hunks[0].start_line", expected: "integer >= 1"},
+		{name: "zero hunk line", args: `{"scope":"project","files":[{"path":"notes.txt","action":"edit","hunks":[{"start_line":0,"old_lines":["old"],"new_lines":["new"]}]}]}`, kind: "hunk_line_invalid", field: "files[0].hunks[0].start_line", expected: "integer >= 1"},
+		{name: "negative hunk line", args: `{"scope":"project","files":[{"path":"notes.txt","action":"edit","hunks":[{"start_line":-1,"old_lines":["old"],"new_lines":["new"]}]}]}`, kind: "hunk_line_invalid", field: "files[0].hunks[0].start_line", expected: "integer >= 1"},
+		{name: "null hunk line", args: `{"scope":"project","files":[{"path":"notes.txt","action":"edit","hunks":[{"start_line":null,"old_lines":["old"],"new_lines":["new"]}]}]}`, kind: "invalid_type", field: "files[0].hunks[0].start_line", expected: "integer", hasOffset: true},
+		{name: "null relocate", args: `{"scope":"project","files":[{"path":"notes.txt","action":"edit","hunks":[{"relocate":null,"old_lines":["old"],"new_lines":["new"]}]}]}`, kind: "invalid_type", field: "files[0].hunks[0].relocate", expected: "boolean", hasOffset: true},
 		{name: "missing hunk input", args: `{"scope":"project","files":[{"path":"notes.txt","action":"edit","hunks":[{"start_line":1,"new_lines":["new"]}]}]}`, kind: "hunk_old_lines_required", field: "files[0].hunks[0].old_lines", expected: "array"},
 		{name: "missing hunk output", args: `{"scope":"project","files":[{"path":"notes.txt","action":"edit","hunks":[{"start_line":1,"old_lines":["old"]}]}]}`, kind: "hunk_new_lines_required", field: "files[0].hunks[0].new_lines", expected: "array"},
 	}
@@ -468,7 +473,7 @@ func TestFilePatchRejectsMismatchedOrOverlappingHunks(t *testing.T) {
 		"files": []map[string]any{{
 			"path":   "notes.txt",
 			"action": "edit",
-			"hunks":  []map[string]any{{"start_line": 2, "old_lines": []string{"third"}, "new_lines": []string{"changed"}}},
+			"hunks":  []map[string]any{{"start_line": 2, "relocate": false, "old_lines": []string{"third"}, "new_lines": []string{"changed"}}},
 		}},
 	})
 	if mismatched.Ok || !strings.Contains(mismatched.Content, `"reason":"hunk_lines_mismatch"`) {
@@ -837,22 +842,27 @@ func TestUnifiedPatchGitBatchUsesApprovalAndTracking(t *testing.T) {
 }
 
 func TestUnifiedPatchRelocationUsesExactBytes(t *testing.T) {
+	enabled, disabled := true, false
 	for _, tc := range []struct {
 		name, before, after string
-		relocate, ok        bool
+		relocate            *bool
+		ok                  bool
 	}{
-		{"opt in", "prefix\nold\n", "prefix\nnew\n", true, true},
-		{"default rejects shift", "prefix\nold\n", "prefix\nold\n", false, false},
-		{"ambiguous", "prefix\nold\nold\n", "prefix\nold\nold\n", true, false},
-		{"endings disambiguate", "old\r\nold\n", "old\r\nnew\n", true, true},
-		{"ending mismatch", "old\r\n", "old\r\n", true, false},
+		{"opt in", "prefix\nold\n", "prefix\nnew\n", &enabled, true},
+		{"default relocates", "prefix\nold\n", "prefix\nnew\n", nil, true},
+		{"strict rejects shift", "prefix\nold\n", "prefix\nold\n", &disabled, false},
+		{"ambiguous", "prefix\nold\nold\n", "prefix\nold\nold\n", nil, false},
+		{"endings disambiguate", "old\r\nold\n", "old\r\nnew\n", nil, true},
+		{"ending mismatch", "old\r\n", "old\r\n", nil, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root := t.TempDir()
 			writePatchTestFile(t, filepath.Join(root, "x"), tc.before)
-			result := patchTestCall(NewBuiltinRunner(), "session", root, FilePatch, map[string]any{
-				"scope": "project", "relocate": tc.relocate, "diff": "--- a/x\n+++ b/x\n@@ -1 +1 @@\n-old\n+new\n",
-			})
+			args := map[string]any{"scope": "project", "diff": "--- a/x\n+++ b/x\n@@ -1 +1 @@\n-old\n+new\n"}
+			if tc.relocate != nil {
+				args["relocate"] = *tc.relocate
+			}
+			result := patchTestCall(NewBuiltinRunner(), "session", root, FilePatch, args)
 			if result.Ok != tc.ok || readPatchTestFile(t, filepath.Join(root, "x")) != tc.after {
 				t.Fatalf("apply: %s", result.Content)
 			}

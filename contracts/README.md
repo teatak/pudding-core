@@ -698,14 +698,24 @@ writing. Skill and temp writes remain compatible and accept the optional check.
 
 `builtin_file_patch` accepts either the existing `files` array or a `diff` string
 containing standard unified text headers and hunks. Optional top-level `relocate`
-applies only to `diff`; structured hunks retain their own option. Both forms use
+applies only to `diff`; structured hunks retain their own option. Both default to
+unique exact relocation. Structured `start_line` is optional for non-empty
+`old_lines`: omitted coordinates require a unique exact source block. A supplied
+coordinate that already matches selects that occurrence; stale coordinates move
+only to a unique exact match. `relocate=false` requires exact coordinates, and
+empty-source insertions always require a line and cannot relocate. Missing or
+ambiguous matches and overlapping resolved hunks reject the batch. Explicit
+coordinates remain one-based; zero, negative and null values are invalid.
+`files[].relocations` includes content-located hunks, omitting `requestedStartLine`
+when no coordinate was supplied; failed recovery likewise omits `startLine` when
+absent from the request. Both forms use
 the same permission checks, approval snapshot, atomic writer and turn-file replay.
 Line endings and no-final-newline markers participate in exact matching. Whole
 file deletion must match the entire source. Malformed text reports
 `invalid_arguments` with `errorKind=invalid_diff` and the offending diff line;
 no file is written. Text input is capped at 2 MiB, 16 files and 64 hunks per file.
 Binary/rename/mode changes, executable creation and empty-file creation/deletion
-are unsupported in this format. Existing result and approval shapes are unchanged.
+are unsupported in this format.
 
 Project `builtin_file_patch` operations with `action=replace` require an
 `expected_hash` matching the source `file_read.contentHash`. Missing versions

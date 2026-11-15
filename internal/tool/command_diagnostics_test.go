@@ -32,6 +32,15 @@ func TestCommandTestExecutionEvidence(t *testing.T) {
 	wrapper := "1..0\n# Subtest: " + filepath.Join(root, "empty.test.js") + "\nok 1 - " + filepath.Join(root, "empty.test.js") + "\n"
 	for _, tc := range []struct{ name, command, output, want string }{
 		{"go empty", "go test -json ./...", empty, "no_tests"},
+		{"go explicit json", "go test -json=true ./...", empty, "no_tests"},
+		{"go disabled json", "go test -json -json=false ./...", "?   p [no test files]\n", "no_tests"},
+		{"go reenabled json", "go test -json=false -json=true ./...", skipped, "all_skipped"},
+		{"go json flag as pattern", "go test -run -json ./...", "?   p [no test files]\n", "no_tests"},
+		{"go list flag as pattern", "go test -run -list ./...", "?   p [no test files]\n", "no_tests"},
+		{"go test prefixed pattern", "go test -test.run -json ./...", "?   p [no test files]\n", "no_tests"},
+		{"go forwarded json", "go test ./... -args -json", "?   p [no test files]\n", "no_tests"},
+		{"go terminated flags", "go test ./... -- -json -list Test", "?   p [no test files]\n", "no_tests"},
+		{"go positional arguments", "go test ./... -v arg -json", "?   p [no test files]\n", "no_tests"},
 		{"go skipped", "go test -json ./...", skipped, "all_skipped"},
 		{"go mixed", "go test -json ./...", empty + skipped + ran, "ran"},
 		{"go incomplete", "go test -json ./...", jsonEvents(map[string]string{"Action": "start", "Package": "p"}), "unknown"},
@@ -41,8 +50,10 @@ func TestCommandTestExecutionEvidence(t *testing.T) {
 		{"go plain mixed", "go test ./...", "ok p 0.01s [no tests to run]\nok q 0.02s\n", "unknown"},
 		{"go verbose skip", "go test -v ./...", "--- SKIP: TestSkip (0.00s)\nok p 0.01s\n", "all_skipped"},
 		{"go list", "go test -list Test ./...", "TestOne\nok p 0.01s\n", "collected"},
+		{"go list reset", "go test -list Test -list= ./...", "--- PASS: TestOne (0.00s)\nok p 0.01s\n", "ran"},
 		{"pytest collect", "python3 -m pytest --collect-only", "1 test collected\n", "collected"},
 		{"tap empty", "node --test", "TAP version 13\n1..0\n" + tapSummary(0, 0, 0), "no_tests"},
+		{"tap with preload", "node --import tsx --test", "TAP version 13\n1..0\n" + tapSummary(0, 0, 0), "no_tests"},
 		{"tap wrapper", "node --test", "TAP version 13\n" + wrapper + tapSummary(1, 1, 0), "no_tests"},
 		{"tap wrapper and real", "node --test", "TAP version 13\n" + wrapper + "ok 2 - real test\n" + tapSummary(2, 2, 0), "ran"},
 		{"tap skips", "npm test", "TAP version 13\nok 1 - skipped # SKIP\n" + tapSummary(1, 0, 1), "all_skipped"},
@@ -50,33 +61,43 @@ func TestCommandTestExecutionEvidence(t *testing.T) {
 		{"nested empty plan", "node --test", "TAP version 13\n    1..0\nok 1 - actual\n" + tapSummary(1, 1, 0), "ran"},
 		{"tap incomplete", "node --test", "TAP version 13\n1..0\n# tests 0\n", "unknown"},
 		{"unknown reporter", "npm test", "done\n", "unknown"},
+		{"vitest unknown reporter", "vitest run", "done\n", "unknown"},
+		{"jest empty without evidence", "jest --passWithNoTests", "No tests found, exiting with code 0\n", "unknown"},
+		{"vitest TAP", "npx vitest run --reporter=tap", "TAP version 13\nok 1 - real test\n" + tapSummary(1, 1, 0), "ran"},
+		{"package exec TAP", "pnpm exec vitest run", "TAP version 13\nok 1 - skipped # SKIP\n" + tapSummary(1, 0, 1), "all_skipped"},
 	} {
-		t.Run(tc.name, func(t *testing.T) {
-			args := commandRunArgs{Command: tc.command}
-			stdout, stderr := newCommandOutputBuffers(args, root, []string{root})
-			if stdout.diagnostics == nil {
-				t.Fatal("test command was not classified")
-			}
-			for _, b := range []byte(tc.output) {
-				stdout.Write([]byte{b})
-			}
-			result := commandResult(Result{}, args, "sh", root, []string{root}, nil, 0, stdout, stderr, false, false, 0, "", nil)
-			fields := decodeToolResult(t, result)
-			wantStatus := tc.want
-			if wantStatus == "ran" {
-				wantStatus = "passed"
-			}
-			if wantStatus == "unknown" {
-				wantStatus = "completed"
-			}
-			if fields["testExecutionStatus"] != tc.want || fields["verificationStatus"] != wantStatus || fields["exitCode"] != float64(0) || fields["ok"] != true {
-				t.Fatalf("%s", result.Content)
-			}
-			preview := ModelResultContent(CommandRun, true, result.Content, "turn", "call", true)
-			if !strings.Contains(preview, `"testExecutionStatus"`) {
-				t.Fatalf("execution evidence lost: %s", preview)
-			}
-		})
+		for _, stream := range []string{"stdout", "stderr"} {
+			t.Run(tc.name+"/"+stream, func(t *testing.T) {
+				args := commandRunArgs{Command: tc.command}
+				stdout, stderr := newCommandOutputBuffers(args, root, []string{root})
+				if stdout.diagnostics == nil {
+					t.Fatal("test command was not classified")
+				}
+				output := stdout
+				if stream == "stderr" {
+					output = stderr
+				}
+				for _, b := range []byte(tc.output) {
+					output.Write([]byte{b})
+				}
+				result := commandResult(Result{}, args, "sh", root, []string{root}, nil, 0, stdout, stderr, false, false, 0, "", nil)
+				fields := decodeToolResult(t, result)
+				wantStatus := tc.want
+				if wantStatus == "ran" {
+					wantStatus = "passed"
+				}
+				if wantStatus == "unknown" {
+					wantStatus = "completed"
+				}
+				if fields["testExecutionStatus"] != tc.want || fields["verificationStatus"] != wantStatus || fields["exitCode"] != float64(0) || fields["ok"] != true {
+					t.Fatalf("%s", result.Content)
+				}
+				preview := ModelResultContent(CommandRun, true, result.Content, "turn", "call", true)
+				if !strings.Contains(preview, `"testExecutionStatus"`) {
+					t.Fatalf("execution evidence lost: %s", preview)
+				}
+			})
+		}
 	}
 }
 
@@ -100,11 +121,52 @@ func TestCommandTestExecutionDoesNotOverrideExitOrMissingOutput(t *testing.T) {
 			t.Fatalf("exit status masked: %+v", fields)
 		}
 	}
-	e := newCommandTestExecution([]string{"go", "test", "-v"}, false)
+	e := newCommandTestExecution([]string{"go", "test", "-v"})
 	e.line("--- SKIP: TestSkip (0.00s)")
 	e.incomplete = true
 	if e.status() != "unknown" {
 		t.Fatal("dropped output claimed all tests skipped")
+	}
+}
+
+func TestCommandTestExecutionAcrossStreams(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("PowerShell does not emit POSIX verification metadata")
+	}
+	root := t.TempDir()
+	tapEmpty := "TAP version 13\n1..0\n# tests 0\n# pass 0\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n"
+	tapSkip := "TAP version 13\nok 1 - later # SKIP\n# tests 1\n# pass 0\n# fail 0\n# cancelled 0\n# skipped 1\n# todo 0"
+	goEmpty := "{\"Action\":\"pass\",\"Package\":\"p\"}\n"
+	for _, tc := range []struct {
+		name, command, stdout, stderr, want string
+	}{
+		{"noise beside report", "node --test", "ordinary progress\n", tapEmpty, "no_tests"},
+		{"empty and skipped", "node --test", tapEmpty, tapSkip, "all_skipped"},
+		{"incomplete reporter", "node --test", tapEmpty, "TAP version 13\n# tests 0\n", "unknown"},
+		{"dropped reporter", "node --test", tapEmpty, strings.Repeat("x", commandDiagnosticLineBytes+1), "unknown"},
+		{"go events in both streams", "go test -json", "{\"Action\":\"skip\",\"Package\":\"p\",\"Test\":\"TestSkip\"}\n", goEmpty, "all_skipped"},
+		{"go incomplete second package", "go test -json", goEmpty, "{\"Action\":\"start\",\"Package\":\"q\"}\n", "unknown"},
+		{"go corrupt second stream", "go test -json", goEmpty, "{invalid\n", "unknown"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			args := commandRunArgs{Command: tc.command}
+			stdout, stderr := newCommandOutputBuffers(args, root, []string{root})
+			done := make(chan struct{}, 2)
+			for output, text := range map[*truncatingBuffer]string{stdout: tc.stdout, stderr: tc.stderr} {
+				go func() {
+					for _, b := range []byte(text) {
+						output.Write([]byte{b})
+					}
+					done <- struct{}{}
+				}()
+			}
+			<-done
+			<-done
+			fields := decodeToolResult(t, commandResult(Result{}, args, "sh", root, []string{root}, nil, 0, stdout, stderr, false, false, 0, "", nil))
+			if fields["testExecutionStatus"] != tc.want {
+				t.Fatalf("incorrect combined evidence: %+v", fields)
+			}
+		})
 	}
 }
 
@@ -185,35 +247,46 @@ func TestCommandTestFailuresGoJSONAndNodeTAP(t *testing.T) {
 	}
 	for _, tc := range []struct{ command, output, name, path string }{
 		{"go test -json ./...", goOutput, "TestValue", "pkg/check_test.go"},
+		{"go test -json=true ./...", goOutput, "TestValue", "pkg/check_test.go"},
 		{"node --test --test-reporter=tap", "TAP version 13\nnot ok 1 - value assertion\n  ---\n  location: 'check.test.js:1:3'\n  error: |-\n    Expected values to match\n    多行断言\n  expected: 2\n  actual: 1\n  code: ERR_ASSERTION\n  ...\nnot ok 2 - deferred # TODO later\n", "value assertion", "check.test.js"},
 	} {
-		args := commandRunArgs{Command: tc.command}
-		stdout, stderr := newCommandOutputBuffers(args, root, []string{root})
-		noise := strings.Repeat("progress\n", commandOutputLimitBytes)
-		stdout.Write([]byte(noise))
-		for _, b := range []byte(tc.output) {
-			stdout.Write([]byte{b})
-		}
-		stdout.Write([]byte(noise))
-		result := commandResult(Result{}, args, "sh", root, []string{root}, nil, 1, stdout, stderr, false, false, 0, "non_zero_exit", nil)
-		var got struct {
-			TestFailures          []commandTestFailure
-			TestFailuresTruncated bool
-			StdoutTruncated       bool
-			DiagnosticCount       int
-		}
-		if err := json.Unmarshal([]byte(result.Content), &got); err != nil {
-			t.Fatal(err)
-		}
-		if !got.StdoutTruncated || got.TestFailuresTruncated || got.DiagnosticCount != 0 || len(got.TestFailures) != 1 || got.TestFailures[0].Name != tc.name || got.TestFailures[0].RelativePath != tc.path || got.TestFailures[0].Message == "" {
-			t.Fatalf("%s: %+v", tc.command, got)
-		}
-		for _, toolName := range []string{CommandRun, CommandSession} {
-			result.Name = toolName
-			preview := ModelResultContent(toolName, true, result.Content, "turn", "command", true)
-			if !strings.Contains(preview, tc.name) || !strings.Contains(preview, "testFailureCount") {
-				t.Fatalf("preview lost failure: %s", preview)
-			}
+		for _, stream := range []string{"stdout", "stderr", "both"} {
+			t.Run(tc.command+"/"+stream, func(t *testing.T) {
+				args := commandRunArgs{Command: tc.command}
+				stdout, stderr := newCommandOutputBuffers(args, root, []string{root})
+				noise := strings.Repeat("progress\n", commandOutputLimitBytes)
+				for name, output := range map[string]*truncatingBuffer{"stdout": stdout, "stderr": stderr} {
+					if stream != "both" && stream != name {
+						continue
+					}
+					output.Write([]byte(noise))
+					for _, b := range []byte(tc.output) {
+						output.Write([]byte{b})
+					}
+					output.Write([]byte(noise))
+				}
+				result := commandResult(Result{}, args, "sh", root, []string{root}, nil, 1, stdout, stderr, false, false, 0, "non_zero_exit", nil)
+				var got struct {
+					TestFailures          []commandTestFailure
+					TestFailuresTruncated bool
+					StdoutTruncated       bool
+					StderrTruncated       bool
+					DiagnosticCount       int
+				}
+				if err := json.Unmarshal([]byte(result.Content), &got); err != nil {
+					t.Fatal(err)
+				}
+				if got.StdoutTruncated != (stream != "stderr") || got.StderrTruncated != (stream != "stdout") || got.TestFailuresTruncated || got.DiagnosticCount != 0 || len(got.TestFailures) != 1 || got.TestFailures[0].Name != tc.name || got.TestFailures[0].RelativePath != tc.path || got.TestFailures[0].Message == "" {
+					t.Fatalf("%s: %+v", tc.command, got)
+				}
+				for _, toolName := range []string{CommandRun, CommandSession} {
+					result.Name = toolName
+					preview := ModelResultContent(toolName, true, result.Content, "turn", "command", true)
+					if !strings.Contains(preview, tc.name) || !strings.Contains(preview, "testFailureCount") {
+						t.Fatalf("preview lost failure: %s", preview)
+					}
+				}
+			})
 		}
 	}
 }
@@ -245,6 +318,16 @@ func TestCommandTestFailuresRemainBoundedAndKeepUnknownLocations(t *testing.T) {
 	}
 	if len(tap.failures) != 1 || !tap.failures[0].Unresolved || tap.failures[0].Path != "" || tap.failures[0].Line != 12 || tap.failures[0].Column != 3 {
 		t.Fatalf("lost unresolved location: %+v", tap.failures)
+	}
+	left := newCommandTestCollector(nil, t.TempDir(), nil)
+	right := newCommandTestCollector(nil, t.TempDir(), nil)
+	for i := 0; i < commandMaxTestFailures/2+1; i++ {
+		left.add(commandTestFailure{Name: fmt.Sprintf("left-%d", i)})
+		right.add(commandTestFailure{Name: fmt.Sprintf("right-%d", i)})
+	}
+	_, failures, truncated := finishCommandTests(left, right)
+	if !truncated || len(failures) != commandMaxTestFailures {
+		t.Fatalf("combined failure limit ignored: %d, %t", len(failures), truncated)
 	}
 }
 
@@ -322,8 +405,41 @@ func TestCommandVerificationKindRecognizesStaticInvocations(t *testing.T) {
 		{[]string{"bun", "--cwd=web", "run", "check"}, "check"},
 		{[]string{"npx", "tsc", "--noEmit"}, "check"},
 		{[]string{"npx", "--yes", "eslint", "."}, "lint"},
+		{[]string{"vitest", "run"}, "test"},
+		{[]string{"./node_modules/.bin/vitest", "related", "src/file.ts", "--run"}, "test"},
+		{[]string{"jest", "--runInBand"}, "test"},
+		{[]string{"npx", "--yes", "vitest", "run"}, "test"},
+		{[]string{"pnpm", "exec", "vitest", "run"}, "test"},
+		{[]string{"npm", "exec", "--", "jest", "--runInBand"}, "test"},
+		{[]string{"yarn", "exec", "jest"}, "test"},
+		{[]string{"bun", "x", "vitest", "run"}, "test"},
+		{[]string{"vitest", "list"}, ""},
+		{[]string{"vitest", "init"}, ""},
+		{[]string{"vitest", "bench"}, ""},
+		{[]string{"vitest", "--listTags=json"}, ""},
+		{[]string{"vitest", "--clear-cache"}, ""},
+		{[]string{"jest", "--listTests"}, ""},
+		{[]string{"jest", "--showConfig"}, ""},
+		{[]string{"jest", "--clearCache"}, ""},
+		{[]string{"npx", "jest", "--list-tests=true"}, ""},
+		{[]string{"pnpm", "exec", "vitest", "--help"}, ""},
+		{[]string{"npm", "exec", "--package", "jest", "jest"}, ""},
+		{[]string{"jest", "--listTests=false"}, "test"},
 		{[]string{"node", "--test", "test/example.test.js"}, "test"},
 		{[]string{"node", "--experimental-strip-types", "--test", "test/example.test.ts"}, "test"},
+		{[]string{"node", "--import", "tsx", "--test", "test/example.test.ts"}, "test"},
+		{[]string{"node", "-r", "ts-node/register", "--test"}, "test"},
+		{[]string{"node", "--loader", "tsx", "--test"}, "test"},
+		{[]string{"node", "--test-name-pattern", "--help", "--test"}, "test"},
+		{[]string{"node", "--test-reporter", "tap", "--test-reporter-destination", "stderr", "--test"}, "test"},
+		{[]string{"node", "--test-name-pattern", "--test", "script.js"}, ""},
+		{[]string{"node", "--import", "--test", "script.js"}, ""},
+		{[]string{"node", "--unknown", "--test"}, ""},
+		{[]string{"node", "--test", "--import"}, ""},
+		{[]string{"node", "--run", "test", "--test"}, ""},
+		{[]string{"node", "--run=test", "--test"}, ""},
+		{[]string{"node", "--", "--test"}, ""},
+		{[]string{"node", "--test", "--", "test/example.test.js"}, "test"},
 		{[]string{"npm", "--prefix"}, ""},
 		{[]string{"npm", "--unknown", "test"}, ""},
 		{[]string{"npm", "run", "test", "--if-present"}, ""},

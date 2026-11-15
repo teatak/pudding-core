@@ -30,23 +30,114 @@ var goTestSummaryPattern = regexp.MustCompile(`^(ok|\?)\s+\S+\s+(.+)$`)
 var tapTestCountPattern = regexp.MustCompile(`^# (tests|pass|fail|cancelled|skipped|todo) (\d+)\s*$`)
 var tapTestResultPattern = regexp.MustCompile(`^(?:not )?ok\s+\d+\s*-?\s*(.*)$`)
 
-func newCommandTestExecution(argv []string, goJSON bool) *commandTestExecution {
-	e := &commandTestExecution{goJSON: goJSON, goPackages: make(map[string]*goTestExecution)}
+func newCommandTestExecution(argv []string) *commandTestExecution {
+	e := &commandTestExecution{goPackages: make(map[string]*goTestExecution)}
 	if len(argv) == 0 {
 		return e
 	}
 	op, args := commandOperation(argv[0]), argv[1:]
 	e.goCommand = op == "go" && len(args) > 0 && args[0] == "test"
+	if e.goCommand {
+		e.goJSON, e.collected = goTestOutputOptions(args[1:])
+		return e
+	}
 	pytest := op == "pytest" || ((op == "python" || op == "python3") && len(args) > 1 && args[0] == "-m" && args[1] == "pytest")
 	for _, arg := range args {
-		if arg == "--" || (e.goCommand && arg == "-args") {
+		if arg == "--" {
 			break
 		}
-		if (e.goCommand && (arg == "-list" || strings.HasPrefix(arg, "-list="))) || (pytest && (arg == "--collect-only" || arg == "--co")) {
+		if pytest && (arg == "--collect-only" || arg == "--co") {
 			e.collected = true
 		}
 	}
 	return e
+}
+
+// Consume known value flags before interpreting output options. Go accepts
+// flags on either side of the package list, but -args/-- ends Go flag parsing.
+func goTestOutputOptions(args []string) (jsonOutput, collected bool) {
+	inPackages, afterPackages := false, false
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if arg == "--" || arg == "-args" || arg == "--args" {
+			break
+		}
+		if !strings.HasPrefix(arg, "-") {
+			if afterPackages {
+				break
+			}
+			inPackages = true
+			continue
+		}
+		if inPackages {
+			inPackages, afterPackages = false, true
+		}
+		flag, value, inline := strings.Cut(strings.TrimLeft(arg, "-"), "=")
+		if flag == "json" {
+			jsonOutput = true
+			if inline {
+				var err error
+				jsonOutput, err = strconv.ParseBool(value)
+				if err != nil {
+					return false, false
+				}
+			}
+			continue
+		}
+		switch strings.TrimPrefix(flag, "test.") {
+		case "list", "run", "skip", "bench", "benchtime", "count", "cpu", "parallel", "shuffle", "timeout",
+			"fuzz", "fuzztime", "fuzzminimizetime", "blockprofile", "blockprofilerate", "coverprofile", "cpuprofile",
+			"memprofile", "memprofilerate", "mutexprofile", "mutexprofilefraction", "outputdir", "trace",
+			"o", "vet", "covermode", "coverpkg", "tags", "ldflags", "gcflags", "asmflags", "gccgoflags", "toolexec",
+			"mod", "modfile", "overlay", "pkgdir", "p", "buildmode", "compiler", "installsuffix", "pgo":
+			if !inline {
+				i++
+				if i == len(args) {
+					return false, false
+				}
+				value = args[i]
+			}
+			if flag == "list" || flag == "test.list" {
+				collected = value != ""
+			}
+		case "v", "short", "failfast", "fullpath", "benchmem", "artifacts", "c", "a", "n", "x", "work",
+			"race", "msan", "asan", "cover", "trimpath", "modcacherw", "linkshared", "buildvcs":
+		default:
+			if !inline {
+				return false, false // Unknown flag arity can hide later output options.
+			}
+		}
+	}
+	return jsonOutput, collected
+}
+
+// Streams keep independent line/report buffers. Merge only completed evidence,
+// so a silent stream does not turn a conclusive report into "unknown".
+func (e *commandTestExecution) merge(other *commandTestExecution) {
+	e.finishTAP()
+	other.finishTAP()
+	e.ran = e.ran || other.ran
+	e.skipped = e.skipped || other.skipped
+	e.empty = e.empty || other.empty
+	e.unknown = e.unknown || other.unknown
+	e.incomplete = e.incomplete || other.incomplete
+	e.goPlainRan = e.goPlainRan || other.goPlainRan
+	e.goPlainSkipped = e.goPlainSkipped || other.goPlainSkipped
+	e.goPlainEmpty = e.goPlainEmpty || other.goPlainEmpty
+	for name, pkg := range other.goPackages {
+		state := e.goPackages[name]
+		if state == nil {
+			if len(e.goPackages) >= 1024 {
+				e.unknown = true
+				continue
+			}
+			state = &goTestExecution{}
+			e.goPackages[name] = state
+		}
+		state.done = state.done || pkg.done
+		state.ran = state.ran || pkg.ran
+		state.skipped = state.skipped || pkg.skipped
+	}
 }
 
 func (e *commandTestExecution) line(line string) {

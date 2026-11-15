@@ -70,6 +70,44 @@ func TestRepeatedToolFailuresDistinguishProgress(t *testing.T) {
 
 type repeatingFailureClient struct{ requests []provider.Request }
 
+func TestRepeatedToolFailuresRecognizeMissingTargetAcrossReadTools(t *testing.T) {
+	var guard repeatedToolFailures
+	result := store.ContentPart{Type: store.ContentPartToolResult, CallID: "one", Content: `{"ok":false,"reason":"path_not_found","exists":false}`}
+	for i, name := range []string{tool.FileSearch, tool.FileSlice, tool.FileRead, tool.FileList} {
+		call := tool.Call{Name: name, CallID: "one", Args: json.RawMessage(fmt.Sprintf(`{"scope":"project","path":"missing","query":"attempt-%d"}`, i))}
+		if guard.observe([]tool.Call{call}, []store.ContentPart{result}) != (i == 3) {
+			t.Fatalf("switching read tools concealed repeated absence at attempt %d", i+1)
+		}
+		if guard.reminder() == "" || !guard.missingPath {
+			t.Fatal("known missing target should guide recovery from the first attempt")
+		}
+	}
+	call := tool.Call{Name: tool.FileRead, CallID: "one", Args: json.RawMessage(`{"scope":"project","path":"corrected"}`)}
+	if guard.observe([]tool.Call{call}, []store.ContentPart{result}) || guard.count != 1 {
+		t.Fatal("corrected path must start a new attempt")
+	}
+	call.Args = json.RawMessage(`{"scope":"skill","path":"corrected"}`)
+	if guard.observe([]tool.Call{call}, []store.ContentPart{result}) || guard.count != 1 {
+		t.Fatal("different scope must not share a missing target")
+	}
+	result.Ok, result.Content = true, `{"ok":true,"content":"created"}`
+	if guard.observe([]tool.Call{call}, []store.ContentPart{result}) || guard.count != 0 || guard.reminder() != "" {
+		t.Fatal("successful access after creation must clear the missing-target state")
+	}
+	call.Name = tool.FileStat
+	result.Content = `{"ok":true,"exists":false}`
+	for range 5 {
+		if guard.observe([]tool.Call{call}, []store.ContentPart{result}) || guard.reminder() != "" {
+			t.Fatal("normal existence result counted as execution failure")
+		}
+	}
+	call.Name = tool.FileRead
+	result.Ok, result.Content = false, `{"ok":false,"reason":"read_failed"}`
+	if guard.observe([]tool.Call{call}, []store.ContentPart{result}) || guard.missingPath || guard.reminder() != "" {
+		t.Fatal("I/O failure was treated as a missing target")
+	}
+}
+
 func (*repeatingFailureClient) Name() string { return "repeat" }
 func (c *repeatingFailureClient) Stream(_ context.Context, req provider.Request) (<-chan provider.Chunk, error) {
 	c.requests = append(c.requests, req)

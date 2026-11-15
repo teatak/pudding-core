@@ -6,6 +6,9 @@
 
 工具结果可通过对话显示设置按声明展开正文；输入仍使用原 JSON schema。声明、历史快照及预算规则见 [工具结果文本展开](context-working-set.md#工具结果文本展开)。
 
+命令的 `stdout/stderr` 及后台轮询的 `output[].content` 都声明文本展开，保留原始
+JSON、各片段的 stream/offset、进程状态和下一读取位置；关闭开关后仍返回原 JSON。
+
 同一批调用中，相邻且已暴露的内置 `file_read`、`file_slice`、`file_list`、`file_search`
 最多四个并行执行。命令、写入、插件和权限变更仍是顺序边界；每个调用继续通过原有
 授权检查和资源锁。结果按模型发出的顺序存储，取消后保留已分派调用的结果，不再启动后续批次。
@@ -40,7 +43,12 @@
 主要错误分别为 `invalid_scope`、`project_dirs_required`、`absolute_path_required`、
 `path_not_authorized`、`path_not_found`。通用文件路径解析的非法 scope 返回 `allowedScopes`；多 root 相对路径
 返回 `projectRoots` 和改用绝对路径的提示。已授权目录内的文件不存在不会提示申请更多权限。
-`file_stat` 对可定位的缺失文件仍返回 `exists=false`。
+`file_stat` 对可定位的缺失文件返回 `ok=true, exists=false`；正常搜索零命中也属于成功结果。
+读取、搜索或列目录的目标不存在时保留 `ok=false, reason=path_not_found, exists=false`，
+Desktop 显示为“路径不存在”的提醒；权限拒绝和实际 I/O 异常仍显示为错误。原始系统错误保留在结果中。
+首次确认目标缺失后，引导模型纠正路径或查找已有父目录，不再对同一路径重复读取、搜索或探测。
+在同一 scope 内换用读取工具、调整搜索词不算进展；连续四次访问相同缺失目标仍触发重复失败保护。
+成功访问或修改路径会重置计数，不缓存文件缺失状态，文件创建后可以正常访问。
 
 实现：[projectpath](../internal/projectpath/projectpath.go)、
 [文件路径错误](../internal/tool/file.go)、[命令策略](../internal/tool/policy.go)。
@@ -123,11 +131,17 @@ daemon 时自动回收。清理不按 `_preview` 等文件名猜测，也不接�
 `unresolved=true`，不提供可打开的 `path` 或源码片段。
 Go `test -json` 和 Node TAP 输出另提取 `testFailures`：失败用例或包、原因及可确认的
 位置；Go 子包按授权范围内的 go.mod 定位，未知包保留原始位置。TAP TODO/SKIP 不算失败。
-最多保留 50 项失败、256 项待完成用例和每项 16 KiB 日志，超限标记
+两种报告均从 stdout、stderr 独立解析后合并，相同失败记录去重，合并后的失败总数仍受上限约束。
+Go `-json=true/false` 按最后一次显式值处理，不将筛选条件或 `-args/--` 后的内容当作报告选项。
+最多保留 50 项失败；每个流最多保留 256 项待完成用例和每项 16 KiB 日志，超限标记
 `testFailuresTruncated`。模型预览保留三项及 `shown_test_failures`；这些是已观察到的失败，
 不是测试总数或通过证明，最终成功与否继续以命令退出状态为准。
 
 测试命令同时返回 `testExecutionStatus`：`ran/no_tests/all_skipped/collected/unknown`。
+直接执行 Vitest/Jest，以及明确的 npx、npm/pnpm/yarn exec、bun x 调用进入同一验证流程；
+仅列出测试、查看配置或清理缓存不作为测试执行。识别命令不代表已确认测试实际运行。
+Node 的 `--import`、`--require`、报告器和测试筛选等选项会先消费参数值；脚本参数中的
+`--test` 不作为测试启动标志。无法确定参数边界的调用不推断验证类型。
 Go JSON 和完整 Node TAP 摘要用于确认实际用例执行；Node 在空 `1..0` 后生成的文件包装项
 不计为实际用例，混合文件中真正执行的用例仍保留。普通 Go 输出可识别无测试标记及
 verbose 模式的 PASS/SKIP；单独的 `ok` 不足以区分执行与全部跳过。Go `-list` 和 pytest
@@ -185,12 +199,23 @@ Unix 命令使用 POSIX `/bin/sh`，不会自动切换 shell 或改写执行选�
 
 ## 4. 搜索与精确补丁
 
+`file_move` 默认不替换已存在的目标；冲突返回 `destination_exists` 并保留源与目标。
+确实需要替换时显式传入 `overwrite=true`，沿用系统重命名语义，不合并目录。
+默认移动复用 Desktop 文件操作的排他重命名，在 macOS、Linux、Windows 上避免并发目标创建被覆盖。
+
+`file_slice` 读到请求的结束行即停止解析，范围外的超长行不会让有效切片失败。
+从末尾读取时以固定大小的环形窗口保留 `lines + skip` 行，返回原始行号和顺序；
+不为每个新行搬移整个窗口。完整行、大小上限及截断标记保持原有规则。
+
 `file_list(recursive=true)` 只枚举文件路径，不读取正文，支持项目根相对的
 `include_globs` / `exclude_globs`（含 `**`）；普通调用继续列出一层目录。
 递归结果用 `returnedCount` 表示实际返回数量，`complete/skipped/truncated`
 说明遍历是否完整，不把截断后的数量当成总数。多授权根时仍需指定绝对路径。
 `file_search(output_mode="files")` 在各文件首次命中后停止读取，返回去重的
 `files` 和 `fileCount`，不返回正文或匹配行数；默认 `content` 保留原有行为。
+
+内容搜索原样保留查询首尾的空格、制表符及正则表达式，不自动 trim；纯空白查询有效，
+只有空字符串返回 `query_required`。工具与项目文件搜索使用同一规则，分页游标也绑定原始查询。
 
 `file_search` 和递归 `file_list` 达到结果或遍历上限时返回 `nextCursor`。
 将其作为下次 `cursor`，保持 scope、path、查询和过滤参数不变，可调整页面大小。
@@ -210,6 +235,7 @@ Unix 命令使用 POSIX `/bin/sh`，不会自动切换 shell 或改写执行选�
 
 `file_search` 和项目搜索返回 `complete` 与按原因计数的 `skipped`。目录搜索跳过的
 超大文本文件、不可读路径和符号链接分别记为 `file_too_large`、`read_error`、`symlink`；
+搜索根目录本身不可读时直接返回读取失败，不伪装为成功的部分搜索。
 达到结果数量上限也令 `complete=false`。已知二进制文件、默认排除目录及显式 glob
 过滤仍属于搜索范围约束，不计为读取失败。目录扫描的单文件上限为 1 MiB；显式指定
 文件可搜索到 16 MiB，超过该上限明确报错。零命中且 `complete=false` 不能证明不存在。
@@ -218,34 +244,39 @@ Unix 命令使用 POSIX `/bin/sh`，不会自动切换 shell 或改写执行选�
 `numberedExcerpt`，每个上下文行都有明确行号。仅在坐标和行数一致时编号；路径、匹配行、
 范围和 `truncated` 等定位信息仍保留。Canonical 结果和 UI 数据格式不变。
 
-`context_lines` 仍为 0–5，越界返回错误，不静默改写参数。搜索结果用于定位；准备补丁时
-仍应读取 `file_slice` 的自然顺序完整源行，尤其不能将截断的搜索预览作为 `old_lines`。
+`context_lines` 仍为 0–5，越界返回错误，不静默改写参数。准备补丁时可复用已读的完整
+源行；源文不完整或不熟悉时，读取 `file_slice` 的自然顺序源行，不能将截断预览作为 `old_lines`。
 
 `file_patch` 支持二选一的输入：原有 `files` 数组，或标准 unified diff 字符串 `diff`。
 后者必须包含 `---` / `+++` 文件头和计数完整的 `@@` hunk，接受普通 Git 文本 diff
 的 `diff --git` / `index` 头；成对去除路径的 `a/`、`b/` 前缀，`/dev/null` 表示新增
 或删除。路径仍受原有授权约束，多目录时使用绝对路径；删除必须精确描述整个源文件。
 输入保留 LF、CRLF 和 `\ No newline at end of file`，上下文匹配也校验换行。
-`diff` 的 `relocate` 位于顶层，默认关闭；`files` 仍在各 hunk 上设置。
+`diff` 的 `relocate` 位于顶层，`files` 在各 hunk 上设置；两者默认开启唯一精确重定位。
 解析后的操作共用审批、快照校验、原子写入和撤销流程，不调用 shell 或 `git apply`。
 格式错误返回 `invalid_arguments` / `invalid_diff`、出错 diff 行及修复提示，整批不写入。
 输入上限 2 MiB，仍限 16 文件、每文件 64 hunk；二进制、重命名、权限变更及空文件
 新增/删除不走此格式，应使用已有对应操作。新增可执行文件也不能借 diff 静默丢弃权限。
 
-`file_patch` 保持精确匹配和整批校验后写入。每个 hunk 可显式设置 `relocate: true`：
-仅在 `start_line` 不匹配或越界时，按非空 `old_lines` 在修改前文件中的唯一精确匹配
-重定位；纯插入不能重定位，无匹配或多匹配仍拒绝。指定位置已精确匹配时照常使用，
-无需全文件唯一。全部 hunk 解析后重新检查重叠，审批与执行继续绑定同一文件快照。
+`file_patch` 保持精确匹配和整批校验后写入。结构化 hunk 的 `start_line` 可省略：
+非空 `old_lines` 在修改前文件中唯一精确匹配时，直接按内容定位。有行号但不匹配或
+越界时，默认按同样规则重定位；无匹配或多匹配仍拒绝。指定位置已精确匹配时照常使用，
+无需全文件唯一。显式 `relocate: false` 保留严格定位，必须提供准确行号。
+纯插入（空 `old_lines`）仍须提供行号，且不能重定位；按内容插入时在新旧行中保留
+用于定位的原文上下文。显式行号必须大于等于 1，`0`、负数及 `null` 不能替代省略。
+全部 hunk 解析后重新检查重叠，审批与执行继续绑定同一文件快照。
 失败的 `recovery.candidates[]` 各含 `startLine` 和该候选附近最多五行的编号上下文；
 最多返回五个候选，完整匹配数及候选／源行截断标记仍保留。候选反馈取代原来的
-仅坐标数组。唯一候选的上下文未截断且目标明确时，可直接修正 `start_line` 或设置
-`relocate: true` 重试，不强制重读；有歧义、截断或目标不明确时再读取局部源行。
+仅坐标数组。严格定位失败且唯一候选的上下文完整、目标明确时，可直接修正行号或开启
+重定位后重试，不强制重读；有歧义、截断或目标不明确时再读取局部源行，不原样重复请求。
+省略行号的失败结果也省略 `recovery.startLine`，不虚构请求位置。
 
-成功结果的 `files[].relocations[]` 仅记录实际移动的 hunk，包含原输入数组中从 1 开始的
-`hunk`、请求的 `requestedStartLine` 和解析后的 `startLine`；两个坐标都属于修改前文件。
+成功结果的 `files[].relocations[]` 记录实际移动或未提供行号而按内容定位的 hunk，包含
+原输入数组中从 1 开始的 `hunk` 和解析后的 `startLine`；提供过行号时才包含
+`requestedStartLine`。两个坐标都属于修改前文件。
 成功结果的 `files[].lineRanges[]` 从同一份 review diff 派生，描述修改后文件的
 `startLine` 和 `lineCount`。`lineCount=0` 是删除边界，可位于新 EOF 后一行；删除整个
-文件时数组为空。后续编辑应重新读取这些位置附近的源行，不沿用本批的原始坐标。
+文件时数组为空。后续编辑使用当前完整源文；需要补充源文时读取这些位置附近，不沿用旧坐标。
 
 超大工具结果继续使用受限 preview 和 `result_ref` 回读。预览额外保留有界错误分类、
 资源数值、路径提示与 recovery 坐标（成功结果的重定位列表省略时标记 `relocationsTruncated`），不把完整源文件重复放回模型上下文。
@@ -260,10 +291,16 @@ Unix 命令使用 POSIX `/bin/sh`，不会自动切换 shell 或改写执行选�
 不写入、不自动重试，也不把冲突当作权限问题。重新读取并合并修改后才能再次写入。
 成功写入返回新 `contentHash`。仅修改时间变化且内容相同不会产生冲突。
 
-项目写入继续通过原有资源锁；同一 runner 的版本检查和整文件写入串行执行。新文件
-使用排他创建，避免读取后突然出现的文件被覆盖。`skill`、`temp` 保留既有默认覆盖语义，
+项目写入继续通过原有资源锁；同一 runner 的版本检查和整文件写入串行执行。内容先写入
+目标所在目录的临时文件，完成写入、同步及关闭后才替换目标，并保留已有文件权限。
+写入或同步失败不会截断原文件；带 `expected_hash` 时，替换前再次校验版本。新项目文件
+使用不可覆盖的重命名提交，避免写入期间出现的文件被覆盖。临时文件在成功或失败后清理。
+`skill`、`temp` 保留既有默认覆盖语义，
 也可显式传 `expected_hash` 做相同校验。读取过长或被截断的文件应使用局部补丁，不能
 把截断正文当作整文件内容重新写回。
+
+文本读取、切片、搜索和整文件写入在打开目标前检查普通文件类型；目录、命名管道和
+设备等返回 `regular_file_required`，不等待管道输入，也不将特殊文件替换为普通文本。
 
 `file_patch` 的项目 `action=replace` 同样要求每个文件提供读取时的 `expected_hash`。
 缺失返回 `file_version_required`，内容变化或源文件已删除返回 `file_conflict`；在准备

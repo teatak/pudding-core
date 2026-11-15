@@ -464,8 +464,7 @@ func commandResult(out Result, args commandRunArgs, shell, cwd string, projectDi
 		payload["diagnosticCount"] = len(diagnostics)
 		payload["diagnosticsTruncated"] = truncated
 		if first.tests != nil {
-			first.tests.finishTAP()
-			testExecutionStatus := first.tests.execution.status()
+			testExecutionStatus, failures, failuresTruncated := finishCommandTests(first.tests, second.tests)
 			payload["testExecutionStatus"] = testExecutionStatus
 			if verificationStatus == "passed" && (testExecutionStatus == "no_tests" || testExecutionStatus == "all_skipped" || testExecutionStatus == "collected") {
 				payload["verificationStatus"] = testExecutionStatus
@@ -473,9 +472,9 @@ func commandResult(out Result, args commandRunArgs, shell, cwd string, projectDi
 			if verificationStatus == "passed" && testExecutionStatus == "unknown" {
 				payload["verificationStatus"] = "completed"
 			}
-			payload["testFailures"] = first.tests.failures
-			payload["testFailureCount"] = len(first.tests.failures)
-			payload["testFailuresTruncated"] = first.tests.truncated || first.droppingLine
+			payload["testFailures"] = failures
+			payload["testFailureCount"] = len(failures)
+			payload["testFailuresTruncated"] = failuresTruncated
 		}
 	}
 	out = toolJSON(out, ok, payload)

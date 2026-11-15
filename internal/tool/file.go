@@ -23,6 +23,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/teatak/pudding-core/internal/home"
+	"github.com/teatak/pudding-core/internal/projectfs"
 	"github.com/teatak/pudding-core/internal/skill"
 )
 
@@ -126,7 +127,7 @@ func (r *BuiltinRunner) fileList(ctx context.Context, call Call) Result {
 	}
 	entries, err := os.ReadDir(resolved.target)
 	if err != nil {
-		return toolJSONError(out, "read_dir_failed", err.Error())
+		return fileIOError(out, "read_dir_failed", resolved.target, err)
 	}
 	if args.Scope == managedScopeSkill || args.Scope == managedScopePlugin || args.Scope == managedScopeTemp || args.Scope == managedScopeWidget {
 		visible := entries[:0]
@@ -233,7 +234,7 @@ func (r *BuiltinRunner) fileStat(call Call) Result {
 			out.SummaryCount = 4
 			return out
 		}
-		return toolJSONError(out, "stat_failed", err.Error())
+		return fileIOError(out, "stat_failed", resolved.target, err)
 	}
 	kind := "file"
 	switch {
@@ -319,7 +320,7 @@ func (r *BuiltinRunner) fileSearch(ctx context.Context, call Call) Result {
 		if errors.As(err, &searchErr) {
 			return toolJSONError(out, searchErr.Code, searchErr.Detail)
 		}
-		return toolJSONError(out, "search_failed", err.Error())
+		return fileIOError(out, "search_failed", resolved.target, err)
 	}
 	items := make([]map[string]any, 0, len(result.Matches))
 	for _, match := range result.Matches {
@@ -399,7 +400,7 @@ func (r *BuiltinRunner) fileSlice(call Call) Result {
 		return filePathError(out, args.Scope, err)
 	}
 	if isBinary, mt, err := probeBinaryFile(resolved.target); err != nil {
-		return toolJSONError(out, "read_failed", err.Error())
+		return fileIOError(out, "read_failed", resolved.target, err)
 	} else if isBinary {
 		if isMediaMIME(mt) {
 			return mediaRequiredForTextTool(out, mt)
@@ -454,7 +455,7 @@ func (r *BuiltinRunner) fileSlice(call Call) Result {
 		return toolJSONError(out, "invalid_origin", "origin must be start or end")
 	}
 	if err != nil {
-		return toolJSONError(out, "read_failed", err.Error())
+		return fileIOError(out, "read_failed", resolved.target, err)
 	}
 	switch order {
 	case "natural":
@@ -505,7 +506,7 @@ func (r *BuiltinRunner) fileRead(call Call) Result {
 		return filePathError(out, args.Scope, err)
 	}
 	if isBinary, mt, err := probeBinaryFile(resolved.target); err != nil {
-		return toolJSONError(out, "read_failed", err.Error())
+		return fileIOError(out, "read_failed", resolved.target, err)
 	} else if isBinary {
 		if isMediaMIME(mt) {
 			return mediaRequiredForTextTool(out, mt)
@@ -528,7 +529,7 @@ func (r *BuiltinRunner) fileRead(call Call) Result {
 	}
 	data, err := os.ReadFile(resolved.target)
 	if err != nil {
-		return toolJSONError(out, "read_failed", err.Error())
+		return fileIOError(out, "read_failed", resolved.target, err)
 	}
 	if !isToolText(data) {
 		mt := sniffBytesMIME(resolved.target, data)
@@ -602,7 +603,7 @@ func (r *BuiltinRunner) fileWrite(call Call) Result {
 		}
 		currentHash, readErr := hashFileContent(resolved.target)
 		if readErr != nil && !errors.Is(readErr, os.ErrNotExist) {
-			return toolJSONError(out, "read_failed", readErr.Error())
+			return fileIOError(out, "read_failed", resolved.target, readErr)
 		}
 		if readErr == nil && args.ExpectedHash == "" {
 			return toolJSON(out, false, resolved.payload(map[string]any{"ok": false, "reason": "file_version_required", "hint": "Read the current file, then pass its contentHash as expected_hash to replace it; use file_patch for focused edits."}))
@@ -614,23 +615,12 @@ func (r *BuiltinRunner) fileWrite(call Call) Result {
 	if err := os.MkdirAll(filepath.Dir(resolved.target), 0o700); err != nil {
 		return toolJSONError(out, "mkdir_failed", err.Error())
 	}
-	flags := os.O_WRONLY | os.O_CREATE | os.O_TRUNC
-	if resolved.project && args.ExpectedHash == "" {
-		flags = os.O_WRONLY | os.O_CREATE | os.O_EXCL
-	} else if args.ExpectedHash != "" {
-		flags = os.O_WRONLY | os.O_TRUNC
-	}
-	file, err := os.OpenFile(resolved.target, flags, 0o600)
-	if errors.Is(err, os.ErrExist) || args.ExpectedHash != "" && errors.Is(err, os.ErrNotExist) {
+	err = writeFileAtomically(resolved.target, strings.NewReader(*args.Content), args.ExpectedHash, resolved.project && args.ExpectedHash == "")
+	if errors.Is(err, errFileWriteConflict) {
 		return toolJSONError(out, "file_conflict", "file changed before writing; read it again before retrying")
 	}
 	if err != nil {
-		return toolJSONError(out, "write_failed", err.Error())
-	}
-	_, writeErr := file.WriteString(*args.Content)
-	closeErr := file.Close()
-	if err := errors.Join(writeErr, closeErr); err != nil {
-		return toolJSONError(out, "write_failed", err.Error())
+		return fileIOError(out, "write_failed", resolved.target, err)
 	}
 	out.Ok = true
 	out.Content = jsonString(resolved.payload(map[string]any{"ok": true, "scope": args.Scope, "bytes": len([]byte(*args.Content)), "contentHash": patchContentHash([]byte(*args.Content))}))
@@ -640,6 +630,9 @@ func (r *BuiltinRunner) fileWrite(call Call) Result {
 }
 
 func hashFileContent(path string) (string, error) {
+	if _, err := regularFileInfo(path); err != nil {
+		return "", err
+	}
 	file, err := os.Open(path)
 	if err != nil {
 		return "", err
@@ -679,7 +672,7 @@ func (r *BuiltinRunner) fileDelete(call Call) Result {
 	}
 	info, err := os.Stat(resolved.target)
 	if err != nil {
-		return toolJSONError(out, "stat_failed", err.Error())
+		return fileIOError(out, "stat_failed", resolved.target, err)
 	}
 	if info.IsDir() && !args.Recursive {
 		return toolJSONError(out, "recursive_required", "recursive=true is required to delete a directory")
@@ -702,9 +695,10 @@ func (r *BuiltinRunner) fileDelete(call Call) Result {
 func (r *BuiltinRunner) fileMove(call Call) Result {
 	out := Result{CallID: call.CallID, Name: call.Name}
 	var args struct {
-		Scope    string `json:"scope"`
-		FromPath string `json:"from_path"`
-		ToPath   string `json:"to_path"`
+		Scope     string `json:"scope"`
+		FromPath  string `json:"from_path"`
+		ToPath    string `json:"to_path"`
+		Overwrite bool   `json:"overwrite"`
 	}
 	if err := decodeStructToolArgs(call.Args, &args); err != nil {
 		return toolJSONError(out, "invalid_arguments", err.Error())
@@ -724,8 +718,22 @@ func (r *BuiltinRunner) fileMove(call Call) Result {
 	if err := os.MkdirAll(filepath.Dir(toResolved.target), 0o700); err != nil {
 		return toolJSONError(out, "mkdir_failed", err.Error())
 	}
-	if err := os.Rename(fromResolved.target, toResolved.target); err != nil {
-		return toolJSONError(out, "move_failed", err.Error())
+	if fromResolved.target != toResolved.target {
+		if args.Overwrite {
+			err = os.Rename(fromResolved.target, toResolved.target)
+		} else {
+			err = projectfs.RenameNoReplace(fromResolved.target, toResolved.target)
+		}
+		if errors.Is(err, projectfs.ErrConflict) {
+			return toolJSON(out, false, map[string]any{
+				"ok": false, "reason": "destination_exists", "detail": "The destination already exists; neither entry was replaced.",
+				"from": fromResolved.outputPath(), "to": toResolved.outputPath(),
+				"hint": "Choose a different destination. Set overwrite=true only when replacing this destination is intended.",
+			})
+		}
+		if err != nil {
+			return fileIOError(out, "move_failed", fromResolved.target, err)
+		}
 	}
 	out.Ok = true
 	payload := map[string]any{"ok": true, "scope": args.Scope, "from": fromResolved.outputPath(), "to": toResolved.outputPath()}
@@ -972,7 +980,7 @@ func filePathErrorWithReason(out Result, scope, fallbackReason string, err error
 	}
 	if !isProjectFileScope(scope) {
 		if errors.Is(err, os.ErrNotExist) {
-			return toolJSONError(out, "path_not_found", err.Error())
+			return toolJSON(out, false, missingPathPayload(err))
 		}
 		return toolJSONError(out, fallbackReason, err.Error())
 	}
@@ -981,6 +989,33 @@ func filePathErrorWithReason(out Result, scope, fallbackReason string, err error
 	out.SummaryKind = SummaryReturnedFields
 	out.SummaryCount = len(payload)
 	return out
+}
+
+// A missing target is an unavailable result, not evidence of a broken tool or
+// missing permission. Keep ok=false: reading/searching it did not succeed.
+func missingPathPayload(err error) map[string]any {
+	return map[string]any{
+		"ok": false, "reason": "path_not_found", "exists": false, "detail": err.Error(),
+		"hint": "The requested path does not exist. Do not repeat reads or searches, or probe existence again, for this same unchanged path. Check an existing parent directory to locate the intended file, correct the path, or report it missing. Retry after the path or filesystem has changed; additional project access is not required.",
+	}
+}
+
+func fileIOError(out Result, reason, target string, err error) Result {
+	if errors.Is(err, projectfs.ErrNotFile) {
+		return toolJSONError(out, "regular_file_required", err.Error())
+	}
+	if errors.Is(err, os.ErrNotExist) {
+		var pathErr *os.PathError
+		if errors.As(err, &pathErr) && pathErr.Path == target {
+			return toolJSON(out, false, missingPathPayload(err))
+		}
+		// Discovery also opens auxiliary files such as .gitignore. Their
+		// disappearance does not establish that the requested target is missing.
+		if _, targetErr := os.Lstat(target); errors.Is(targetErr, os.ErrNotExist) {
+			return toolJSON(out, false, missingPathPayload(err))
+		}
+	}
+	return toolJSONError(out, reason, err.Error())
 }
 
 func projectPathErrorPayload(err error) map[string]any {
@@ -994,7 +1029,7 @@ func projectPathErrorPayload(err error) map[string]any {
 	case "absolute_path_required":
 		hint = "Select one authorized project root and pass an absolute path or cwd. file_list with scope=project and path=. lists the roots."
 	case "path_not_found":
-		hint = "The selected authorized path does not exist. Check the path or use file_stat to test existence; additional project access is not required."
+		return missingPathPayload(err)
 	case "path_not_allowed":
 		hint = "A file path is required for this tool."
 	}
@@ -1325,7 +1360,6 @@ func SearchTextFiles(ctx context.Context, root string, options TextFileSearchOpt
 	if options.OutputMode != "content" && options.OutputMode != "files" {
 		return TextFileSearchResult{}, &TextFileSearchError{Code: "invalid_output_mode", Detail: "output_mode must be content or files"}
 	}
-	options.Query = strings.TrimSpace(options.Query)
 	if options.Query == "" {
 		return TextFileSearchResult{}, &TextFileSearchError{Code: "query_required", Detail: "query must be a non-empty string"}
 	}
@@ -1473,6 +1507,9 @@ func searchTextFiles(ctx context.Context, root string, options fileSearchOptions
 			return err
 		}
 		if walkErr != nil {
+			if path == root {
+				return walkErr
+			}
 			options.skipped["read_error"]++
 			return nil
 		}
@@ -1705,10 +1742,10 @@ func readLineRange(path string, start, end int) ([]fileLineRecord, error) {
 		if lineNo < start {
 			continue
 		}
-		if lineNo > end {
+		out = append(out, fileLineRecord{number: lineNo, text: scanner.Text()})
+		if lineNo == end {
 			break
 		}
-		out = append(out, fileLineRecord{number: lineNo, text: scanner.Text()})
 	}
 	if err := scanner.Err(); err != nil {
 		return nil, err
@@ -1729,13 +1766,15 @@ func readLineRangeFromEnd(path string, lines, skip int) ([]fileLineRecord, error
 	scanner := bufio.NewScanner(file)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	window := make([]fileLineRecord, 0, windowSize)
-	lineNo := 0
+	lineNo, oldest := 0, 0
 	for scanner.Scan() {
 		lineNo++
-		window = append(window, fileLineRecord{number: lineNo, text: scanner.Text()})
-		if len(window) > windowSize {
-			copy(window, window[1:])
-			window = window[:len(window)-1]
+		record := fileLineRecord{number: lineNo, text: scanner.Text()}
+		if len(window) < windowSize {
+			window = append(window, record)
+		} else {
+			window[oldest] = record
+			oldest = (oldest + 1) % windowSize
 		}
 	}
 	if err := scanner.Err(); err != nil {
@@ -1749,7 +1788,11 @@ func readLineRangeFromEnd(path string, lines, skip int) ([]fileLineRecord, error
 	if start < 0 {
 		start = 0
 	}
-	return window[start:end], nil
+	out := make([]fileLineRecord, end-start)
+	for i := range out {
+		out[i] = window[(oldest+start+i)%len(window)]
+	}
+	return out, nil
 }
 
 func renderLineSlice(lines []fileLineRecord, maxBytes int) (string, string, int) {
@@ -1781,6 +1824,9 @@ func reverseLineRecords(lines []fileLineRecord) {
 }
 
 func probeBinaryFile(path string) (bool, string, error) {
+	if _, err := regularFileInfo(path); err != nil {
+		return false, "", err
+	}
 	if isKnownBinaryExt(path) {
 		return true, sniffBytesMIME(path, nil), nil
 	}

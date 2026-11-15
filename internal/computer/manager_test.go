@@ -732,3 +732,46 @@ func TestKeyboardRejectsMixedTargetsBeforeDispatch(t *testing.T) {
 		}
 	}
 }
+
+func TestKeyboardRejectsUnsupportedKeysBeforeExecutingBatchPrefix(t *testing.T) {
+	for _, key := range []string{"f13", "return", "command+v", "🙂", "aa", " ", "!"} {
+		t.Run(key, func(t *testing.T) {
+			// Match the Helper's rejection of an unsupported physical key. A
+			// static argument error must be found before the earlier click runs.
+			service := &fakeService{actErrAt: 1, actErr: invalid("unsupported physical key")}
+			x, y := 0.5, 0.5
+			result, err := NewManager(service).Act(context.Background(), "session", "com.example.App", 42, []ActionInput{
+				{Type: ActionClick, X: &x, Y: &y},
+				{Type: ActionPressKey, Key: key},
+			})
+			var operationErr *OperationError
+			if !errors.As(err, &operationErr) || operationErr.Code != "computer_invalid_request" || operationErr.Outcome != "not_started" {
+				t.Errorf("expected pre-dispatch rejection: result=%+v err=%v", result, err)
+			}
+			if service.pointers != 0 || service.actions != 0 || service.observes != 0 || service.uses != 0 {
+				t.Fatalf("invalid batch reached native service: clicks=%d actions=%d observes=%d uses=%d", service.pointers, service.actions, service.observes, service.uses)
+			}
+		})
+	}
+}
+
+func TestKeyboardNormalizesAllSupportedPhysicalKeys(t *testing.T) {
+	keys := strings.Fields("enter tab space backspace escape home pageup delete end pagedown left right down up f1 f2 f3 f4 f5 f6 f7 f8 f9 f10 f11 f12")
+	for _, key := range "abcdefghijklmnopqrstuvwxyz0123456789`-=[]\\;',./" {
+		keys = append(keys, string(key))
+	}
+	for _, key := range keys {
+		t.Run(key, func(t *testing.T) {
+			service := &fakeService{}
+			result, err := NewManager(service).Act(context.Background(), "session", "com.example.App", 42, []ActionInput{
+				{Type: ActionPressKey, Key: strings.ToUpper(key), Modifiers: []string{"command", "shift"}},
+			})
+			if err != nil || result.Failure != nil || result.CompletedCount != 1 || service.actions != 1 {
+				t.Fatalf("supported key failed: result=%+v err=%v actions=%d", result, err, service.actions)
+			}
+			if result.Actions[0].Key != key || strings.Join(result.Actions[0].Modifiers, ",") != "command,shift" {
+				t.Fatalf("key or modifiers changed: %+v", result.Actions[0])
+			}
+		})
+	}
+}

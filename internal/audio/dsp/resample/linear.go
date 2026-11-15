@@ -21,9 +21,6 @@ func NewLinear(srcRate, dstRate int) *Linear {
 	}
 }
 
-func (l *Linear) SrcRate() int { return l.srcRate }
-func (l *Linear) DstRate() int { return l.dstRate }
-
 func (l *Linear) Reset() {
 	l.pos = 0
 	l.last = 0

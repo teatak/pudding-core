@@ -1628,7 +1628,7 @@ func (e *Engine) streamTurn(ctx context.Context, sessionID, turnID string, resol
 			continue
 		}
 		if repeated {
-			return failed("repeated_tool_failure: The same tool calls failed four times with unchanged inputs and results. Inspect the saved errors and change the approach before retrying.")
+			return failed("repeated_tool_failure: The tool calls failed four times without progress. Inspect the saved results and change the approach before retrying.")
 		}
 		if changed {
 			messages := baseReq.Messages

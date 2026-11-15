@@ -31,6 +31,42 @@ func TestDeclaredToolTextIsOptInAndFailureStatusSurvives(t *testing.T) {
 	}
 }
 
+func TestCommandProcessOutputTextKeepsStreamsOffsetsAndReadback(t *testing.T) {
+	for _, name := range []string{CommandRun, CommandSession} {
+		t.Run(name, func(t *testing.T) {
+			payload := map[string]any{
+				"ok": true, "processID": "process-1", "status": "exited", "exitCode": 7,
+				"nextOffset": 42, "hasMore": false,
+				"output": []BackgroundProcessOutputChunk{
+					{Offset: 0, Stream: "stdout", Content: "line one\n第二行\n"},
+					{Offset: 23, Stream: "stderr", Content: "test failed\nreason\n"},
+				},
+			}
+			raw := jsonString(payload)
+			spec := builtinModelOutput(name)
+			out := ModelResultContent(name, true, raw, "turn", "call", true, OutputPresentation{Enabled: true, Spec: spec})
+			for _, want := range []string{`"processID":"process-1"`, `"exitCode":7`, `"offset":23`, `"stream":"stderr"`, `"nextOffset":42`, `"hasMore":false`, `"/output/0/content"`, `"/output/1/content"`, "line one\n第二行\n", "test failed\nreason\n"} {
+				if !strings.Contains(out, want) {
+					t.Fatalf("missing process output or metadata %q: %s", want, out)
+				}
+			}
+			if got := ModelResultContent(name, true, raw, "turn", "call", true, OutputPresentation{Enabled: false, Spec: spec}); got != raw {
+				t.Fatal("disabled text expansion changed canonical JSON")
+			}
+			payload["output"] = []BackgroundProcessOutputChunk{{Stream: "stdout", Content: strings.Repeat("long log line\n", modelResultMaxChars)}}
+			out = ModelResultContent(name, true, jsonString(payload), "turn", "call", true, OutputPresentation{Enabled: true, Spec: spec})
+			if utf8.RuneCountInString(out) > modelResultMaxChars || !strings.Contains(out, `"result_ref"`) || !strings.Contains(out, `"exitCode":7`) || !strings.Contains(out, `"processID":"process-1"`) || !strings.Contains(out, `"nextOffset":42`) {
+				t.Fatal("large process output lost budget, status, cursor or readback")
+			}
+			for _, empty := range []string{`{"ok":true,"output":[]}`, `{"ok":true,"processes":[]}`, `{"ok":false,"reason":"process_not_found"}`} {
+				if got := ModelResultContent(name, true, empty, "turn", "call", true, OutputPresentation{Enabled: true, Spec: spec}); got != empty {
+					t.Fatalf("optional log fields broke a non-log response: %s", got)
+				}
+			}
+		})
+	}
+}
+
 func TestSearchPresentationPreservesCanonicalPathsAndNumberedSource(t *testing.T) {
 	raw := `{"matches":[{"path":"a.go","line":8,"lineStart":7,"lineEnd":9,"text":"target","excerpt":"before\ntarget\nafter"}]}`
 	out := ModelResultContent(FileSearch, true, raw, "t", "c", true, OutputPresentation{Enabled: true, Spec: builtinModelOutput(FileSearch)})

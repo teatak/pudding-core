@@ -121,6 +121,33 @@ type gitWritePayload struct {
 	ConflictedCount int       `json:"conflictedCount"`
 }
 
+func TestGitReadToolsRejectInvalidArgumentsBeforeDiscovery(t *testing.T) {
+	runner := NewBuiltinRunner()
+	defer runner.Close()
+	// No repository is provided: malformed input must be diagnosed first.
+	for _, tool := range []string{GitStatus, GitLog} {
+		for _, tc := range []struct{ input, kind, field string }{
+			{`null`, "expected_object", ""},
+			{`{}`, "missing_field", "scope"},
+			{`{"scope":null}`, "invalid_type", "scope"},
+			{`{"scope":"project","cwd":null}`, "invalid_type", "cwd"},
+			{`{"scope":"project","cwd":5}`, "invalid_type", "cwd"},
+			{`{"scope":"project","cwwd":"sub"}`, "unknown_field", "cwwd"},
+			{`{"scope":"project","max_count":1}`, "unknown_field", "max_count"},
+			{`{"scope":"project"} {}`, "invalid_json", ""},
+		} {
+			t.Run(tool+"/"+tc.input, func(t *testing.T) {
+				result := runner.Call(context.Background(), Call{Name: tool, Args: json.RawMessage(tc.input)})
+				fields := decodeToolResult(t, result)
+				field, _ := fields["field"].(string)
+				if result.Ok || fields["reason"] != "invalid_arguments" || fields["errorKind"] != tc.kind || field != tc.field || fields["receivedBytes"] != float64(len(tc.input)) {
+					t.Fatalf("invalid input not diagnosed: %s", result.Content)
+				}
+			})
+		}
+	}
+}
+
 func TestGitReadToolsReturnStructuredRepositoryData(t *testing.T) {
 	root := newGitTestRepository(t, true)
 	if err := os.WriteFile(filepath.Join(root, "tracked.txt"), []byte("one\ntwo\n"), 0o600); err != nil {
@@ -278,6 +305,9 @@ func TestGitStageDeletionAndUnstageInUnbornRepository(t *testing.T) {
 	})); !result.Ok {
 		t.Fatalf("stage in unborn repository failed: %+v", result)
 	}
+	if err := os.WriteFile(newFile, []byte("edited after staging\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	unstaged := decodeGitPayload[gitWritePayload](t, unbornRunner.Call(context.Background(), newGitToolCall("session_a", "unstage_unborn", unborn, GitUnstage, map[string]any{
 		"scope": "project",
 		"paths": []string{"new.txt"},
@@ -285,7 +315,7 @@ func TestGitStageDeletionAndUnstageInUnbornRepository(t *testing.T) {
 	if !unstaged.OK || unstaged.StagedCount != 0 || unstaged.UntrackedCount != 1 {
 		t.Fatalf("unstage in unborn repository failed: %+v", unstaged)
 	}
-	if got := readPatchTestFile(t, newFile); got != "new\n" {
+	if got := readPatchTestFile(t, newFile); got != "edited after staging\n" {
 		t.Fatalf("unborn unstage changed worktree content: %q", got)
 	}
 }

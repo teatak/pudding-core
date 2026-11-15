@@ -287,6 +287,25 @@ func TestWidgetQueryUsesAuthorizedPluginConnection(t *testing.T) {
 		t.Fatal(err)
 	}
 	hash := w.HeadRevision
+	for _, request := range []struct {
+		method, path string
+		input        map[string]any
+	}{
+		{"PUT", "/bindings", map[string]any{"expectedRevision": w.Revision, "bindings": map[string]string{"primary": "account-1"}}},
+		{"POST", "/queries/items", map[string]any{"bindingVersion": w.BindingVersion, "params": map[string]any{"status": "open"}}},
+		{"POST", "/links", map[string]any{"expectedRevision": w.Revision, "confirm": true,
+			"left":  widgetEntityInput{Source: "primary", EntityType: "item", EntityID: "one"},
+			"right": widgetEntityInput{Source: "primary", EntityType: "item", EntityID: "two"}}},
+	} {
+		request.input["revisionHash"] = strings.Repeat("f", 64)
+		call(request.method, base+request.path, request.input, 404)
+		request.input["revisionHash"] = hash
+		call(request.method, "/studio/items/missing"+request.path, request.input, 404)
+	}
+	unchanged, err := st.GetStudioItem(context.Background(), w.ID)
+	if err != nil || unchanged.Revision != w.Revision || calls != 0 {
+		t.Fatalf("rejected widget references changed state or reached upstream: %+v, %v, calls=%d", unchanged, err, calls)
+	}
 	call("POST", base+"/activate", map[string]any{"expectedRevision": w.Revision, "revisionHash": hash}, 409)
 	query := map[string]any{"revisionHash": hash, "bindingVersion": w.BindingVersion, "params": map[string]any{"status": "open"}}
 	body := call("POST", base+"/queries/items", query, 200)

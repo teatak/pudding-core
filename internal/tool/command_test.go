@@ -236,6 +236,15 @@ func TestCommandRunExecutesGoTest(t *testing.T) {
 			t.Fatalf("unmatched real Go test: %s", result.Content)
 		}
 	})
+	for _, command := range []string{"go test -json=true ./... 1>&2", "go test -json -json=false -v ./..."} {
+		t.Run(command, func(t *testing.T) {
+			result := commandTestCall(context.Background(), root, map[string]any{"scope": "project", "command": command, "timeout_ms": 30000})
+			fields := decodeToolResult(t, result)
+			if !result.Ok || fields["exitCode"] != float64(0) || fields["verificationStatus"] != "passed" || fields["testExecutionStatus"] != "ran" {
+				t.Fatalf("real Go output mode lost: %s", result.Content)
+			}
+		})
+	}
 	t.Run("directory prefix preserves test evidence and source locations", func(t *testing.T) {
 		writeCommandTestFile(t, root, "nested/broken_test.go", "package nested\nimport \"testing\"\nfunc TestFails(t *testing.T) { t.Fatal(\"observed failure\") }\n")
 		result := commandTestCall(context.Background(), root, map[string]any{"scope": "project", "command": "cd nested && go test -json ./...", "timeout_ms": 30000})
@@ -248,6 +257,31 @@ func TestCommandRunExecutesGoTest(t *testing.T) {
 			t.Fatalf("chained Go test lost failure location: %s", result.Content)
 		}
 	})
+}
+
+func TestCommandRunExecutesNodeTestWithPreloadAndStderr(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("PowerShell does not emit POSIX verification metadata")
+	}
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("requires Node with --import support (18.19+)")
+	}
+	root := t.TempDir()
+	writeCommandTestFile(t, root, "preload.mjs", "globalThis.preloaded = true;\n")
+	writeCommandTestFile(t, root, "check.test.mjs", "import test from 'node:test';\nimport assert from 'node:assert/strict';\ntest('preload', () => assert.equal(globalThis.preloaded, true));\ntest('known failure', () => assert.fail('observed assertion'));\n")
+	result := commandTestCall(context.Background(), root, map[string]any{
+		"scope": "project", "timeout_ms": 30000,
+		"command": quoteShellArg(node) + " --import ./preload.mjs --test-reporter tap --test-reporter-destination stderr --test check.test.mjs",
+	})
+	fields := decodeToolResult(t, result)
+	if !result.Ok || fields["exitCode"] != float64(1) || fields["verificationStatus"] != "failed" || fields["testExecutionStatus"] != "ran" || fields["testFailureCount"] != float64(1) || !strings.Contains(fields["stderr"].(string), "TAP version 13") {
+		t.Fatalf("real Node stderr report lost: %s", result.Content)
+	}
+	failure := fields["testFailures"].([]any)[0].(map[string]any)
+	if failure["name"] != "known failure" || failure["relativePath"] != "check.test.mjs" {
+		t.Fatalf("Node assertion location lost: %+v", failure)
+	}
 }
 
 func TestCommandRunParsesFailedGoDiagnostics(t *testing.T) {

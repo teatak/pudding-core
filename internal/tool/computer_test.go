@@ -679,6 +679,9 @@ func TestComputerSelectionAndKeyboardApprovalDetails(t *testing.T) {
 	if err != nil || details["key"] != "f" {
 		t.Fatalf("details=%+v err=%v", details, err)
 	}
+	if _, err := computerActApprovalDetails(Call{Args: json.RawMessage(`{"appID":"com.example.App","windowID":42,"actions":[{"type":"click","x":0.5,"y":0.5},{"type":"press_key","key":"command+v"}]}`)}); err == nil {
+		t.Fatal("unsupported key in a batch reached approval")
+	}
 	if _, err := decodeComputerObserveArgs([]byte(`{"appID":"com.example.App","windowID":42,"includeAccessibility":false}`)); err == nil {
 		t.Fatal("accepted no observation channels")
 	}
