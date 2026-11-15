@@ -151,12 +151,111 @@ func TestElectronBridgeRoutesApplicationLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	launched, err := service.UseApp(context.Background(), "session_a", "com.example.App", true, AppSelection{})
-	if err != nil || launched.PID != 42 || !launched.NewlyLaunched || len(launched.Windows) != 1 || launched.Windows[0].WindowID != 7 {
+	if err != nil || launched.PID != 42 || !launched.NewlyLaunched || launched.ForegroundError != nil || len(launched.Windows) != 1 || launched.Windows[0].WindowID != 7 {
 		t.Fatalf("unexpected launch: %#v err=%v", launched, err)
 	}
 	quit, err := service.QuitApp(context.Background(), "session_a", "com.example.App", 42)
 	if err != nil || !quit.Closed {
 		t.Fatalf("unexpected quit: %#v err=%v", quit, err)
+	}
+}
+
+func TestElectronBridgePreservesLaunchBeforeForegroundFailure(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		raw     map[string]any
+		code    string
+		message string
+		outcome string
+	}{
+		{name: "activation failed", raw: map[string]any{"code": "computer_activation_failed", "message": "could not activate", "outcome": "unknown", "retryable": false}, code: "computer_activation_failed", message: "could not activate", outcome: "unknown"},
+		{name: "empty object", raw: map[string]any{}},
+		{name: "invalid outcome", raw: map[string]any{"code": "computer_activation_failed", "message": "could not activate", "outcome": "invalid"}, code: "computer_activation_failed", message: "could not activate", outcome: "invalid"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				writeJSON(w, map[string]any{
+					"bundleID": "com.example.App", "name": "Example", "pid": 42, "newlyLaunched": true,
+					"windowStatus": WindowStatusNone, "windows": []any{}, "foregroundError": tc.raw,
+				})
+			}))
+			defer server.Close()
+			service, err := NewElectronBridgeService(ElectronBridgeConfig{URL: server.URL, Token: "bridge-token"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			launched, err := service.UseApp(context.Background(), "session_a", "com.example.App", true, AppSelection{})
+			if err != nil || launched.AppID != "com.example.App" || launched.PID != 42 || !launched.NewlyLaunched || launched.WindowStatus != WindowStatusNone || launched.WindowError != nil {
+				t.Fatalf("foreground failure lost launch envelope: result=%+v err=%v", launched, err)
+			}
+			failure := launched.ForegroundError
+			if failure == nil || failure.Code != tc.code || failure.Message != tc.message || failure.Outcome != tc.outcome || failure.Retryable {
+				t.Fatalf("foreground failure was discarded or normalized before ownership: %+v", failure)
+			}
+		})
+	}
+}
+
+func TestElectronBridgeMalformedForegroundFailureRetainsOwnership(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		raw  any
+	}{
+		{name: "string", raw: "bad"},
+		{name: "wrong field type", raw: map[string]any{"code": "computer_activation_failed", "message": "failed", "outcome": "unknown", "retryable": "false"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var quits int
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/computer/apps/use":
+					writeJSON(w, map[string]any{"bundleID": "com.example.App", "name": "Example", "pid": 42, "newlyLaunched": true, "windowStatus": WindowStatusNone, "windows": []any{}, "foregroundError": tc.raw})
+				case "/computer/apps/quit":
+					var request struct {
+						PID int32 `json:"pid"`
+					}
+					if err := json.NewDecoder(r.Body).Decode(&request); err != nil || request.PID != 42 {
+						t.Errorf("unexpected quit request: %+v, %v", request, err)
+					}
+					quits++
+					writeJSON(w, map[string]any{"bundleID": "com.example.App", "pid": 42, "closed": true})
+				default:
+					t.Errorf("unexpected path: %s", r.URL.Path)
+				}
+			}))
+			defer server.Close()
+			service, err := NewElectronBridgeService(ElectronBridgeConfig{URL: server.URL, Token: "bridge-token"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			manager := NewManager(service)
+			_, err = manager.UseApp(context.Background(), "session_a", "com.example.App", true, AppSelection{})
+			assertOperationCode(t, err, "computer_invalid_response")
+			if failure := ErrorFailure(err); failure.Outcome != "unknown" || failure.Retryable {
+				t.Fatalf("invalid failure permitted replay: %+v", failure)
+			}
+			if err := manager.ReleaseSession(context.Background(), "session_a"); err != nil {
+				t.Fatal(err)
+			}
+			if quits != 1 {
+				t.Fatalf("quit requests = %d, want 1", quits)
+			}
+		})
+	}
+}
+
+func TestElectronBridgeNullForegroundFailure(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, map[string]any{"bundleID": "com.example.App", "name": "Example", "pid": 42, "newlyLaunched": true, "windowStatus": WindowStatusNone, "windows": []any{}, "foregroundError": nil})
+	}))
+	defer server.Close()
+	service, err := NewElectronBridgeService(ElectronBridgeConfig{URL: server.URL, Token: "bridge-token"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := service.UseApp(context.Background(), "session_a", "com.example.App", true, AppSelection{})
+	if err != nil || result.ForegroundError != nil || !result.NewlyLaunched || result.PID != 42 {
+		t.Fatalf("unexpected null foreground failure: %+v, %v", result, err)
 	}
 }
 

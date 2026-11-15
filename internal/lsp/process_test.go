@@ -514,10 +514,18 @@ func (s *fakeLSP) handleClientMessage(message wireMessage) (bool, error) {
 		if err := s.respond(message.ID, true); err != nil {
 			return false, err
 		}
-		for { time.Sleep(time.Hour) }
+		for {
+			time.Sleep(time.Hour)
+		}
 	case "textDocument/definition":
-		var params struct { TextDocument struct { URI string `json:"uri"` } `json:"textDocument"` }
-		if err := json.Unmarshal(message.Params, &params); err != nil { return false, err }
+		var params struct {
+			TextDocument struct {
+				URI string `json:"uri"`
+			} `json:"textDocument"`
+		}
+		if err := json.Unmarshal(message.Params, &params); err != nil {
+			return false, err
+		}
 		locations := []any{}
 		if _, open := s.documents[params.TextDocument.URI]; open {
 			locations = append(locations, map[string]any{"uri": params.TextDocument.URI, "range": Range{}})

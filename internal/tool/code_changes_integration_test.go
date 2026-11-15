@@ -33,7 +33,9 @@ type unopenedCodeOperation struct {
 
 func (s *unopenedCodeLanguageService) BeginOperation(ctx context.Context, spec lsp.ServerSpec) (lsp.Operation, error) {
 	op, err := s.Manager.BeginOperation(ctx, spec)
-	if err != nil { return nil, err }
+	if err != nil {
+		return nil, err
+	}
 	return &unopenedCodeOperation{Operation: op, opens: &s.opens}, nil
 }
 

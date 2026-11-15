@@ -44,18 +44,18 @@ type Process struct {
 	documents        map[string]documentState
 	documentUse      uint64
 
-	writeMu chan struct{}
+	writeMu     chan struct{}
 	operationMu chan struct{}
-	leases atomic.Int64
-	killOnce sync.Once
-	mu      sync.Mutex
-	pending map[string]chan wireMessage
-	err     error
-	done    chan struct{}
-	nextID  atomic.Int64
-	endOnce sync.Once
-	closeMu sync.Mutex
-	closing bool
+	leases      atomic.Int64
+	killOnce    sync.Once
+	mu          sync.Mutex
+	pending     map[string]chan wireMessage
+	err         error
+	done        chan struct{}
+	nextID      atomic.Int64
+	endOnce     sync.Once
+	closeMu     sync.Mutex
+	closing     bool
 }
 
 func startProcess(ctx context.Context, spec ServerSpec, opts processOptions) (*Process, error) {
@@ -446,7 +446,9 @@ func (p *Process) processError() error {
 
 func (p *Process) forceTerminate() {
 	p.killOnce.Do(func() {
-		go func() { _ = terminateProcess(p.cmd) }()
+		// Do not defer numeric PID/process-group termination to another
+		// goroutine: the waiter may reap the process before that goroutine runs.
+		_ = terminateProcess(p.cmd)
 	})
 }
 

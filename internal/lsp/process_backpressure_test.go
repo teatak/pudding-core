@@ -20,7 +20,9 @@ func awaitWriter(t *testing.T, process *Process) {
 	t.Helper()
 	deadline := time.Now().Add(time.Second)
 	for len(process.writeMu) == 0 {
-		if time.Now().After(deadline) { t.Fatal("writer did not start") }
+		if time.Now().After(deadline) {
+			t.Fatal("writer did not start")
+		}
 		time.Sleep(time.Millisecond)
 	}
 }
@@ -28,19 +30,23 @@ func awaitWriter(t *testing.T, process *Process) {
 func TestProcessBlockedPipeRespectsRequestAndDocumentDeadlines(t *testing.T) {
 	for _, document := range []bool{false, true} {
 		name := "request"
-		if document { name = "document" }
+		if document {
+			name = "document"
+		}
 		t.Run(name, func(t *testing.T) {
 			manager := newTestManager()
 			defer closeTestManager(t, manager)
 			spec := testServerSpec(t, "blocked-"+name)
 			process, err := manager.Acquire(context.Background(), spec)
-			if err != nil { t.Fatal(err) }
+			if err != nil {
+				t.Fatal(err)
+			}
 			stopHelperReading(t, process)
 			ctx, cancel := context.WithTimeout(context.Background(), 80*time.Millisecond)
 			defer cancel()
 			start := time.Now()
 			if document {
-				_, err = manager.SyncDocument(ctx, spec, Document{URI: process.rootURI+"/large.ts", LanguageID: "typescript", Text: strings.Repeat("x", 2<<20)})
+				_, err = manager.SyncDocument(ctx, spec, Document{URI: process.rootURI + "/large.ts", LanguageID: "typescript", Text: strings.Repeat("x", 2<<20)})
 			} else {
 				err = process.Request(ctx, "test/large", map[string]string{"text": strings.Repeat("x", 2<<20)}, nil)
 			}
@@ -58,7 +64,9 @@ func TestProcessCancellationAndShutdownBypassBlockedWriter(t *testing.T) {
 	manager := newTestManager()
 	defer closeTestManager(t, manager)
 	process, err := manager.Acquire(context.Background(), testServerSpec(t, "cancel-backpressure"))
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	waitCtx, cancelWait := context.WithCancel(context.Background())
 	defer cancelWait()
 	waiting := make(chan error, 1)
@@ -84,7 +92,9 @@ func TestProcessCancellationAndShutdownBypassBlockedWriter(t *testing.T) {
 	cancelWait()
 	select {
 	case err := <-waiting:
-		if !errors.Is(err, context.Canceled) { t.Fatalf("cancel result = %v", err) }
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("cancel result = %v", err)
+		}
 	case <-time.After(time.Second):
 		t.Fatal("cancel notification blocked the request's return")
 	}
@@ -102,7 +112,9 @@ func TestProcessCancellationAndShutdownBypassBlockedWriter(t *testing.T) {
 	}
 	select {
 	case err := <-written:
-		if err == nil { t.Fatal("interrupted write reported success") }
+		if err == nil {
+			t.Fatal("interrupted write reported success")
+		}
 	case <-time.After(time.Second):
 		t.Fatal("closing stdin did not release the writer")
 	}

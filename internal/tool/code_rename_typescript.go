@@ -24,7 +24,9 @@ func (r *BuiltinRunner) validateTypeScriptRename(ctx context.Context, target res
 				continue
 			}
 			old, err := codeTextForLSPRange(text, item.Range, encoding)
-			if err != nil { return err }
+			if err != nil {
+				return err
+			}
 			if strings.HasPrefix(old, "#") {
 				if strings.HasPrefix(name, "#") && typeScriptIdentifierName(name[1:]) && item.NewText == name {
 					continue

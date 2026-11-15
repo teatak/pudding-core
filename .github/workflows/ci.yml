@@ -14,8 +14,6 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
-      - name: Report formatting for Code fixes
-        run: gofmt -d internal/lsp internal/tool
       - run: brew install portaudio cmake pkgconf
       - name: Prepare pinned Abseil for the arm64 audio bridge
         run: |

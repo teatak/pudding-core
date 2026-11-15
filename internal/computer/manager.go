@@ -125,19 +125,31 @@ func (m *Manager) UseApp(ctx context.Context, sessionID, appID string, foregroun
 		return UseResult{}, failure
 	}
 	defer m.mu.Unlock()
-	if !native.NewlyLaunched {
+	result := UseResult{AppID: native.AppID, Name: native.Name, PID: native.PID, WindowStatus: native.WindowStatus, WindowError: native.WindowError, Windows: native.Windows}
+	if native.NewlyLaunched {
+		launchID := candidateLaunchID
+		lease.owned[launchID] = launchRecord{launchID: launchID, appID: native.AppID, name: native.Name, pid: native.PID}
+		result.LaunchID = &launchID
+	} else {
 		for _, record := range lease.owned {
 			if record.appID == native.AppID && record.pid == native.PID {
 				existingLaunchID := record.launchID
-				return UseResult{LaunchID: &existingLaunchID, AppID: record.appID, Name: record.name, PID: record.pid, WindowStatus: native.WindowStatus, WindowError: native.WindowError, Windows: native.Windows}, nil
+				result.LaunchID = &existingLaunchID
+				result.Name = record.name
+				break
 			}
 		}
-		return UseResult{AppID: native.AppID, Name: native.Name, PID: native.PID, WindowStatus: native.WindowStatus, WindowError: native.WindowError, Windows: native.Windows}, nil
 	}
-	launchID := candidateLaunchID
-	record := launchRecord{launchID: launchID, appID: native.AppID, name: native.Name, pid: native.PID}
-	lease.owned[launchID] = record
-	return UseResult{LaunchID: &launchID, AppID: native.AppID, Name: native.Name, PID: native.PID, WindowStatus: native.WindowStatus, WindowError: native.WindowError, Windows: native.Windows}, nil
+	// Foreground activation can fail after launch. Keep the validated process
+	// owned even when this optional error is malformed, so release can clean it
+	// up and another app entry can recover the original launch ID.
+	if failure := native.ForegroundError; failure != nil {
+		if !foreground || !strings.HasPrefix(failure.Code, "computer_") || len(failure.Code) <= len("computer_") || strings.TrimSpace(failure.Code) != failure.Code || strings.TrimSpace(failure.Message) == "" || failure.Outcome != "unknown" || failure.Retryable {
+			return UseResult{}, &OperationError{Code: "computer_invalid_response", Message: "Computer Use app entry returned an invalid foreground error", Outcome: "unknown"}
+		}
+		return UseResult{}, &OperationError{Code: failure.Code, Message: failure.Message, Permission: failure.Permission, Permissions: failure.Permissions, Outcome: "unknown"}
+	}
+	return result, nil
 }
 
 func (m *Manager) QuitApp(ctx context.Context, sessionID, launchID string) (QuitResult, error) {
