@@ -6,7 +6,6 @@ import (
 	"errors"
 	"sort"
 	"strings"
-	"time"
 	"unicode/utf8"
 )
 
@@ -16,7 +15,7 @@ type documentState struct {
 	hash       [sha256.Size]byte
 	languageID string
 	version    int
-	lastUsed   time.Time
+	lastUsed   uint64
 }
 
 func (p *Process) SyncDocument(document Document) (DocumentState, error) {
@@ -96,7 +95,10 @@ func (p *Process) syncDocumentLocked(document Document, touch bool) (DocumentSta
 	current, exists := p.documents[document.URI]
 	lastUsed := current.lastUsed
 	if touch || !exists {
-		lastUsed = time.Now()
+		// Clock readings can tie, especially on Windows. A sequence under
+		// documentsMu preserves actual access order without map-order ties.
+		p.documentUse++
+		lastUsed = p.documentUse
 	}
 	if exists && current.hash == hash && current.languageID == document.LanguageID {
 		current.lastUsed = lastUsed
@@ -117,9 +119,9 @@ func (p *Process) syncDocumentLocked(document Document, touch bool) (DocumentSta
 	}
 	if !exists && len(p.documents) >= maxOpenDocuments {
 		oldestURI := ""
-		var oldest time.Time
+		var oldest uint64
 		for uri, state := range p.documents {
-			if oldestURI == "" || state.lastUsed.Before(oldest) {
+			if oldestURI == "" || state.lastUsed < oldest {
 				oldestURI = uri
 				oldest = state.lastUsed
 			}

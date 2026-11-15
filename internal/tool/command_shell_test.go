@@ -1,6 +1,9 @@
 package tool
 
 import (
+	"encoding/json"
+	"os"
+	"os/exec"
 	"reflect"
 	"runtime"
 	"testing"
@@ -145,6 +148,64 @@ func TestCommandVerificationInvocationRecognizesLiteralDirectoryPrefix(t *testin
 	} {
 		if argv, _ := commandVerificationInvocation(command); argv != nil {
 			t.Fatalf("ambiguous compound command classified: %q => %v", command, argv)
+		}
+	}
+}
+
+func TestPowerShellDiagnosticArgvAcceptsOnlyLiteralInvocations(t *testing.T) {
+	for _, tc := range []struct {
+		command string
+		argv    []string
+	}{
+		{`go test -json ./...`, []string{"go", "test", "-json", "./..."}},
+		{`go.exe test -json=true ./...`, []string{"go.exe", "test", "-json=true", "./..."}},
+		{`& 'C:\Program Files\Go\bin\go.exe' test -json ./...`, []string{"go.exe", "test", "-json", "./..."}},
+		{`& "C:\Program Files\nodejs\node.exe" --test --test-reporter=tap`, []string{"node.exe", "--test", "--test-reporter=tap"}},
+		{`ruff check 'one''two.py' '$literal.py' "two words.py"`, []string{"ruff", "check", "one'two.py", "$literal.py", "two words.py"}},
+		{`go test -run '' ./...`, []string{"go", "test", "-run", "", "./..."}},
+	} {
+		if got := powerShellDiagnosticArgv(tc.command); !reflect.DeepEqual(got, tc.argv) {
+			t.Errorf("%q: argv=%q, want %q", tc.command, got, tc.argv)
+		}
+	}
+	for _, command := range []string{
+		``, `&`, `'go' test ./...`, `& $exe --test`, `$exe --test`,
+		`go test $env:TARGET`, `go test "$env:TARGET"`, `go test $(Get-Target)`,
+		`go test @targets`, `go test @(1, 2)`, `& { go test }`,
+		`go test | Tee-Object log`, `go test; exit 0`, `go test && echo ok`, `go test || echo ok`,
+		`go test > test.log`, `go test 2>&1`, `go test &`, `go test # comment`,
+		`go --% test -json`, `go test --flag="partial quote"`, `go test "unterminated`,
+		"go test `./...", "go test\nnode --test", `go test ‘smart quotes’`, `go test 'smart’quote'`,
+	} {
+		if got := powerShellDiagnosticArgv(command); got != nil {
+			t.Errorf("unsupported PowerShell must not supply diagnostic argv: %q => %q", command, got)
+		}
+	}
+}
+
+func TestPowerShellDiagnosticArgvMatchesNativeArguments(t *testing.T) {
+	executable := testPowerShell(t)
+	helper, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, suffix := range []string{
+		`test -json=true ./... --test-reporter=tap`,
+		`'C:\path with space\' 'one''two' '$literal' "two words" '' '{"name":"a b"}'`,
+	} {
+		command := "& " + psQuote(helper) + " '-test.run=^TestPowerShellArgvHelper$' '--' '--ps-argv' " + suffix
+		argv := powerShellDiagnosticArgv(command)
+		if len(argv) < 4 {
+			t.Fatalf("literal helper invocation was not recognized: %q", command)
+		}
+		cmd := exec.Command(executable, powerShellArgs(powerShellScript(command))...)
+		output, err := cmd.Output()
+		if err != nil {
+			t.Fatal(err)
+		}
+		var actual []string
+		if err := json.Unmarshal(output, &actual); err != nil || !reflect.DeepEqual(actual, argv[4:]) {
+			t.Fatalf("PowerShell argv=%s, analysis=%q, err=%v", output, argv[4:], err)
 		}
 	}
 }

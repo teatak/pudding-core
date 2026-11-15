@@ -224,6 +224,9 @@ func TestCommandRunExecutesGoTest(t *testing.T) {
 		if payload.VerificationKind != "" || payload.VerificationStatus != "" || payload.DiagnosticCount != 0 {
 			t.Fatalf("PowerShell used POSIX verification analysis: %+v", payload)
 		}
+		if fields := decodeToolResult(t, res); fields["testExecutionStatus"] != "ran" || fields["testFailureCount"] != float64(0) {
+			t.Fatalf("PowerShell lost native Go test evidence: %s", res.Content)
+		}
 		return
 	}
 	if payload.VerificationKind != "test" || payload.VerificationStatus != "passed" || payload.DiagnosticCount != 0 {
@@ -260,9 +263,6 @@ func TestCommandRunExecutesGoTest(t *testing.T) {
 }
 
 func TestCommandRunExecutesNodeTestWithPreloadAndStderr(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("PowerShell does not emit POSIX verification metadata")
-	}
 	node, err := exec.LookPath("node")
 	if err != nil {
 		t.Skip("requires Node with --import support (18.19+)")
@@ -270,13 +270,24 @@ func TestCommandRunExecutesNodeTestWithPreloadAndStderr(t *testing.T) {
 	root := t.TempDir()
 	writeCommandTestFile(t, root, "preload.mjs", "globalThis.preloaded = true;\n")
 	writeCommandTestFile(t, root, "check.test.mjs", "import test from 'node:test';\nimport assert from 'node:assert/strict';\ntest('preload', () => assert.equal(globalThis.preloaded, true));\ntest('known failure', () => assert.fail('observed assertion'));\n")
+	invocation := quoteShellArg(node)
+	if runtime.GOOS == "windows" {
+		invocation = "& " + psQuote(node)
+	}
 	result := commandTestCall(context.Background(), root, map[string]any{
 		"scope": "project", "timeout_ms": 30000,
-		"command": quoteShellArg(node) + " --import ./preload.mjs --test-reporter tap --test-reporter-destination stderr --test check.test.mjs",
+		"command": invocation + " --import ./preload.mjs --test-reporter tap --test-reporter-destination stderr --test check.test.mjs",
 	})
 	fields := decodeToolResult(t, result)
-	if !result.Ok || fields["exitCode"] != float64(1) || fields["verificationStatus"] != "failed" || fields["testExecutionStatus"] != "ran" || fields["testFailureCount"] != float64(1) || !strings.Contains(fields["stderr"].(string), "TAP version 13") {
+	if !result.Ok || fields["exitCode"] != float64(1) || fields["testExecutionStatus"] != "ran" || fields["testFailureCount"] != float64(1) || !strings.Contains(fields["stderr"].(string), "TAP version 13") {
 		t.Fatalf("real Node stderr report lost: %s", result.Content)
+	}
+	if runtime.GOOS == "windows" {
+		if fields["verificationKind"] != nil || fields["verificationStatus"] != nil {
+			t.Fatalf("PowerShell used POSIX verification analysis: %s", result.Content)
+		}
+	} else if fields["verificationStatus"] != "failed" {
+		t.Fatalf("failed Node test metadata missing: %s", result.Content)
 	}
 	failure := fields["testFailures"].([]any)[0].(map[string]any)
 	if failure["name"] != "known failure" || failure["relativePath"] != "check.test.mjs" {
@@ -294,20 +305,21 @@ func TestCommandRunParsesFailedGoDiagnostics(t *testing.T) {
 		"timeout_ms": 30000,
 	})
 	payload := decodeCommandPayload(t, res)
-	if runtime.GOOS == "windows" {
-		if !res.Ok || payload.ExitCode == 0 || !strings.Contains(payload.Stderr, "missingSymbol") || payload.VerificationKind != "" || payload.VerificationStatus != "" || payload.DiagnosticCount != 0 {
-			t.Fatalf("PowerShell lost native failure output or used POSIX analysis: %+v", payload)
-		}
-		return
+	if !res.Ok || payload.ExitCode != 1 || !strings.Contains(payload.Stderr, "missingSymbol") {
+		t.Fatalf("failed go test lost native failure output: %+v", payload)
 	}
-	if !res.Ok || payload.ExitCode == 0 || payload.VerificationKind != "test" || payload.VerificationStatus != "failed" {
+	if runtime.GOOS == "windows" {
+		if payload.VerificationKind != "" || payload.VerificationStatus != "" {
+			t.Fatalf("PowerShell used POSIX verification analysis: %+v", payload)
+		}
+	} else if payload.VerificationKind != "test" || payload.VerificationStatus != "failed" {
 		t.Fatalf("failed go test metadata missing: %+v", payload)
 	}
-	if payload.DiagnosticCount == 0 || len(payload.Diagnostics) == 0 {
+	if payload.DiagnosticCount != 1 || len(payload.Diagnostics) != 1 {
 		t.Fatalf("go diagnostic not parsed: stdout=%q stderr=%q", payload.Stdout, payload.Stderr)
 	}
 	diagnostic := payload.Diagnostics[0]
-	if diagnostic.RelativePath != "broken.go" || diagnostic.Line != 3 || diagnostic.Severity != "error" || !strings.Contains(diagnostic.Message, "missingSymbol") || !strings.Contains(diagnostic.Excerpt, "func broken") {
+	if diagnostic.RelativePath != "broken.go" || diagnostic.Line != 3 || diagnostic.Column != 17 || diagnostic.Severity != "error" || !strings.Contains(diagnostic.Message, "missingSymbol") || !strings.Contains(diagnostic.Excerpt, "func broken") {
 		t.Fatalf("unexpected go diagnostic: %+v", diagnostic)
 	}
 }

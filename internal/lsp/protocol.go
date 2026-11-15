@@ -36,6 +36,30 @@ type ServerSpec struct {
 	Env     []string
 }
 
+const (
+	// FileChangeInvalidate means the authorized mutation scope was too large or
+	// could not be enumerated reliably. Restart matching cached workspaces on
+	// their next acquisition instead of silently dropping changed files.
+	FileChangeInvalidate = iota
+	FileCreated
+	FileChanged
+	FileDeleted
+)
+
+// FileChange describes a committed filesystem change, not an editor overlay.
+// Path must be an absolute canonical path authorized by the caller. Type zero
+// invalidates the workspace containing Path (or contained by a directory Path).
+type FileChange struct {
+	Path string
+	Type int
+}
+
+// FileChangeRecorder is optional for injected language services. Recording a
+// mutation must not start a language server or change the mutation's outcome.
+type FileChangeRecorder interface {
+	RecordFileChanges(changes []FileChange)
+}
+
 type Position struct {
 	Line      int `json:"line"`
 	Character int `json:"character"`
@@ -109,11 +133,12 @@ type workspaceFolder struct {
 }
 
 type initializeParams struct {
-	ProcessID        int                `json:"processId"`
-	RootURI          string             `json:"rootUri"`
-	ClientInfo       clientInfo         `json:"clientInfo"`
-	Capabilities     clientCapabilities `json:"capabilities"`
-	WorkspaceFolders []workspaceFolder  `json:"workspaceFolders"`
+	ProcessID             int                `json:"processId"`
+	RootURI               string             `json:"rootUri"`
+	ClientInfo            clientInfo         `json:"clientInfo"`
+	Capabilities          clientCapabilities `json:"capabilities"`
+	WorkspaceFolders      []workspaceFolder  `json:"workspaceFolders"`
+	InitializationOptions map[string]any     `json:"initializationOptions,omitempty"`
 }
 
 type clientInfo struct {

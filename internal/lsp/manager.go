@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -67,6 +68,9 @@ type managerEntry struct {
 	ready    chan struct{}
 	err      error
 	lastUsed time.Time
+	flushMu  sync.Mutex
+	files    map[string]int // guarded by Manager.mu; never held during protocol IO
+	invalid  atomic.Bool
 }
 
 // Manager owns and shares LSP processes by canonical language root and server kind.
@@ -127,6 +131,10 @@ func (m *Manager) Request(ctx context.Context, spec ServerSpec, method string, p
 			return err
 		}
 		m.touch(process.spec.Key, process)
+		if err := m.flushFileChanges(process); err != nil {
+			m.discard(process.spec.Key, process)
+			return err
+		}
 		err = process.Request(requestCtx, method, params, result)
 		m.touch(process.spec.Key, process)
 		if !errors.Is(err, ErrRequestNotSent) || requestCtx.Err() != nil {
@@ -154,6 +162,10 @@ func (m *Manager) RefreshDocuments(ctx context.Context, spec ServerSpec, load Do
 		return nil, err
 	}
 	m.touch(process.spec.Key, process)
+	if err := m.flushFileChanges(process); err != nil {
+		m.discard(process.spec.Key, process)
+		return nil, err
+	}
 	states, err := process.RefreshDocuments(ctx, load)
 	m.touch(process.spec.Key, process)
 	return states, err
@@ -196,14 +208,19 @@ func (m *Manager) Acquire(ctx context.Context, spec ServerSpec) (*Process, error
 					if entry.err != nil {
 						return nil, entry.err
 					}
-					if entry.process != nil && entry.process.Alive() {
-						m.touch(key, entry.process)
-						return entry.process, nil
-					}
 					continue
 				case <-ctx.Done():
 					return nil, ctx.Err()
 				}
+			}
+			if entry.invalid.Load() {
+				delete(m.entries, key)
+				process := entry.process
+				m.mu.Unlock()
+				if process != nil {
+					m.closeWithManagerTimeout(process)
+				}
+				continue
 			}
 			if entry.process != nil && entry.process.Alive() {
 				entry.lastUsed = time.Now()
@@ -252,7 +269,11 @@ func (m *Manager) Acquire(ctx context.Context, spec ServerSpec) (*Process, error
 			return nil, ErrClosed
 		}
 		go m.watchProcess(key, entry, process)
-		return process, nil
+		// Mutations can arrive while initialize is loading the workspace.
+		// Recheck a bounded-queue invalidation before exposing that process.
+		if !entry.invalid.Load() {
+			return process, nil
+		}
 	}
 }
 

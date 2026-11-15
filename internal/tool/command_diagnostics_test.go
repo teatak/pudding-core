@@ -347,7 +347,11 @@ func TestCommandDiagnosticsSurviveOutputTruncationAndChunkBoundaries(t *testing.
 	stderr.Write([]byte("broken.go:2:17: error: 未定义 missing"))
 	result := commandResult(Result{}, args, "sh", root, []string{root}, nil, 1, stdout, stderr, false, false, 0, "non_zero_exit", nil)
 	payload := decodeCommandPayload(t, result)
-	if !payload.StdoutTruncated || strings.Contains(payload.Stdout, "未定义") || payload.DiagnosticCount != 1 || payload.VerificationStatus != "failed" {
+	wantVerification := "failed"
+	if runtime.GOOS == "windows" {
+		wantVerification = "" // Collect diagnostics without claiming POSIX verification semantics.
+	}
+	if !payload.StdoutTruncated || strings.Contains(payload.Stdout, "未定义") || payload.ExitCode != 1 || payload.DiagnosticCount != 1 || payload.VerificationStatus != wantVerification {
 		t.Fatalf("lost or duplicated middle diagnostic: %+v", payload)
 	}
 	d := payload.Diagnostics[0]
@@ -452,6 +456,26 @@ func TestCommandVerificationKindRecognizesStaticInvocations(t *testing.T) {
 		{[]string{"tsc", "--showConfig", "--showConfig", "false"}, "check"},
 		{[]string{"tsc", "--build", "--dry", "false"}, "check"},
 		{[]string{"tsc", "--build", "--force"}, "check"},
+		{[]string{"tsc", "--noEmit", "--noCheck"}, ""},
+		{[]string{"tsc", "--noCheck", "true"}, ""},
+		{[]string{"tsc", "--noCheck", "false"}, "check"},
+		{[]string{"tsc", "--noCheck", "--noCheck", "false"}, "check"},
+		{[]string{"tsc", "--noCheck", "false", "--noCheck"}, ""},
+		{[]string{"npx", "tsc", "--noEmit", "--noCheck"}, ""},
+		{[]string{"pnpm", "exec", "tsc", "--noCheck", "false"}, "check"},
+		{[]string{"make", "build", "-n"}, ""},
+		{[]string{"make", "build", "-kn"}, ""},
+		{[]string{"make", "build", "--dry-run"}, ""},
+		{[]string{"make", "build", "--just-print"}, ""},
+		{[]string{"make", "build", "--recon"}, ""},
+		{[]string{"make", "build", "-f", "-n"}, "build"},
+		{[]string{"make", "build", "-f-n"}, "build"},
+		{[]string{"make", "build", "--file", "-n"}, "build"},
+		{[]string{"make", "build", "--file=-n"}, "build"},
+		{[]string{"make", "build", "-I", "-n"}, "build"},
+		{[]string{"make", "build", "--", "-n"}, "build"},
+		{[]string{"make", "build", "FLAGS=-n"}, "build"},
+		{[]string{"make", "build", "-f", "Makefile", "-n"}, ""},
 		{[]string{"go", "build", "-n=false", "./..."}, "build"},
 		{[]string{"go", "build", "-n", "-n=false", "./..."}, "build"},
 		{[]string{"go", "build", "-ldflags", "-n", "./..."}, "build"},
@@ -484,8 +508,14 @@ func TestCommandNonExecutingModesDoNotClaimVerification(t *testing.T) {
 		"tsc --build --dry",
 		"tsc -b --clean",
 		"tsc --showConfig false --listFilesOnly",
+		"tsc --noEmit --noCheck",
+		"tsc --noCheck false --noCheck",
 		"npx tsc --showConfig",
+		"npx tsc --noCheck",
 		"pnpm exec tsc --listFilesOnly",
+		"pnpm exec tsc --noCheck",
+		"make build -n",
+		"make build --dry-run",
 		"go build -n ./...",
 		"go build -n=true ./...",
 		"go build --n ./...",
@@ -530,6 +560,104 @@ func TestCommandNonExecutingModesDoNotClaimVerification(t *testing.T) {
 				if _, exists := fields["verificationStatus"]; exists {
 					t.Fatalf("non-executing invocation claimed a verification outcome: %s", content)
 				}
+			}
+		})
+	}
+}
+
+func TestCommandVerificationIgnoresRuffFailureOnlyWhenRequested(t *testing.T) {
+	for _, tc := range []struct {
+		argv []string
+		want bool
+	}{
+		{[]string{"ruff", "check", "--exit-zero", "."}, true},
+		{[]string{"ruff", "check", "-e", "."}, true},
+		{[]string{"npx", "--yes", "ruff", "check", "--exit-zero"}, true},
+		{[]string{"pnpm", "--dir", "web", "exec", "ruff", "check", "--exit-zero"}, true},
+		{[]string{"npm", "exec", "--", "ruff", "check", "--exit-zero"}, true},
+		{[]string{"yarn", "exec", "ruff", "check", "--exit-zero"}, true},
+		{[]string{"bun", "x", "ruff", "check", "--exit-zero"}, true},
+		{[]string{"ruff", "check", "."}, false},
+		{[]string{"ruff", "check", "--", "--exit-zero"}, false},
+		{[]string{"ruff", "check", "--stdin-filename=--exit-zero", "-"}, false},
+		{[]string{"ruff", "format", "--exit-zero"}, false},
+		{[]string{"npm", "run", "lint", "--", "--exit-zero"}, false},
+		{[]string{"eslint", "--exit-zero"}, false},
+	} {
+		if got := commandVerificationIgnoresFailure(tc.argv); got != tc.want {
+			t.Errorf("%q: ignoresFailure=%v, want %v", tc.argv, got, tc.want)
+		}
+	}
+}
+
+func TestCommandRuffExitZeroPreservesDiagnosticsWithoutClaimingPass(t *testing.T) {
+	root := t.TempDir()
+	writePatchTestFile(t, filepath.Join(root, "app.py"), "import os\n")
+	for _, command := range []string{"ruff check --exit-zero .", "ruff check -e .", "pnpm exec ruff check --exit-zero ."} {
+		t.Run(command, func(t *testing.T) {
+			args := commandRunArgs{Command: command}
+			stdout, stderr := newCommandOutputBuffers(args, root, []string{root})
+			stdout.Write([]byte("app.py:1:1: F401 unused import\n"))
+			result := commandResult(Result{}, args, "sh", root, []string{root}, nil, 0, stdout, stderr, false, false, 0, "", nil)
+			for _, content := range []string{result.Content, ModelResultContent(CommandRun, result.Ok, result.Content, "turn", "call", true)} {
+				var fields map[string]any
+				if err := json.Unmarshal([]byte(content), &fields); err != nil {
+					t.Fatal(err)
+				}
+				if fields["ok"] != true || fields["exitCode"] != float64(0) || fields["diagnosticCount"] != float64(1) {
+					t.Fatalf("process status or lint diagnostic lost: %s", content)
+				}
+				diagnostic := fields["diagnostics"].([]any)[0].(map[string]any)
+				if diagnostic["relativePath"] != "app.py" || diagnostic["severity"] != "error" || !strings.Contains(diagnostic["message"].(string), "F401") {
+					t.Fatalf("exit-zero hid lint failure evidence: %s", content)
+				}
+				if runtime.GOOS == "windows" {
+					if fields["verificationStatus"] != nil || fields["verificationKind"] != nil {
+						t.Fatalf("PowerShell gained a POSIX verification conclusion: %s", content)
+					}
+				} else if fields["verificationKind"] != "lint" || fields["verificationStatus"] != "completed" {
+					t.Fatalf("exit-zero claimed a lint outcome: %s", content)
+				}
+			}
+		})
+	}
+}
+
+func TestWindowsCommandDiagnosticsDoNotProveVerificationSuccess(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("PowerShell result metadata")
+	}
+	root := t.TempDir()
+	output := "{\"Action\":\"pass\",\"Package\":\"p\",\"Test\":\"TestPass\"}\n{\"Action\":\"pass\",\"Package\":\"p\"}\n"
+	for _, tc := range []struct {
+		command string
+		literal bool
+	}{
+		{`go test -json ./...`, true},
+		{`go.exe test -json ./...`, true},
+		{`& 'C:\Program Files\Go\bin\go.exe' test -json ./...`, true},
+		{`go test -json ./...; exit 0`, false},
+		{`go test -json ./... | Tee-Object log`, false},
+		{`& $exe test -json ./...`, false},
+	} {
+		t.Run(tc.command, func(t *testing.T) {
+			args := commandRunArgs{Command: tc.command}
+			stdout, stderr := newCommandOutputBuffers(args, root, []string{root})
+			stdout.Write([]byte(output))
+			result := commandResult(Result{}, args, "pwsh", root, []string{root}, nil, 0, stdout, stderr, false, false, 0, "", nil)
+			fields := decodeToolResult(t, result)
+			if fields["ok"] != true || fields["exitCode"] != float64(0) || fields["stdout"] != output {
+				t.Fatalf("raw process result changed: %s", result.Content)
+			}
+			if fields["verificationStatus"] != nil || fields["verificationKind"] != nil {
+				t.Fatalf("PowerShell gained a POSIX verification conclusion: %s", result.Content)
+			}
+			if tc.literal {
+				if fields["testExecutionStatus"] != "ran" || fields["testFailureCount"] != float64(0) || fields["diagnosticCount"] != float64(0) {
+					t.Fatalf("literal command lost observed test evidence: %s", result.Content)
+				}
+			} else if fields["testExecutionStatus"] != nil || fields["diagnostics"] != nil || fields["testFailures"] != nil {
+				t.Fatalf("complex PowerShell was assigned guessed diagnostic semantics: %s", result.Content)
 			}
 		})
 	}

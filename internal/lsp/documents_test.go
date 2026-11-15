@@ -113,6 +113,35 @@ func TestRefreshPreservesDocumentLimitAndUsageOrder(t *testing.T) {
 	if len(documents) != maxOpenDocuments || documents[newestURI].Text == "" || documents[newURI].Text == "" {
 		t.Fatalf("document capacity was not preserved: %d documents", len(documents))
 	}
+
+	// Explicitly reusing unchanged text still makes a document most recent.
+	// Refresh changed text afterward so both refresh paths preserve that use.
+	touchedURI := fileURI(filepath.Join(spec.Key.LanguageRoot, fmt.Sprintf("file%03d.go", maxOpenDocuments-2)))
+	state, err := manager.SyncDocument(ctx, spec, Document{URI: touchedURI, LanguageID: "go", Text: "package demo\n"})
+	if err != nil || state.Changed {
+		t.Fatalf("unchanged explicit use = %+v, %v", state, err)
+	}
+	refreshedText := "package demo\nfunc Updated() {}\n"
+	if _, err := manager.RefreshDocuments(ctx, spec, func(string) (string, bool, error) {
+		return refreshedText, true, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	nextURI := fileURI(filepath.Join(spec.Key.LanguageRoot, "next.go"))
+	if _, err := manager.SyncDocument(ctx, spec, Document{URI: nextURI, LanguageID: "go", Text: "package demo\n"}); err != nil {
+		t.Fatal(err)
+	}
+	documents = nil
+	if err := manager.Request(ctx, spec, "test/documents", nil, &documents); err != nil {
+		t.Fatal(err)
+	}
+	oldestUntouchedURI := fileURI(filepath.Join(spec.Key.LanguageRoot, fmt.Sprintf("file%03d.go", maxOpenDocuments-3)))
+	if _, exists := documents[oldestUntouchedURI]; exists {
+		t.Fatal("unchanged explicit use or changed refresh lost the eviction order")
+	}
+	if len(documents) != maxOpenDocuments || documents[touchedURI].Text != refreshedText || documents[newURI].Text != refreshedText || documents[nextURI].Text == "" {
+		t.Fatalf("the most recently used documents were not retained: %d documents", len(documents))
+	}
 }
 
 func TestRefreshInvalidatesUnchangedDependentDiagnostics(t *testing.T) {

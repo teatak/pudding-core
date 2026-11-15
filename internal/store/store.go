@@ -409,11 +409,11 @@ func NormalizeApprovalMode(mode ApprovalMode) ApprovalMode {
 	}
 }
 
+// NormalizeProjectDirs cleans and deduplicates paths without changing filename whitespace.
 func NormalizeProjectDirs(dirs []string) []string {
 	seen := make(map[string]bool, len(dirs))
 	out := make([]string, 0, len(dirs))
 	for _, dir := range dirs {
-		dir = strings.TrimSpace(dir)
 		if dir == "" || !filepath.IsAbs(dir) {
 			continue
 		}
@@ -1067,9 +1067,8 @@ func NormalizeLocalFolders(folders []LocalFolder) []LocalFolder {
 	for _, folder := range folders {
 		folder.ID = strings.TrimSpace(folder.ID)
 		folder.Name = strings.TrimSpace(folder.Name)
-		folder.Path = strings.TrimSpace(folder.Path)
 		folder.Origin = strings.TrimSpace(folder.Origin)
-		if folder.ID == "" || folder.Path == "" {
+		if folder.ID == "" || strings.TrimSpace(folder.Path) == "" {
 			continue
 		}
 		if folder.Name == "" {
@@ -1101,11 +1100,9 @@ func NormalizeProjectReferences(references []ProjectReference) []ProjectReferenc
 	for _, reference := range references {
 		reference.ID = strings.TrimSpace(reference.ID)
 		reference.Name = strings.TrimSpace(reference.Name)
-		reference.Path = strings.TrimSpace(reference.Path)
-		reference.SourcePath = strings.TrimSpace(reference.SourcePath)
 		reference.RootID = strings.TrimSpace(reference.RootID)
 		reference.Kind = strings.TrimSpace(reference.Kind)
-		if reference.ID == "" || reference.Name == "" || reference.Path == "" || reference.SourcePath == "" || reference.RootID == "" {
+		if reference.ID == "" || reference.Name == "" || strings.TrimSpace(reference.Path) == "" || strings.TrimSpace(reference.SourcePath) == "" || reference.RootID == "" {
 			continue
 		}
 		if !filepath.IsAbs(reference.SourcePath) {
@@ -1166,7 +1163,7 @@ func ProjectReferencesFromParts(parts []ContentPart) []ProjectReference {
 }
 
 func localFolderName(path string) string {
-	normalized := strings.TrimRight(strings.ReplaceAll(strings.TrimSpace(path), "\\", "/"), "/")
+	normalized := strings.TrimRight(strings.ReplaceAll(path, "\\", "/"), "/")
 	if normalized == "" {
 		return path
 	}

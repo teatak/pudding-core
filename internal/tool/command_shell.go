@@ -283,6 +283,79 @@ func commandVerificationArgv(command string) []string {
 	return argv
 }
 
+// This deliberately small PowerShell subset is only for extracting diagnostics.
+// It never authorizes execution or proves verification succeeded. Accept one
+// literal invocation, optionally with &, and whole quoted arguments. Expansion,
+// operators, redirection, comments and partial quoting remain unclassified.
+func powerShellDiagnosticArgv(command string) []string {
+	command = strings.TrimSpace(command)
+	if command == "" || strings.ContainsAny(command, "\r\n\x00‘’“”") {
+		return nil
+	}
+	invoked := false
+	if command[0] == '&' {
+		if len(command) < 2 || !strings.ContainsRune(" \t", rune(command[1])) {
+			return nil
+		}
+		invoked = true
+		command = strings.TrimLeft(command[1:], " \t")
+	}
+	var argv []string
+	for command != "" {
+		var value strings.Builder
+		quoted := command[0] == '\'' || command[0] == '"'
+		if quoted {
+			if len(argv) == 0 && !invoked {
+				return nil // A quoted expression alone is not a command invocation.
+			}
+			quote, at, closed := command[0], 1, false
+			for at < len(command) {
+				ch := command[at]
+				if ch == quote {
+					if quote == '\'' && at+1 < len(command) && command[at+1] == quote {
+						value.WriteByte(quote)
+						at += 2
+						continue
+					}
+					at++
+					closed = true
+					break
+				}
+				if quote == '"' && (ch == '$' || ch == '`') {
+					return nil
+				}
+				value.WriteByte(ch)
+				at++
+			}
+			if !closed || at < len(command) && !strings.ContainsRune(" \t", rune(command[at])) {
+				return nil
+			}
+			command = command[at:]
+		} else {
+			at := strings.IndexAny(command, " \t")
+			if at < 0 {
+				at = len(command)
+			}
+			word := command[:at]
+			if word == "--%" || strings.ContainsAny(word, "'\"`$@(){}[];,|&<>#") {
+				return nil
+			}
+			value.WriteString(word)
+			command = command[at:]
+		}
+		argv = append(argv, value.String())
+		command = strings.TrimLeft(command, " \t")
+	}
+	if len(argv) == 0 || argv[0] == "" {
+		return nil
+	}
+	// Normalize only the analysis copy, including when this parser is tested on
+	// another OS. The original PowerShell source and executed arguments stay intact.
+	name := strings.ReplaceAll(argv[0], "\\", "/")
+	argv[0] = name[strings.LastIndex(name, "/")+1:]
+	return argv
+}
+
 // Recognize a direct check or one literal cd followed by a check. This only
 // describes execution; it does not rewrite the command or change approvals.
 func commandVerificationInvocation(command string) ([]string, string) {
