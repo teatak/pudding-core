@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -41,13 +42,6 @@ func (r *BuiltinRunner) validateTypeScriptRename(ctx context.Context, target res
 	for uri, snapshot := range snapshots {
 		paths[snapshot.Path] = uri
 	}
-	// Do not compare diagnostic counts: a new error can replace an old error
-	// with the same code. Existing syntax errors require an explicit repair.
-	for _, file := range files {
-		if err := r.checkTypeScriptRenameSyntax(ctx, target, paths[file.Path], true); err != nil {
-			return err
-		}
-	}
 	changed := make([]string, 0, len(files))
 	defer func() {
 		if len(changed) == 0 {
@@ -70,11 +64,29 @@ func (r *BuiltinRunner) validateTypeScriptRename(ctx context.Context, target res
 			}
 		}
 	}()
+	// TypeScript suppresses binding grammar errors when JS checking is off or
+	// a file carries @ts-nocheck/@ts-ignore. Use checked, directive-neutralized
+	// overlays for both baselines and candidates; patch content stays unmodified.
 	for _, file := range files {
 		uri := paths[file.Path]
 		changed = append(changed, uri)
 		_, languageID := codeLanguageForPath(file.Path)
-		if _, err := service.SyncDocument(ctx, target.spec, lsp.Document{URI: uri, LanguageID: languageID, Text: *file.Content}); err != nil {
+		text := snapshots[uri].Text
+		if err := r.syncTypeScriptRenameValidationDocument(ctx, target, lsp.Document{URI: uri, LanguageID: languageID, Text: text}); err != nil {
+			return newCodeRenameError("rename_validation_failed", err.Error())
+		}
+	}
+	// Do not compare diagnostic counts: a new error can replace an old error
+	// with the same code. Existing syntax errors require an explicit repair.
+	for _, file := range files {
+		if err := r.checkTypeScriptRenameSyntax(ctx, target, paths[file.Path], true); err != nil {
+			return err
+		}
+	}
+	for _, file := range files {
+		uri := paths[file.Path]
+		_, languageID := codeLanguageForPath(file.Path)
+		if err := r.syncTypeScriptRenameValidationDocument(ctx, target, lsp.Document{URI: uri, LanguageID: languageID, Text: *file.Content}); err != nil {
 			return newCodeRenameError("rename_validation_failed", err.Error())
 		}
 	}
@@ -84,6 +96,119 @@ func (r *BuiltinRunner) validateTypeScriptRename(ctx context.Context, target res
 		}
 	}
 	return nil
+}
+
+var typeScriptRenameDirective = regexp.MustCompile(`(?i)@ts-(?:nocheck|check|ignore|expect-error)`)
+
+func (r *BuiltinRunner) syncTypeScriptRenameValidationDocument(ctx context.Context, target resolvedCodeTarget, document lsp.Document) error {
+	service := r.codeLanguageService(ctx)
+	// Classifications must describe the exact unmodified source being checked.
+	if _, err := service.SyncDocument(ctx, target.spec, document); err != nil {
+		return err
+	}
+	text := document.Text
+	if typeScriptRenameDirective.MatchString(text) {
+		var response struct {
+			Success bool   `json:"success"`
+			Message string `json:"message"`
+			Body    struct {
+				Spans []int `json:"spans"`
+			} `json:"body"`
+		}
+		err := service.Request(ctx, target.spec, "workspace/executeCommand", map[string]any{
+			"command": "typescript.tsserverRequest",
+			"arguments": []any{"encodedSyntacticClassifications-full", map[string]any{
+				"file": document.URI, "start": 0, "length": codeUTF16TextLength(text),
+			}, map[string]any{"executionTarget": 0}},
+		}, &response)
+		if err != nil {
+			return err
+		}
+		if !response.Success {
+			return fmt.Errorf("TypeScript syntactic classifications failed: %s", response.Message)
+		}
+		if response.Body.Spans == nil {
+			return fmt.Errorf("TypeScript returned missing syntactic classifications")
+		}
+		text, err = neutralizeTypeScriptRenameDirectives(text, response.Body.Spans)
+		if err != nil {
+			return err
+		}
+	}
+	document.Text = addTypeScriptRenameCheckDirective(text)
+	_, err := service.SyncDocument(ctx, target.spec, document)
+	return err
+}
+
+func codeUTF16TextLength(text string) int {
+	length := 0
+	for _, char := range text {
+		length++
+		if char > 0xffff {
+			length++
+		}
+	}
+	return length
+}
+
+func neutralizeTypeScriptRenameDirectives(text string, spans []int) (string, error) {
+	if len(spans)%3 != 0 {
+		return "", fmt.Errorf("TypeScript returned malformed syntactic classifications")
+	}
+	length := codeUTF16TextLength(text)
+	// A linear offset table avoids rescanning a large source for every token.
+	// Rename files are already limited to 512 KiB.
+	offsets := make([]int, length+1)
+	units := 0
+	for offset, char := range text {
+		offsets[units] = offset
+		units++
+		if char > 0xffff {
+			offsets[units] = -1 // Interior of a UTF-16 surrogate pair.
+			units++
+		}
+	}
+	offsets[length] = len(text)
+	checked := []byte(text)
+	for index := 0; index < len(spans); index += 3 {
+		start, size, kind := spans[index], spans[index+1], spans[index+2]
+		if start < 0 || start > length || size < 0 || size > length-start {
+			return "", fmt.Errorf("TypeScript returned an out-of-range syntactic classification")
+		}
+		from, to := offsets[start], offsets[start+size]
+		if from < 0 || to < 0 {
+			return "", fmt.Errorf("TypeScript classification splits a UTF-16 surrogate pair")
+		}
+		switch kind {
+		case 1: // TypeScript ClassificationType.comment.
+			for _, match := range typeScriptRenameDirective.FindAllStringIndex(text[from:to], -1) {
+				checked[from+match[0]] = '_'
+			}
+		case 18: // JSDoc tags are separate from their leading @ punctuation.
+			if from > 0 && text[from-1] == '@' {
+				match := typeScriptRenameDirective.FindStringIndex(text[from-1:to])
+				if match != nil && match[0] == 0 {
+					checked[from-1] = '_'
+				}
+			}
+		}
+	}
+	return string(checked), nil
+}
+
+func addTypeScriptRenameCheckDirective(text string) string {
+	offset := 0
+	if strings.HasPrefix(text, "\ufeff") {
+		offset = len("\ufeff")
+	}
+	if strings.HasPrefix(text[offset:], "#!") {
+		newline := strings.IndexByte(text[offset:], '\n')
+		if newline < 0 {
+			return text + "\n// @ts-check\n"
+		}
+		offset += newline + 1
+	}
+	return text[:offset] + "// @ts-check\n" + text[offset:]
 }
 
 func (r *BuiltinRunner) checkTypeScriptRenameSyntax(ctx context.Context, target resolvedCodeTarget, uri string, baseline bool) error {

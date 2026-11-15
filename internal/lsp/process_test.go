@@ -510,6 +510,28 @@ func (s *fakeLSP) handleClientMessage(message wireMessage) (bool, error) {
 			time.Sleep(delay)
 			_ = s.respond(id, map[string]string{"value": value})
 		}(append(json.RawMessage(nil), message.ID...), params.Value, time.Duration(params.DelayMS)*time.Millisecond)
+	case "test/stopAfterFramePrefix":
+		if err := s.respond(message.ID, true); err != nil {
+			return false, err
+		}
+		for {
+			line, err := s.reader.r.ReadString('\n')
+			if err != nil {
+				return false, err
+			}
+			if line == "\r\n" || line == "\n" {
+				break
+			}
+		}
+		if _, err := s.reader.r.ReadByte(); err != nil {
+			return false, err
+		}
+		if err := s.notify("textDocument/publishDiagnostics", map[string]any{"uri": s.rootURI + "/blocked-frame", "diagnostics": []any{}}); err != nil {
+			return false, err
+		}
+		for {
+			time.Sleep(time.Hour)
+		}
 	case "test/stopReading":
 		if err := s.respond(message.ID, true); err != nil {
 			return false, err

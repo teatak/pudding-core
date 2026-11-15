@@ -215,6 +215,11 @@ func (r *BuiltinRunner) codeRename(ctx context.Context, call Call) Result {
 			}
 		}
 	}
+	// Cancellation may arrive while an independent context restores a temporary
+	// validation overlay. Honor it before beginning the atomic disk transaction.
+	if err := ctx.Err(); err != nil {
+		return codeServiceError(out, err)
+	}
 	applied := applyPreparedPatchResult(out, patchProjectDirs, patch)
 	if !applied.Ok {
 		var failure struct {

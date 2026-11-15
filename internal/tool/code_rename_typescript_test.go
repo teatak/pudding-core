@@ -69,12 +69,12 @@ func TestCodeRenameTypeScriptRestoresPreviewAfterCancellation(t *testing.T) {
 				if err := syncCtx.Err(); err != nil {
 					t.Fatalf("restore reused canceled call context: %v", err)
 				}
-				if document.Text == after {
-					current = after
+				if document.Text == addTypeScriptRenameCheckDirective(after) {
+					current = document.Text
 					cancel()
 					return lsp.DocumentState{}, context.Canceled
 				}
-				if restoreFails {
+				if restoreFails && document.Text == before && ctx.Err() != nil {
 					return lsp.DocumentState{}, errors.New("restore transport failed")
 				}
 				current = document.Text
@@ -103,6 +103,49 @@ func TestCodeRenameTypeScriptValidatesSemanticNameGrammar(t *testing.T) {
 		raw, _ := json.Marshal(code)
 		if typeScriptNameGrammarDiagnostic(raw) {
 			t.Errorf("ordinary type error blocks rename: %d", code)
+		}
+	}
+}
+
+func TestCodeRenameTypeScriptNeutralizesOnlyClassifiedComments(t *testing.T) {
+	text := "const emoji = '😀';\n// @TS-NOCHECK\nconst literal = '@ts-ignore';\nconst template = `@ts-check`;\nconst regexp = /@ts-expect-error/;\nimport type { Item } from '@ts-nocheck/module';\n/** @ts-ignore */\nexport const count = 1;\n"
+	spans := []int{}
+	add := func(token string, kind int) {
+		start := strings.Index(text, token)
+		if start < 0 {
+			t.Fatalf("missing fixture token %q", token)
+		}
+		spans = append(spans, codeUTF16TextLength(text[:start]), codeUTF16TextLength(token), kind)
+	}
+	add("// @TS-NOCHECK", 1)
+	add("'@ts-ignore'", 6)
+	add("`@ts-check`", 6)
+	add("/@ts-expect-error/", 7)
+	add("'@ts-nocheck/module'", 6)
+	// JSDoc's @ punctuation and tag name have separate classifications.
+	tagStart := strings.LastIndex(text, "@ts-ignore") + 1
+	spans = append(spans, codeUTF16TextLength(text[:tagStart]), len("ts-ignore"), 18)
+	got, err := neutralizeTypeScriptRenameDirectives(text, spans)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := strings.ReplaceAll(text, "// @TS-NOCHECK", "// _TS-NOCHECK")
+	want = strings.ReplaceAll(want, "/** @ts-ignore */", "/** _ts-ignore */")
+	if got != want {
+		t.Fatalf("validation changed a non-comment token:\nwant %q\ngot  %q", want, got)
+	}
+	for _, malformed := range [][]int{{1}, {-1, 1, 1}, {0, codeUTF16TextLength(text) + 1, 1}, {codeUTF16TextLength(text[:strings.Index(text, "😀")]) + 1, 1, 1}} {
+		if _, err := neutralizeTypeScriptRenameDirectives(text, malformed); err == nil {
+			t.Fatalf("malformed classification accepted: %v", malformed)
+		}
+	}
+}
+
+func TestCodeRenameTypeScriptCheckDirectivePreservesBOMAndShebang(t *testing.T) {
+	for _, prefix := range []string{"", "\ufeff", "#!/usr/bin/env node\n", "\ufeff#!/usr/bin/env node\n"} {
+		text := prefix + "export const value = 1\n"
+		if got, want := addTypeScriptRenameCheckDirective(text), prefix+"// @ts-check\nexport const value = 1\n"; got != want {
+			t.Fatalf("check directive displaced file prefix: got %q, want %q", got, want)
 		}
 	}
 }

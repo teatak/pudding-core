@@ -27,7 +27,7 @@ func awaitWriter(t *testing.T, process *Process) {
 	}
 }
 
-func TestProcessBlockedPipeRespectsRequestAndDocumentDeadlines(t *testing.T) {
+func TestProcessBlockedPipeRespectsRequestAndDocumentCancellation(t *testing.T) {
 	for _, document := range []bool{false, true} {
 		name := "request"
 		if document {
@@ -41,22 +41,78 @@ func TestProcessBlockedPipeRespectsRequestAndDocumentDeadlines(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			stopHelperReading(t, process)
-			ctx, cancel := context.WithTimeout(context.Background(), 80*time.Millisecond)
-			defer cancel()
-			start := time.Now()
-			if document {
-				_, err = manager.SyncDocument(ctx, spec, Document{URI: process.rootURI + "/large.ts", LanguageID: "typescript", Text: strings.Repeat("x", 2<<20)})
-			} else {
-				err = process.Request(ctx, "test/large", map[string]string{"text": strings.Repeat("x", 2<<20)}, nil)
+			var ready bool
+			if err := process.Request(context.Background(), "test/stopAfterFramePrefix", nil, &ready); err != nil || !ready {
+				t.Fatalf("partial-read handshake: %v, %v", ready, err)
 			}
-			if !errors.Is(err, context.DeadlineExceeded) || time.Since(start) > time.Second {
-				t.Fatalf("blocked pipe ignored context: %v after %s", err, time.Since(start))
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			result := make(chan error, 1)
+			go func() {
+				if document {
+					_, err := manager.SyncDocument(ctx, spec, Document{URI: process.rootURI + "/large.ts", LanguageID: "typescript", Text: strings.Repeat("x", 2<<20)})
+					result <- err
+				} else {
+					result <- process.Request(ctx, "test/large", map[string]string{"text": strings.Repeat("x", 2<<20)}, nil)
+				}
+			}()
+			// Marshaling is slower under the race detector. The helper confirms
+			// receiving a header and payload byte, so cancellation below tests
+			// actual partial I/O instead of a deadline expiring before the send.
+			barrierDeadline := time.Now().Add(3 * time.Second)
+			for {
+				if _, ok := process.Diagnostics(process.rootURI + "/blocked-frame"); ok {
+					break
+				}
+				select {
+				case err := <-result:
+					t.Fatalf("large write ended before its partial-I/O barrier: %v", err)
+				default:
+				}
+				if time.Now().After(barrierDeadline) {
+					t.Fatal("helper did not receive the partial frame")
+				}
+				time.Sleep(time.Millisecond)
+			}
+			start := time.Now()
+			cancel()
+			select {
+			case err := <-result:
+				if !errors.Is(err, context.Canceled) || time.Since(start) > time.Second {
+					t.Fatalf("blocked pipe ignored cancellation: %v after %s", err, time.Since(start))
+				}
+			case <-time.After(time.Second):
+				t.Fatal("blocked pipe ignored cancellation")
 			}
 			if process.Alive() || process.Pending() != 0 {
 				t.Fatalf("partial frame left a reusable process: alive=%v pending=%d", process.Alive(), process.Pending())
 			}
 		})
+	}
+}
+
+func TestProcessCancellationBeforeSendPreservesSharedServer(t *testing.T) {
+	manager := newTestManager()
+	defer closeTestManager(t, manager)
+	spec := testServerSpec(t, "cancel-before-send")
+	process, err := manager.Acquire(context.Background(), spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := process.Request(ctx, "test/large", map[string]string{"text": strings.Repeat("x", 2<<20)}, nil); !errors.Is(err, context.Canceled) {
+		t.Fatalf("pre-send request cancellation = %v", err)
+	}
+	if _, err := manager.SyncDocument(ctx, spec, Document{URI: process.rootURI + "/large.ts", LanguageID: "typescript", Text: strings.Repeat("x", 2<<20)}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("pre-send document cancellation = %v", err)
+	}
+	if !process.Alive() || process.Pending() != 0 {
+		t.Fatalf("pre-send cancellation discarded a usable process: alive=%v pending=%d", process.Alive(), process.Pending())
+	}
+	var echo map[string]string
+	if err := process.Request(context.Background(), "test/echo", map[string]string{"value": "usable"}, &echo); err != nil || echo["value"] != "usable" {
+		t.Fatalf("server could not be reused after pre-send cancellation: %v, %+v", err, echo)
 	}
 }
 
