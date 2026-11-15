@@ -124,7 +124,7 @@ func validatePatchFileState(projectDirs []string, projectRoot string, file prepa
 	if err != nil {
 		return err
 	}
-	root, target, _, err := resolveProjectPath([]string{authorizedRoot}, file.Path, false, true)
+	root, target, _, err := resolveProjectEntryPath([]string{authorizedRoot}, file.Path, false, true)
 	if err != nil {
 		return &patchError{reason: patchPathReason(err), detail: file.Path + ": " + err.Error()}
 	}

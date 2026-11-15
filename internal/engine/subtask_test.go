@@ -4,6 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -252,13 +255,14 @@ func TestCollaborationCollectsWithoutEnabledPluginAndAcceptsChildFollowup(t *tes
 
 func TestCollaborationResourceWaitIsCancellable(t *testing.T) {
 	eng, _, _ := newCollaborationEngine(t, mock.New())
-	call := tool.Call{Name: tool.CommandRun, Args: json.RawMessage(`{"command":"touch file"}`), ProjectDirs: []string{t.TempDir()}}
+	call := tool.Call{SessionID: "root", Name: tool.CommandRun, Args: json.RawMessage(`{"scope":"project","command":"touch file"}`), ProjectDirs: []string{t.TempDir()}}
 	release, err := eng.acquireToolResources(context.Background(), call)
 	if err != nil {
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
 	defer cancel()
+	call.SessionID = "peer" // A different session must still serialize writes to the same project.
 	if second, err := eng.acquireToolResources(ctx, call); err == nil {
 		second()
 		t.Fatal("overlapping mutation acquired resource")
@@ -271,33 +275,241 @@ func TestCollaborationResourceWaitIsCancellable(t *testing.T) {
 	second()
 }
 
-func TestCollaborationBackgroundProcessRetainsProjectLease(t *testing.T) {
+func TestCollaborationBackgroundProcessAllowsProjectWork(t *testing.T) {
 	eng, _, _ := newCollaborationEngine(t, mock.New())
-	eng.tools = tool.NewBuiltinRunner()
 	root := t.TempDir()
-	call := tool.Call{SessionID: "root", TurnID: "background_turn", CallID: "background_call", Name: tool.CommandRun, Mode: store.ModeCode, ProjectDirs: []string{root}, CommandSandbox: tool.CommandSandboxBypass, Args: json.RawMessage(`{"scope":"project","command":"sleep 20","background":true}`)}
-	result := eng.callTrackedTool(context.Background(), "root", call.TurnID, store.ModeCode, call)
-	if !result.Ok {
-		t.Fatalf("background start: %s", result.Content)
-	}
-	processes := eng.BackgroundProcesses("root")
-	if len(processes) != 1 || !processes[0].Running {
-		t.Fatalf("background processes: %+v", processes)
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
-	defer cancel()
-	if release, err := eng.acquireToolResources(ctx, call); err == nil {
-		release()
-		t.Fatal("background handle released project lease before process exited")
-	}
-	if _, err := eng.StopBackgroundProcess("root", processes[0].ProcessID); err != nil {
+	eng.attachmentHome = t.TempDir()
+	runner := tool.NewBuiltinRunner(tool.WithHomeDir(eng.attachmentHome))
+	eng.tools = runner
+	t.Cleanup(func() { _ = runner.Close() })
+	if err := os.WriteFile(filepath.Join(root, "notes.txt"), []byte("before\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	waitCtx, waitCancel := context.WithTimeout(context.Background(), time.Second)
-	defer waitCancel()
-	release, err := eng.acquireToolResources(waitCtx, call)
-	if err != nil {
-		t.Fatalf("project lease not released after process exit: %v", err)
+	call := tool.Call{SessionID: "root", TurnID: "background_turn", CallID: "background_call", Name: tool.CommandRun, Mode: store.ModeCode, ProjectDirs: []string{root}, CommandSandbox: tool.CommandSandboxBypass}
+	call.Args, _ = json.Marshal(map[string]any{"scope": "project", "command": collaborationCommandHelper(t, "background"), "background": true})
+	started := collaborationResourceCall(t, eng, call)
+	var process struct {
+		ProcessID string `json:"processID"`
+		Running   bool   `json:"running"`
 	}
-	release()
+	if err := json.Unmarshal([]byte(started.Content), &process); err != nil || !started.Ok || !process.Running || process.ProcessID == "" {
+		t.Fatalf("background start: %s (%v)", started.Content, err)
+	}
+	poll := call
+	poll.Name, poll.CallID = tool.CommandSession, "background_ready"
+	poll.Args, _ = json.Marshal(map[string]any{"action": "poll", "process_id": process.ProcessID, "wait_ms": 5000})
+	if result := collaborationResourceCall(t, eng, poll); !result.Ok || !strings.Contains(result.Content, "ready") {
+		t.Fatalf("background helper was not ready: %s", result.Content)
+	}
+	for _, sessionID := range []string{"root", "peer"} {
+		patch := call
+		patch.SessionID, patch.TurnID, patch.CallID, patch.Name = sessionID, sessionID+"_edit", sessionID+"_patch", tool.FilePatch
+		old, next := "before", "root edit"
+		if sessionID == "peer" {
+			old, next = "root edit", "peer edit"
+		}
+		patch.Args, _ = json.Marshal(map[string]any{"scope": "project", "files": []map[string]any{{"path": "notes.txt", "action": "edit", "hunks": []map[string]any{{"old_lines": []string{old}, "new_lines": []string{next}}}}}})
+		if result := collaborationResourceCall(t, eng, patch); !result.Ok {
+			t.Fatalf("%s edit while background process is running: %s", sessionID, result.Content)
+		}
+		if content, err := os.ReadFile(filepath.Join(root, "notes.txt")); err != nil || string(content) != next+"\n" {
+			t.Fatalf("%s edit was not applied: %q (%v)", sessionID, content, err)
+		}
+	}
+	check := call
+	check.CallID = "background_check"
+	check.Args = json.RawMessage(`{"scope":"project","command":"echo checked","yield_ms":5000}`)
+	result := collaborationResourceCall(t, eng, check)
+	var checked struct {
+		ExitCode *int   `json:"exitCode"`
+		Stdout   string `json:"stdout"`
+	}
+	if err := json.Unmarshal([]byte(result.Content), &checked); err != nil || !result.Ok || checked.ExitCode == nil || *checked.ExitCode != 0 || strings.TrimSpace(checked.Stdout) != "checked" {
+		t.Fatalf("command did not complete while background process is running: %s (%v)", result.Content, err)
+	}
+	workspace := call
+	workspace.Name, workspace.CallID = tool.TempWorkspace, "background_workspace"
+	workspace.Args = json.RawMessage(`{"action":"open"}`)
+	opened := collaborationResourceCall(t, eng, workspace)
+	var scratch struct {
+		Path         string `json:"path"`
+		AbsolutePath string `json:"absolutePath"`
+	}
+	if err := json.Unmarshal([]byte(opened.Content), &scratch); err != nil || !opened.Ok || scratch.AbsolutePath == "" {
+		t.Fatalf("open workspace while background process is running: %s (%v)", opened.Content, err)
+	}
+	previewPath := filepath.Join(scratch.AbsolutePath, "preview.txt")
+	if err := os.WriteFile(previewPath, []byte("preview ready"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	read := call
+	read.Name, read.CallID = tool.FileRead, "background_preview"
+	read.Args, _ = json.Marshal(map[string]any{"scope": "temp", "path": filepath.Join(scratch.Path, "preview.txt")})
+	if result := collaborationResourceCall(t, eng, read); !result.Ok || !strings.Contains(result.Content, "preview ready") {
+		t.Fatalf("read preview while background process is running: %s", result.Content)
+	}
+	processes := eng.BackgroundProcesses(call.SessionID)
+	if len(processes) != 1 || processes[0].ProcessID != process.ProcessID || !processes[0].Running {
+		t.Fatalf("follow-up work stopped the background process: %+v", processes)
+	}
+	workspace.Args = json.RawMessage(`{"action":"clear"}`)
+	if result := collaborationResourceCall(t, eng, workspace); result.Ok || !strings.Contains(result.Content, "workspace_in_use") {
+		t.Fatalf("cleanup must reject the active background process: %s", result.Content)
+	}
+	if content, err := os.ReadFile(previewPath); err != nil || string(content) != "preview ready" {
+		t.Fatalf("rejected cleanup removed the preview: %q (%v)", content, err)
+	}
+	stop := poll
+	stop.CallID = "background_stop"
+	stop.Args, _ = json.Marshal(map[string]any{"action": "stop", "process_id": process.ProcessID})
+	if result := collaborationResourceCall(t, eng, stop); !result.Ok {
+		t.Fatalf("stop background process: %s", result.Content)
+	}
+	if result := collaborationResourceCall(t, eng, workspace); !result.Ok {
+		t.Fatalf("cleanup after background process stopped: %s", result.Content)
+	}
+	if _, err := os.Stat(previewPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("scratch file survived cleanup: %v", err)
+	}
+}
+
+func TestCollaborationYieldedForegroundRetainsProjectLease(t *testing.T) {
+	eng, _, _ := newCollaborationEngine(t, mock.New())
+	root := t.TempDir()
+	runner := tool.NewBuiltinRunner()
+	eng.tools = runner
+	t.Cleanup(func() { _ = runner.Close() })
+	path, gate := filepath.Join(root, "notes.txt"), filepath.Join(root, "continue")
+	if err := os.WriteFile(path, []byte("before\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	call := tool.Call{SessionID: "root", TurnID: "foreground_turn", CallID: "foreground_call", Name: tool.CommandRun, Mode: store.ModeCode, ProjectDirs: []string{root}, CommandSandbox: tool.CommandSandboxBypass}
+	call.Args, _ = json.Marshal(map[string]any{"scope": "project", "command": collaborationCommandHelper(t, "foreground", gate, path), "yield_ms": 0, "mutation_paths": []string{path}})
+	started := eng.callTrackedTool(ctx, call.SessionID, call.TurnID, store.ModeCode, call)
+	var process struct {
+		ProcessID string `json:"processID"`
+		Yielded   bool   `json:"yielded"`
+	}
+	if err := json.Unmarshal([]byte(started.Content), &process); err != nil || !started.Ok || !process.Yielded || process.ProcessID == "" {
+		t.Fatalf("foreground command did not yield: %s (%v)", started.Content, err)
+	}
+	patch := call
+	patch.SessionID, patch.TurnID, patch.CallID, patch.Name = "peer", "peer_turn", "peer_patch", tool.FilePatch
+	patch.Args = json.RawMessage(`{"scope":"project","files":[{"path":"notes.txt","action":"edit","hunks":[{"old_lines":["command"],"new_lines":["after"]}]}]}`)
+	waitCtx, waitCancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+	blocked := eng.callTrackedTool(waitCtx, patch.SessionID, patch.TurnID, store.ModeCode, patch)
+	waitCancel()
+	if blocked.Ok || !strings.Contains(blocked.Content, context.DeadlineExceeded.Error()) {
+		t.Fatalf("another session reached the file before foreground completion: %s", blocked.Content)
+	}
+	if content, err := os.ReadFile(path); err != nil || string(content) != "before\n" {
+		t.Fatalf("pending foreground mutation changed early: %q (%v)", content, err)
+	}
+	if err := os.WriteFile(gate, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	poll := call
+	poll.Name, poll.CallID = tool.CommandSession, "foreground_poll"
+	var offset int64
+	for {
+		poll.Args, _ = json.Marshal(map[string]any{"action": "poll", "process_id": process.ProcessID, "offset": offset, "wait_ms": 5000})
+		result := eng.callTrackedTool(ctx, poll.SessionID, poll.TurnID, store.ModeCode, poll)
+		var state struct {
+			Running    bool  `json:"running"`
+			NextOffset int64 `json:"nextOffset"`
+			ExitCode   *int  `json:"exitCode"`
+		}
+		if err := json.Unmarshal([]byte(result.Content), &state); err != nil || !result.Ok || ctx.Err() != nil {
+			t.Fatalf("foreground completion: %s (%v, %v)", result.Content, err, ctx.Err())
+		}
+		offset = state.NextOffset
+		if !state.Running {
+			if state.ExitCode == nil || *state.ExitCode != 0 {
+				t.Fatalf("foreground command failed: %s", result.Content)
+			}
+			break
+		}
+	}
+	changes, err := eng.turnFiles.Finish(call.TurnID)
+	if err != nil || len(changes) != 1 || changes[0].OldContent != "before\n" || changes[0].NewContent != "command\n" || changes[0].Origin != store.FileChangeOriginCommandObserved {
+		t.Fatalf("yielded foreground mutation baseline was not completed: %+v (%v)", changes, err)
+	}
+	if result := collaborationResourceCall(t, eng, patch); !result.Ok {
+		t.Fatalf("project lease was not released after foreground completion: %s", result.Content)
+	}
+	if content, err := os.ReadFile(path); err != nil || string(content) != "after\n" {
+		t.Fatalf("following edit was not applied: %q (%v)", content, err)
+	}
+}
+
+func collaborationResourceCall(t *testing.T, eng *Engine, call tool.Call) tool.Result {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	result := eng.callTrackedTool(ctx, call.SessionID, call.TurnID, store.ModeCode, call)
+	if ctx.Err() != nil {
+		t.Fatalf("%s did not complete while the managed process was running: %v", call.Name, ctx.Err())
+	}
+	return result
+}
+
+func collaborationCommandHelper(t *testing.T, args ...string) string {
+	t.Helper()
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	argv := append([]string{executable, "-test.run=^TestCollaborationCommandHelperProcess$", "--"}, args...)
+	escapedQuote := "'\\''"
+	if runtime.GOOS == "windows" {
+		escapedQuote = "''"
+	}
+	for i, arg := range argv {
+		argv[i] = "'" + strings.ReplaceAll(arg, "'", escapedQuote) + "'"
+	}
+	command := strings.Join(argv, " ")
+	if runtime.GOOS == "windows" {
+		command = "& " + command
+	}
+	return command
+}
+
+func TestCollaborationCommandHelperProcess(t *testing.T) {
+	var args []string
+	for i, arg := range os.Args {
+		if arg == "--" {
+			args = os.Args[i+1:]
+			break
+		}
+	}
+	if len(args) == 0 {
+		return
+	}
+	switch args[0] {
+	case "background":
+		_, _ = os.Stdout.WriteString("ready\n")
+		time.Sleep(time.Minute)
+	case "foreground":
+		if len(args) != 3 {
+			os.Exit(2)
+		}
+		deadline := time.Now().Add(20 * time.Second)
+		for {
+			if _, err := os.Stat(args[1]); err == nil {
+				break
+			}
+			if time.Now().After(deadline) {
+				os.Exit(3)
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		if err := os.WriteFile(args[2], []byte("command\n"), 0o600); err != nil {
+			os.Exit(4)
+		}
+	default:
+		os.Exit(2)
+	}
+	os.Exit(0)
 }

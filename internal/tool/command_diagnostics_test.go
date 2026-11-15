@@ -446,6 +446,19 @@ func TestCommandVerificationKindRecognizesStaticInvocations(t *testing.T) {
 		{[]string{"npm", "run", "test", "--dry-run"}, ""},
 		{[]string{"npm", "--version"}, ""},
 		{[]string{"tsc", "--version"}, ""},
+		{[]string{"tsc", "--noEmit"}, "check"},
+		{[]string{"tsc", "--listFiles", "--noEmit"}, "check"},
+		{[]string{"tsc", "--showConfig", "false", "--noEmit"}, "check"},
+		{[]string{"tsc", "--showConfig", "--showConfig", "false"}, "check"},
+		{[]string{"tsc", "--build", "--dry", "false"}, "check"},
+		{[]string{"tsc", "--build", "--force"}, "check"},
+		{[]string{"go", "build", "-n=false", "./..."}, "build"},
+		{[]string{"go", "build", "-n", "-n=false", "./..."}, "build"},
+		{[]string{"go", "build", "-ldflags", "-n", "./..."}, "build"},
+		{[]string{"go", "vet", "./..."}, "lint"},
+		{[]string{"eslint", "--fix-dry-run", "src"}, "lint"},
+		{[]string{"ruff", "check", "--statistics", "."}, "lint"},
+		{[]string{"golangci-lint", "run", "--fix"}, "lint"},
 		{[]string{"node", "--help", "--test"}, ""},
 		{[]string{"node", "script.js", "--test"}, ""},
 		{[]string{"node", "-e", "--test"}, ""},
@@ -454,5 +467,70 @@ func TestCommandVerificationKindRecognizesStaticInvocations(t *testing.T) {
 		if got := commandVerificationKind(tc.argv); got != tc.kind {
 			t.Errorf("%q: kind=%q, want %q", tc.argv, got, tc.kind)
 		}
+	}
+}
+
+func TestCommandNonExecutingModesDoNotClaimVerification(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("PowerShell does not emit POSIX verification metadata")
+	}
+	root := t.TempDir()
+	for _, command := range []string{
+		"tsc --showConfig",
+		"tsc --showconfig",
+		"tsc --listFilesOnly",
+		"tsc --init",
+		"tsc --all",
+		"tsc --build --dry",
+		"tsc -b --clean",
+		"tsc --showConfig false --listFilesOnly",
+		"npx tsc --showConfig",
+		"pnpm exec tsc --listFilesOnly",
+		"go build -n ./...",
+		"go build -n=true ./...",
+		"go build --n ./...",
+		"go build -n=false -n ./...",
+		"go vet -n ./...",
+		"eslint --print-config src/app.js",
+		"eslint --print-config=src/app.js",
+		"eslint --init",
+		"eslint --env-info",
+		"eslint --inspect-config",
+		"eslint --mcp",
+		"eslint -v",
+		"ruff check --show-files .",
+		"ruff check --show-settings app.py",
+		"ruff rule E501",
+		"ruff config",
+		"ruff version",
+		"ruff clean",
+		"golangci-lint linters",
+		"golangci-lint config path",
+		"golangci-lint config verify",
+		"golangci-lint version",
+	} {
+		t.Run(command, func(t *testing.T) {
+			args := commandRunArgs{Command: command}
+			stdout, stderr := newCommandOutputBuffers(args, root, []string{root})
+			// Exercise the bounded model view as well as the canonical result:
+			// informational output must never gain a verification conclusion.
+			stdout.Write([]byte(strings.Repeat("configuration information\n", 1000)))
+			result := commandResult(Result{}, args, "sh", root, []string{root}, nil, 0, stdout, stderr, false, false, 0, "", nil)
+			for _, content := range []string{result.Content, ModelResultContent(CommandRun, result.Ok, result.Content, "turn", "call", true)} {
+				var fields map[string]any
+				if err := json.Unmarshal([]byte(content), &fields); err != nil {
+					t.Fatal(err)
+				}
+				if fields["ok"] != true || fields["exitCode"] != float64(0) {
+					t.Fatalf("process completion changed: %s", content)
+				}
+				if _, exists := fields["verificationKind"]; exists {
+					t.Fatalf("non-executing invocation claimed a verification kind: %s", content)
+				}
+				if _, exists := fields["verificationStatus"]; exists {
+					t.Fatalf("non-executing invocation claimed a verification outcome: %s", content)
+				}
+			}
+		})
 	}
 }

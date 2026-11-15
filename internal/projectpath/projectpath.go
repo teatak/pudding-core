@@ -28,7 +28,6 @@ func NormalizeRoots(roots []string) []string {
 	seen := make(map[string]bool, len(roots))
 	out := make([]string, 0, len(roots))
 	for _, root := range roots {
-		root = strings.TrimSpace(root)
 		if root == "" || !filepath.IsAbs(root) {
 			continue
 		}
@@ -52,7 +51,6 @@ func Resolve(roots []string, rawPath string, allowRoot, allowMissing bool) (stri
 	if len(roots) == 0 {
 		return "", "", "", ErrRootsRequired
 	}
-	rawPath = strings.TrimSpace(rawPath)
 	if rawPath == "" {
 		rawPath = "."
 	}
@@ -110,6 +108,94 @@ func Resolve(roots []string, rawPath string, allowRoot, allowMissing bool) (stri
 		return root, resolvedCandidate, filepath.ToSlash(rel), nil
 	}
 	return "", "", "", ErrPathNotAllowed
+}
+
+// ResolveEntry authorizes and resolves a directory entry without following its
+// final symlink. Parent and root aliases retain the same canonical authority as
+// Resolve. This is for metadata, unlink and rename operations, not content reads.
+func ResolveEntry(roots []string, rawPath string, allowRoot, allowMissing bool) (string, string, string, error) {
+	roots = NormalizeRoots(roots)
+	if len(roots) == 0 {
+		return "", "", "", ErrRootsRequired
+	}
+	if rawPath == "" {
+		rawPath = "."
+	}
+	candidate := filepath.Clean(rawPath)
+	if !filepath.IsAbs(candidate) {
+		if len(roots) != 1 {
+			return "", "", "", &AbsolutePathRequiredError{Roots: roots}
+		}
+		candidate = filepath.Join(roots[0], candidate)
+	}
+	// An explicitly authorized root remains protected even when another root
+	// authorizes its parent. In particular, do not turn an authorized root
+	// symlink into an unlink target merely because the parent is also allowed.
+	for _, root := range roots {
+		if candidate != root {
+			continue
+		}
+		resolvedRoot, err := filepath.EvalSymlinks(root)
+		if err != nil {
+			return "", "", "", err
+		}
+		if !allowRoot {
+			return "", "", "", ErrFileRequired
+		}
+		return root, resolvedRoot, ".", nil
+	}
+	root, parent, _, err := Resolve(roots, filepath.Dir(candidate), true, true)
+	if err != nil {
+		// A root itself can be spelled through an alias whose parent is not
+		// authorized. It remains the protected root, never an unlink target.
+		if target, targetErr := filepath.EvalSymlinks(candidate); targetErr == nil {
+			for _, root := range roots {
+				resolvedRoot, rootErr := filepath.EvalSymlinks(root)
+				if rootErr == nil && target == resolvedRoot {
+					if !allowRoot {
+						return "", "", "", ErrFileRequired
+					}
+					return root, resolvedRoot, ".", nil
+				}
+			}
+		}
+		return "", "", "", err
+	}
+	resolvedRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		return "", "", "", err
+	}
+	target := filepath.Join(parent, filepath.Base(candidate))
+	// A canonical spelling or parent alias can name a nested authorized root
+	// even if resolving the parent selected a larger root first. Compare the
+	// authorized root's entry as well when that root is itself a symlink.
+	for _, authorizedRoot := range roots {
+		canonicalRoot, rootErr := filepath.EvalSymlinks(authorizedRoot)
+		if rootErr != nil {
+			continue
+		}
+		rootEntry := authorizedRoot
+		if rootParent, parentErr := filepath.EvalSymlinks(filepath.Dir(authorizedRoot)); parentErr == nil {
+			rootEntry = filepath.Join(rootParent, filepath.Base(authorizedRoot))
+		}
+		if target == canonicalRoot || target == rootEntry {
+			if !allowRoot {
+				return "", "", "", ErrFileRequired
+			}
+			return authorizedRoot, canonicalRoot, ".", nil
+		}
+	}
+	rel, err := filepath.Rel(resolvedRoot, target)
+	if err != nil || !Inside(target, resolvedRoot) {
+		return "", "", "", ErrPathNotAllowed
+	}
+	if rel == "." && !allowRoot {
+		return "", "", "", ErrFileRequired
+	}
+	if _, err := os.Lstat(target); err != nil && !(allowMissing && errors.Is(err, os.ErrNotExist)) {
+		return "", "", "", err
+	}
+	return root, target, filepath.ToSlash(rel), nil
 }
 
 func Inside(path, root string) bool {

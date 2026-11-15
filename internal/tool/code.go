@@ -110,6 +110,9 @@ func (r *BuiltinRunner) codeSymbols(ctx context.Context, call Call) Result {
 	if unavailable := r.codeServiceUnavailable(out); unavailable != nil {
 		return *unavailable
 	}
+	if _, failed := r.refreshCodeDocuments(ctx, out, call, target); failed != nil {
+		return *failed
+	}
 	if target.language == "typescript" {
 		if err := r.syncCodeSymbolSeed(ctx, target); err != nil {
 			if strings.Contains(err.Error(), "language_root_not_found") {
@@ -325,43 +328,68 @@ func (r *BuiltinRunner) codeDiagnostics(ctx context.Context, call Call) Result {
 	if unavailable := r.codeServiceUnavailable(out); unavailable != nil {
 		return *unavailable
 	}
-	var sharedTarget *resolvedCodeTarget
-	diagnostics := make([]codeDiagnostic, 0)
-	fresh := true
-	truncated := false
+	type diagnosticTarget struct {
+		target   resolvedCodeTarget
+		document lsp.Document
+		state    lsp.DocumentState
+	}
+	targets := make([]diagnosticTarget, 0, len(args.Paths))
 	for _, path := range args.Paths {
 		target, failed := r.codeTarget(out, call, path, args.Language, false)
 		if failed != nil {
 			return *failed
 		}
-		if sharedTarget != nil && sharedTarget.spec.Key != target.spec.Key {
+		if len(targets) > 0 && targets[0].target.spec.Key != target.spec.Key {
 			return toolJSONError(out, "mixed_language_targets", "all diagnostic paths must use the same language root and server")
 		}
-		if sharedTarget == nil {
-			copyTarget := target
-			sharedTarget = &copyTarget
-		}
-		text, _, err := readCodeDocument(target.path)
+		targets = append(targets, diagnosticTarget{target: target})
+	}
+	refreshed, failed := r.refreshCodeDocuments(ctx, out, call, targets[0].target)
+	if failed != nil {
+		return *failed
+	}
+	// Synchronize the whole batch before requesting any diagnostics. Otherwise
+	// the first file can be checked against an old overlay of a later file.
+	batchChanged := false
+	for index := range targets {
+		item := &targets[index]
+		text, _, err := readCodeDocument(item.target.path)
 		if err != nil {
 			return codeDocumentError(out, err)
 		}
-		document := lsp.Document{URI: codeFileURI(target.path), LanguageID: target.documentLanguageID, Text: text}
-		state, err := r.languageService.SyncDocument(ctx, target.spec, document)
+		item.document = lsp.Document{URI: codeFileURI(item.target.path), LanguageID: item.target.documentLanguageID, Text: text}
+		state, err := r.languageService.SyncDocument(ctx, item.target.spec, item.document)
 		if err != nil {
 			return codeServiceError(out, err)
 		}
-		items, itemFresh, err := r.codeDocumentDiagnostics(ctx, target, document.URI, state)
+		item.state = codeStateAfterRefresh(state, refreshed)
+		batchChanged = batchChanged || item.state.Changed
+	}
+	if batchChanged {
+		for index := range targets {
+			state := &targets[index].state
+			state.Changed = true
+			if previous, ok := refreshed[state.URI]; ok {
+				state.PreviousDiagnosticGeneration = min(state.PreviousDiagnosticGeneration, previous.PreviousDiagnosticGeneration)
+			}
+		}
+	}
+	diagnostics := make([]codeDiagnostic, 0)
+	fresh := true
+	truncated := false
+	for _, target := range targets {
+		items, itemFresh, err := r.codeDocumentDiagnostics(ctx, target.target, target.document.URI, target.state)
 		if err != nil {
 			return codeServiceError(out, err)
 		}
 		fresh = fresh && itemFresh
-		converter := newCodeLocationConverter(call.ProjectDirs, state.PositionEncoding)
+		converter := newCodeLocationConverter(call.ProjectDirs, target.state.PositionEncoding)
 		for _, item := range items {
 			level := codeDiagnosticSeverity(item.Severity)
 			if len(severity) > 0 && !severity[level] {
 				continue
 			}
-			location, ok := converter.convert(rawLSPLocation{URI: document.URI, Range: item.Range})
+			location, ok := converter.convert(rawLSPLocation{URI: target.document.URI, Range: item.Range})
 			if !ok {
 				continue
 			}
@@ -389,7 +417,7 @@ func (r *BuiltinRunner) codeDiagnostics(ctx context.Context, call Call) Result {
 		}
 		return left.Column < right.Column
 	})
-	payload := codeBasePayload(*sharedTarget)
+	payload := codeBasePayload(targets[0].target)
 	payload["diagnostics"] = diagnostics
 	payload["diagnosticCount"] = len(diagnostics)
 	payload["fresh"] = fresh
@@ -407,6 +435,10 @@ func (r *BuiltinRunner) prepareCodePosition(ctx context.Context, out Result, cal
 	if failed != nil {
 		return resolvedCodeTarget{}, lsp.Document{}, nil, lsp.DocumentState{}, failed
 	}
+	refreshed, failed := r.refreshCodeDocuments(ctx, out, call, target)
+	if failed != nil {
+		return resolvedCodeTarget{}, lsp.Document{}, nil, lsp.DocumentState{}, failed
+	}
 	text, lines, err := readCodeDocument(target.path)
 	if err != nil {
 		result := codeDocumentError(out, err)
@@ -418,7 +450,7 @@ func (r *BuiltinRunner) prepareCodePosition(ctx context.Context, out Result, cal
 		result := codeServiceError(out, err)
 		return resolvedCodeTarget{}, lsp.Document{}, nil, lsp.DocumentState{}, &result
 	}
-	return target, document, lines, state, nil
+	return target, document, lines, codeStateAfterRefresh(state, refreshed), nil
 }
 
 func (r *BuiltinRunner) codeDocumentDiagnostics(ctx context.Context, target resolvedCodeTarget, uri string, state lsp.DocumentState) ([]lsp.Diagnostic, bool, error) {

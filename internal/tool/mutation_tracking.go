@@ -70,14 +70,14 @@ func MutationTrackingForCall(call Call) (ProjectMutationTracking, bool) {
 		}
 		targets := make([]string, 0, len(args.Files))
 		for _, file := range args.Files {
-			target, ok := resolveMutationTarget(call.ProjectDirs, file.Path, true)
+			target, ok := resolveMutationEntryTarget(call.ProjectDirs, file.Path, true)
 			if !ok {
 				return ProjectMutationTracking{}, false
 			}
 			targets = append(targets, target)
 		}
 		return structuredMutationTracking(targets)
-	case FileWrite, FileDelete, AttachmentExport:
+	case FileWrite, AttachmentExport:
 		var args mutationPathArgs
 		if !decodeProjectMutationArgs(call.Args, &args) {
 			return ProjectMutationTracking{}, false
@@ -87,13 +87,23 @@ func MutationTrackingForCall(call Call) (ProjectMutationTracking, bool) {
 			return ProjectMutationTracking{}, false
 		}
 		return structuredMutationTracking([]string{target})
+	case FileDelete:
+		var args mutationPathArgs
+		if !decodeProjectMutationArgs(call.Args, &args) {
+			return ProjectMutationTracking{}, false
+		}
+		target, ok := resolveMutationEntryTarget(call.ProjectDirs, args.Path, true)
+		if !ok {
+			return ProjectMutationTracking{}, false
+		}
+		return structuredMutationTracking([]string{target})
 	case FileMove:
 		var args mutationMoveArgs
 		if !decodeProjectMutationArgs(call.Args, &args) {
 			return ProjectMutationTracking{}, false
 		}
-		from, fromOK := resolveMutationTarget(call.ProjectDirs, args.FromPath, false)
-		to, toOK := resolveMutationTarget(call.ProjectDirs, args.ToPath, true)
+		from, fromOK := resolveMutationEntryTarget(call.ProjectDirs, args.FromPath, false)
+		to, toOK := resolveMutationEntryTarget(call.ProjectDirs, args.ToPath, true)
 		if !fromOK || !toOK {
 			return ProjectMutationTracking{}, false
 		}
@@ -163,6 +173,14 @@ func commandMutationTracking(call Call) (ProjectMutationTracking, bool) {
 		seen[file] = struct{}{}
 	}
 	overflow := false
+	collect := func(target string) {
+		if _, duplicate := seen[target]; duplicate || overflow {
+			return
+		}
+		seen[target] = struct{}{}
+		targets = append(targets, target)
+		overflow = len(targets) > maxCommandMutationTargets
+	}
 	collectShellMutationTargets(analysis.file, resolvedCWD, args.Env, func(cwd, raw string) {
 		if overflow {
 			return
@@ -171,12 +189,14 @@ func commandMutationTracking(call Call) (ProjectMutationTracking, bool) {
 		if !ok {
 			return
 		}
-		if _, duplicate := seen[target]; duplicate {
-			return
+		collect(target)
+		// An unlink changes the link, while a redirection may change its
+		// referent. Observe both exact files, never a linked directory tree.
+		if _, referent, _, err := resolveProjectPath(call.ProjectDirs, target, false, false); err == nil && referent != target {
+			if info, err := os.Stat(referent); err == nil && info.Mode().IsRegular() {
+				collect(referent)
+			}
 		}
-		seen[target] = struct{}{}
-		targets = append(targets, target)
-		overflow = len(targets) > maxCommandMutationTargets
 	})
 	if overflow || len(targets) == 0 {
 		return observation, true
@@ -195,23 +215,39 @@ func resolveCommandMutationFiles(roots []string, cwd string, paths []string) ([]
 		if !filepath.IsAbs(path) {
 			path = filepath.Join(cwd, path)
 		}
-		_, target, relative, err := resolveProjectPath(roots, path, true, true)
+		_, target, relative, err := resolveProjectEntryPath(roots, path, true, true)
 		if err != nil {
 			return nil, fmt.Errorf("mutation_paths: %w", err)
 		}
 		if relative == "." {
 			return nil, errors.New("mutation_paths must name files, not project roots")
 		}
-		info, err := os.Stat(target)
+		info, err := os.Lstat(target)
 		if err != nil && !errors.Is(err, os.ErrNotExist) {
 			return nil, fmt.Errorf("mutation_paths: %w", err)
 		}
-		if err == nil && !info.Mode().IsRegular() {
+		if err == nil && !info.Mode().IsRegular() && info.Mode()&os.ModeSymlink == 0 {
 			return nil, fmt.Errorf("mutation_paths must name regular files: %s", path)
+		}
+		if err == nil && info.Mode()&os.ModeSymlink != 0 {
+			_, referent, _, err := resolveProjectPath(roots, target, false, false)
+			if err != nil {
+				return nil, fmt.Errorf("mutation_paths: %w", err)
+			}
+			if info, err := os.Stat(referent); err != nil || !info.Mode().IsRegular() {
+				return nil, fmt.Errorf("mutation_paths must name regular files: %s", path)
+			}
+			if !seen[referent] {
+				files = append(files, referent)
+				seen[referent] = true
+			}
 		}
 		if !seen[target] {
 			files = append(files, target)
 			seen[target] = true
+		}
+		if len(files) > maxCommandMutationTargets {
+			return nil, fmt.Errorf("mutation_paths resolves to more than %d files", maxCommandMutationTargets)
 		}
 	}
 	sort.Strings(files)
@@ -219,8 +255,7 @@ func resolveCommandMutationFiles(roots []string, cwd string, paths []string) ([]
 }
 
 func resolveCommandMutationTarget(roots []string, cwd, raw string) (string, bool) {
-	raw = strings.TrimSpace(raw)
-	if raw == "" || strings.ContainsAny(raw, "$*?[") {
+	if strings.TrimSpace(raw) == "" || strings.ContainsAny(raw, "$*?[") {
 		return "", false
 	}
 	target := raw
@@ -237,7 +272,7 @@ func resolveCommandMutationTarget(roots []string, cwd, raw string) (string, bool
 		}
 		target = filepath.Join(physicalCWD, target)
 	}
-	_, resolved, relative, err := resolveProjectPath(roots, target, true, true)
+	_, resolved, relative, err := resolveProjectEntryPath(roots, target, true, true)
 	if err != nil || relative == "." {
 		return "", false
 	}
@@ -403,8 +438,8 @@ func commandMutationOperands(args []string, valueOptions map[string]bool) []stri
 	operands := make([]string, 0, len(args))
 	optionsEnded := false
 	for index := 0; index < len(args); index++ {
-		arg := strings.TrimSpace(args[index])
-		if arg == "" {
+		arg := args[index]
+		if strings.TrimSpace(arg) == "" {
 			continue
 		}
 		if !optionsEnded && arg == "--" {
@@ -447,5 +482,10 @@ func mutationScope(value any) (string, bool) {
 
 func resolveMutationTarget(roots []string, path string, allowMissing bool) (string, bool) {
 	_, target, _, err := resolveProjectPath(roots, path, true, allowMissing)
+	return target, err == nil
+}
+
+func resolveMutationEntryTarget(roots []string, path string, allowMissing bool) (string, bool) {
+	_, target, _, err := resolveProjectEntryPath(roots, path, true, allowMissing)
 	return target, err == nil
 }

@@ -18,6 +18,7 @@ import (
 type fakeCodeLanguageService struct {
 	request   func(method string, params, result any) error
 	sync      func(document lsp.Document) (lsp.DocumentState, error)
+	refresh   func(load lsp.DocumentLoader) (map[string]lsp.DocumentState, error)
 	published func(uri string, after uint64) (lsp.DiagnosticSnapshot, bool, error)
 	encoding  string
 }
@@ -45,6 +46,13 @@ func (f *fakeCodeLanguageService) PublishedDiagnostics(_ context.Context, _ lsp.
 		return f.published(uri, after)
 	}
 	return lsp.DiagnosticSnapshot{}, false, context.DeadlineExceeded
+}
+
+func (f *fakeCodeLanguageService) RefreshDocuments(_ context.Context, _ lsp.ServerSpec, load lsp.DocumentLoader) (map[string]lsp.DocumentState, error) {
+	if f.refresh != nil {
+		return f.refresh(load)
+	}
+	return nil, nil
 }
 
 func (f *fakeCodeLanguageService) PositionEncoding(context.Context, lsp.ServerSpec) (string, error) {

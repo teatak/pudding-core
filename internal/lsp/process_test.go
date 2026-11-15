@@ -420,6 +420,13 @@ type fakeLSP struct {
 	ignoreShutdown  bool
 	documentOpens   int
 	documentChanges int
+	documentCloses  int
+	documents       map[string]fakeLSPDocument
+}
+
+type fakeLSPDocument struct {
+	Text    string `json:"text"`
+	Version int    `json:"version"`
 }
 
 func runFakeLSP() error {
@@ -427,6 +434,7 @@ func runFakeLSP() error {
 		reader:         newFrameReader(os.Stdin, DefaultMaxMessageBytes, DefaultMaxHeaderBytes),
 		serverRequest:  map[string]json.RawMessage{},
 		ignoreShutdown: os.Getenv(helperIgnoreShutdownEnv) == "1",
+		documents:      map[string]fakeLSPDocument{},
 	}
 	for {
 		payload, err := server.reader.Read()
@@ -514,15 +522,36 @@ func (s *fakeLSP) handleClientMessage(message wireMessage) (bool, error) {
 		s.documentOpens++
 		var params struct {
 			TextDocument struct {
-				URI string `json:"uri"`
+				URI     string `json:"uri"`
+				Text    string `json:"text"`
+				Version int    `json:"version"`
 			} `json:"textDocument"`
 		}
 		if err := json.Unmarshal(message.Params, &params); err != nil {
 			return false, err
 		}
+		s.documents[params.TextDocument.URI] = fakeLSPDocument{Text: params.TextDocument.Text, Version: params.TextDocument.Version}
 		return false, s.publishDocumentDiagnostic(params.TextDocument.URI)
 	case "textDocument/didChange":
 		s.documentChanges++
+		var params struct {
+			TextDocument struct {
+				URI     string `json:"uri"`
+				Version int    `json:"version"`
+			} `json:"textDocument"`
+			ContentChanges []struct {
+				Text string `json:"text"`
+			} `json:"contentChanges"`
+		}
+		if err := json.Unmarshal(message.Params, &params); err != nil {
+			return false, err
+		}
+		if len(params.ContentChanges) != 1 {
+			return false, errors.New("expected one full document change")
+		}
+		s.documents[params.TextDocument.URI] = fakeLSPDocument{Text: params.ContentChanges[0].Text, Version: params.TextDocument.Version}
+		return false, s.publishDocumentDiagnostic(params.TextDocument.URI)
+	case "textDocument/didClose":
 		var params struct {
 			TextDocument struct {
 				URI string `json:"uri"`
@@ -531,9 +560,12 @@ func (s *fakeLSP) handleClientMessage(message wireMessage) (bool, error) {
 		if err := json.Unmarshal(message.Params, &params); err != nil {
 			return false, err
 		}
-		return false, s.publishDocumentDiagnostic(params.TextDocument.URI)
+		s.documentCloses++
+		delete(s.documents, params.TextDocument.URI)
+	case "test/documents":
+		return false, s.respond(message.ID, s.documents)
 	case "test/documentState":
-		return false, s.respond(message.ID, map[string]int{"opens": s.documentOpens, "changes": s.documentChanges})
+		return false, s.respond(message.ID, map[string]int{"opens": s.documentOpens, "changes": s.documentChanges, "closes": s.documentCloses})
 	case "shutdown":
 		if s.ignoreShutdown {
 			return false, nil

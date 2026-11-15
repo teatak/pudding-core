@@ -64,8 +64,14 @@ func commandVerificationKind(argv []string) string {
 		case "test":
 			return "test"
 		case "vet":
+			if goBuildDryRun(args[1:]) {
+				return ""
+			}
 			return "lint"
 		case "build":
+			if goBuildDryRun(args[1:]) {
+				return ""
+			}
 			return "build"
 		}
 	case "npm", "pnpm", "yarn", "bun":
@@ -140,8 +146,21 @@ func commandVerificationKind(argv []string) string {
 			return "test"
 		}
 	case "tsc":
-		return "check"
-	case "eslint", "golangci-lint", "ruff", "clippy":
+		return typeScriptVerificationKind(args)
+	case "eslint":
+		if commandHasOption(args, "--init", "--print-config", "--env-info", "--inspect-config", "--mcp", "-v") {
+			return ""
+		}
+		return "lint"
+	case "golangci-lint":
+		if first == "run" {
+			return "lint"
+		}
+	case "ruff":
+		if first == "check" && !commandHasOption(args[1:], "--show-files", "--show-settings") {
+			return "lint"
+		}
+	case "clippy":
 		return "lint"
 	case "mvn", "mvnw":
 		return verificationTargetKind(first)
@@ -151,6 +170,79 @@ func commandVerificationKind(argv []string) string {
 		return verificationTargetKind(first)
 	}
 	return ""
+}
+
+// Information, initialization and build planning modes can exit successfully
+// without checking source. TypeScript boolean options also accept a separate
+// false value, and repeated options use their last value.
+func typeScriptVerificationKind(args []string) string {
+	enabled := make(map[string]bool)
+	for i := 0; i < len(args); i++ {
+		if args[i] == "--" {
+			break
+		}
+		flag, value, inline := strings.Cut(strings.ToLower(args[i]), "=")
+		switch flag {
+		case "--all", "--init", "--showconfig", "--listfilesonly", "--clean", "--dry":
+			if !inline && i+1 < len(args) && (args[i+1] == "true" || args[i+1] == "false") {
+				i++
+				value = args[i]
+			}
+			enabled[flag] = value != "false"
+		}
+	}
+	for _, value := range enabled {
+		if value {
+			return ""
+		}
+	}
+	return "check"
+}
+
+// Build and vet share Go's -n option. Consume known value flags so a linker
+// argument named -n does not become a dry-run flag. Go boolean flags take
+// optional values only with '=', unlike TypeScript's separate boolean values.
+func goBuildDryRun(args []string) bool {
+	dryRun := false
+	for i := 0; i < len(args); i++ {
+		if args[i] == "--" {
+			break
+		}
+		if !strings.HasPrefix(args[i], "-") {
+			continue
+		}
+		flag, value, inline := strings.Cut(strings.TrimLeft(args[i], "-"), "=")
+		switch flag {
+		case "n":
+			dryRun = true
+			if inline {
+				parsed, err := strconv.ParseBool(value)
+				dryRun = err != nil || parsed
+			}
+		case "C", "o", "p", "asmflags", "buildmode", "compiler", "covermode", "coverpkg",
+			"gccgoflags", "gcflags", "installsuffix", "ldflags", "mod", "modfile", "overlay",
+			"pgo", "pkgdir", "tags", "toolexec", "vettool":
+			if !inline {
+				i++
+			}
+		}
+	}
+	return dryRun
+}
+
+func commandHasOption(args []string, options ...string) bool {
+	for _, arg := range args {
+		if arg == "--" {
+			break
+		}
+		flag, _, _ := strings.Cut(arg, "=")
+		for _, option := range options {
+			if flag == option {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func nodeVerificationKind(args []string) string {

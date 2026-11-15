@@ -24,6 +24,7 @@ import (
 
 	"github.com/teatak/pudding-core/internal/home"
 	"github.com/teatak/pudding-core/internal/projectfs"
+	"github.com/teatak/pudding-core/internal/projectpath"
 	"github.com/teatak/pudding-core/internal/skill"
 )
 
@@ -177,7 +178,6 @@ func (r *BuiltinRunner) fileList(ctx context.Context, call Call) Result {
 }
 
 func projectRootListRequested(rawPath string) bool {
-	rawPath = strings.TrimSpace(rawPath)
 	return rawPath == "" || rawPath == "."
 }
 
@@ -221,7 +221,7 @@ func (r *BuiltinRunner) fileStat(call Call) Result {
 		return toolArgumentFailure(out, err)
 	}
 	args.Scope = strings.TrimSpace(args.Scope)
-	resolved, err := r.resolveFilePath(call, args.Scope, args.Path, false, true, true)
+	resolved, err := r.resolveFileEntryPath(call, args.Scope, args.Path, false, true, true)
 	if err != nil {
 		return filePathError(out, args.Scope, err)
 	}
@@ -578,9 +578,8 @@ func (r *BuiltinRunner) fileWrite(call Call) Result {
 		return toolArgumentFailure(out, err)
 	}
 	args.Scope = strings.TrimSpace(args.Scope)
-	args.Path = strings.TrimSpace(args.Path)
 	for _, field := range []struct{ name, value string }{{"scope", args.Scope}, {"path", args.Path}} {
-		if field.value == "" {
+		if strings.TrimSpace(field.value) == "" {
 			return toolArgumentFailure(out, &toolArgumentError{
 				kind: "invalid_value", detail: field.name + " must be a non-empty string", field: field.name,
 				expected: "non-empty string", hint: "Set the required " + field.name + " field and retry.", receivedBytes: len(call.Args),
@@ -663,14 +662,14 @@ func (r *BuiltinRunner) fileDelete(call Call) Result {
 		return toolJSONError(out, "invalid_arguments", err.Error())
 	}
 	args.Scope = strings.TrimSpace(args.Scope)
-	resolved, err := r.resolveFilePath(call, args.Scope, args.Path, true, false, true)
+	resolved, err := r.resolveFileEntryPath(call, args.Scope, args.Path, true, false, true)
 	if err != nil {
 		return filePathError(out, args.Scope, err)
 	}
 	if resolved.rel == "." {
 		return toolJSONError(out, "refuse_root_delete", "deleting a scope root is not allowed")
 	}
-	info, err := os.Stat(resolved.target)
+	info, err := os.Lstat(resolved.target)
 	if err != nil {
 		return fileIOError(out, "stat_failed", resolved.target, err)
 	}
@@ -704,11 +703,11 @@ func (r *BuiltinRunner) fileMove(call Call) Result {
 		return toolJSONError(out, "invalid_arguments", err.Error())
 	}
 	args.Scope = strings.TrimSpace(args.Scope)
-	fromResolved, err := r.resolveFilePath(call, args.Scope, args.FromPath, true, false, false)
+	fromResolved, err := r.resolveFileEntryPath(call, args.Scope, args.FromPath, true, false, false)
 	if err != nil {
 		return filePathErrorWithReason(out, args.Scope, "from_path_not_allowed", err)
 	}
-	toResolved, err := r.resolveFilePath(call, args.Scope, args.ToPath, true, false, true)
+	toResolved, err := r.resolveFileEntryPath(call, args.Scope, args.ToPath, true, false, true)
 	if err != nil {
 		return filePathErrorWithReason(out, args.Scope, "to_path_not_allowed", err)
 	}
@@ -776,7 +775,6 @@ func decodeFileCopyArgs(raw json.RawMessage) (fileCopyArgs, error) {
 		value *fileCopyEndpoint
 	}{{"from", &args.From}, {"to", &args.To}} {
 		endpoint.value.Scope = strings.TrimSpace(endpoint.value.Scope)
-		endpoint.value.Path = strings.TrimSpace(endpoint.value.Path)
 		if endpoint.value.Scope == "" {
 			if !filepath.IsAbs(endpoint.value.Path) {
 				return args, errors.New(endpoint.name + ".scope is required for a relative path")
@@ -788,7 +786,7 @@ func decodeFileCopyArgs(raw json.RawMessage) (fileCopyArgs, error) {
 		default:
 			return args, &invalidScopeError{Field: endpoint.name + ".scope", Allowed: []string{managedScopeTemp, managedScopeSkill, managedScopeProject}}
 		}
-		if endpoint.value.Path == "" {
+		if strings.TrimSpace(endpoint.value.Path) == "" {
 			return args, errors.New(endpoint.name + ".path is required")
 		}
 	}
@@ -951,18 +949,34 @@ func copyFileDir(src, dst string) error {
 }
 
 func (r *BuiltinRunner) resolveFilePath(call Call, scope, rawPath string, requireWritable, allowRoot, allowMissing bool) (resolvedFilePath, error) {
+	return r.resolveFilePathMode(call, scope, rawPath, requireWritable, allowRoot, allowMissing, false)
+}
+
+func (r *BuiltinRunner) resolveFileEntryPath(call Call, scope, rawPath string, requireWritable, allowRoot, allowMissing bool) (resolvedFilePath, error) {
+	return r.resolveFilePathMode(call, scope, rawPath, requireWritable, allowRoot, allowMissing, true)
+}
+
+func resolveProjectEntryPath(roots []string, rawPath string, allowRoot, allowMissing bool) (string, string, string, error) {
+	return projectpath.ResolveEntry(roots, rawPath, allowRoot, allowMissing)
+}
+
+func (r *BuiltinRunner) resolveFilePathMode(call Call, scope, rawPath string, requireWritable, allowRoot, allowMissing, preserveEntry bool) (resolvedFilePath, error) {
 	scope = strings.TrimSpace(scope)
 	if scope == managedScopeWidget {
 		return r.resolveWidgetFilePath(call, rawPath, requireWritable, allowRoot, allowMissing)
 	}
 	if isProjectFileScope(scope) {
-		root, target, rel, err := resolveProjectPath(call.ProjectDirs, rawPath, allowRoot, allowMissing)
+		resolve := resolveProjectPath
+		if preserveEntry {
+			resolve = resolveProjectEntryPath
+		}
+		root, target, rel, err := resolve(call.ProjectDirs, rawPath, allowRoot, allowMissing)
 		if err != nil {
 			return resolvedFilePath{}, err
 		}
 		return resolvedFilePath{root: root, target: target, rel: rel, project: true}, nil
 	}
-	root, target, rel, err := r.resolveManagedPath(scope, rawPath, requireWritable, allowRoot)
+	root, target, rel, err := r.resolveManagedPathMode(scope, rawPath, requireWritable, allowRoot, preserveEntry)
 	if err != nil {
 		return resolvedFilePath{}, err
 	}
@@ -1065,6 +1079,10 @@ func (r *BuiltinRunner) managedRoot(scope string) (string, bool, error) {
 }
 
 func (r *BuiltinRunner) resolveManagedPath(scope, rawPath string, requireWritable, allowRoot bool) (string, string, string, error) {
+	return r.resolveManagedPathMode(scope, rawPath, requireWritable, allowRoot, false)
+}
+
+func (r *BuiltinRunner) resolveManagedPathMode(scope, rawPath string, requireWritable, allowRoot, preserveEntry bool) (string, string, string, error) {
 	scope = strings.TrimSpace(scope)
 	root, writable, err := r.managedRoot(scope)
 	if err != nil {
@@ -1085,7 +1103,6 @@ func (r *BuiltinRunner) resolveManagedPath(scope, rawPath string, requireWritabl
 	if rootInfo.Mode()&os.ModeSymlink != 0 || !rootInfo.IsDir() {
 		return "", "", "", errors.New("managed scope root must be a directory, not a symlink")
 	}
-	rawPath = strings.TrimSpace(rawPath)
 	if rawPath == "" {
 		rawPath = "."
 	}
@@ -1102,7 +1119,11 @@ func (r *BuiltinRunner) resolveManagedPath(scope, rawPath string, requireWritabl
 	if err := validateManagedRelativePath(scope, cleaned, requireWritable); err != nil {
 		return "", "", "", err
 	}
-	_, target, rel, err := resolveProjectPath([]string{root}, cleaned, allowRoot, true)
+	resolve := resolveProjectPath
+	if preserveEntry {
+		resolve = resolveProjectEntryPath
+	}
+	_, target, rel, err := resolve([]string{root}, cleaned, allowRoot, true)
 	if err != nil {
 		return "", "", "", err
 	}

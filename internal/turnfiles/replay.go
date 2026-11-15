@@ -213,7 +213,7 @@ func authorizedReplayRoots(roots []string) (map[string]string, error) {
 }
 
 func replayTarget(root, rel string) (string, error) {
-	rel = filepath.Clean(filepath.FromSlash(strings.TrimSpace(rel)))
+	rel = filepath.Clean(filepath.FromSlash(rel))
 	if rel == "." || filepath.IsAbs(rel) || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return "", ErrReplayUnauthorized
 	}

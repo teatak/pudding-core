@@ -15,16 +15,16 @@ const turnFileChangeSummaryColumns = `id,session_id,turn_id,root_path,path,origi
 func insertTurnFileChangesTx(ctx context.Context, tx *sql.Tx, turn *store.Turn, changes []store.TurnFileChangeInput, now time.Time) error {
 	inserted := false
 	for _, change := range changes {
-		rootPath := strings.TrimSpace(change.RootPath)
-		path := strings.TrimSpace(change.Path)
-		if rootPath == "" || path == "" || !validFileChangeKind(change.Kind) {
+		rootPath := change.RootPath
+		path := change.Path
+		if strings.TrimSpace(rootPath) == "" || strings.TrimSpace(path) == "" || !validFileChangeKind(change.Kind) {
 			continue
 		}
 		_, err := tx.ExecContext(ctx, `INSERT INTO turn_file_changes(
 			id,session_id,turn_id,root_path,path,original_path,kind,origin,additions,deletions,binary,too_large,old_size,new_size,old_content,new_content,
 			snapshot_version,old_digest,new_digest,old_mode,new_mode,old_type,new_type,old_binary,new_binary,old_data,new_data,created_at
 		) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-			store.NewID("change"), turn.SessionID, turn.ID, rootPath, path, strings.TrimSpace(change.OriginalPath), change.Kind,
+			store.NewID("change"), turn.SessionID, turn.ID, rootPath, path, change.OriginalPath, change.Kind,
 			store.NormalizeFileChangeOrigin(change.Origin),
 			change.Additions, change.Deletions, boolInt(change.Binary), boolInt(change.TooLarge), change.OldSize, change.NewSize,
 			change.OldContent, change.NewContent, change.SnapshotVersion, change.OldDigest, change.NewDigest,

@@ -94,7 +94,7 @@ func modelResultJSON(name string, ok bool, content, turnID, callID string, canRe
 		}
 		return jsonString(preview)
 	}
-	if name == FilePatch && ok {
+	if (name == FilePatch || name == CodeRename) && ok {
 		for _, key := range []string{"status", "fileCount", "additions", "deletions", "destructive", "warnings", "widgetID", "draftHash"} {
 			if value, exists := fields[key]; exists && len(value) <= 1024 {
 				preview[key] = value
@@ -102,7 +102,13 @@ func modelResultJSON(name string, ok bool, content, turnID, callID string, canRe
 		}
 		var files []patchFileView
 		if json.Unmarshal(fields["files"], &files) == nil {
-			shown := modelPatchFilePreviews(files)
+			budget := modelResultHeadChars
+			if name == CodeRename {
+				// Keep the applied outcome and language-service status before
+				// optional changed-file ranges, including large error details.
+				budget = min(budget, max(0, modelResultMaxChars-utf8.RuneCountInString(jsonString(preview))-256))
+			}
+			shown := modelPatchFilePreviewsWithinBudget(files, budget)
 			preview["files"] = shown
 			preview["shown_files"] = len(shown)
 		}
@@ -150,8 +156,12 @@ type modelPatchFilePreview struct {
 }
 
 func modelPatchFilePreviews(files []patchFileView) []modelPatchFilePreview {
+	return modelPatchFilePreviewsWithinBudget(files, modelResultHeadChars)
+}
+
+func modelPatchFilePreviewsWithinBudget(files []patchFileView, maxChars int) []modelPatchFilePreview {
 	shown := make([]modelPatchFilePreview, 0, len(files))
-	budget := modelResultHeadChars / max(1, len(files))
+	budget := maxChars / max(1, len(files))
 	for _, file := range files {
 		item := modelPatchFilePreview{patchFileView: file}
 		// Reserve room for changed ranges as well as relocation coordinates.
@@ -173,7 +183,7 @@ func modelPatchFilePreviews(files []patchFileView) []modelPatchFilePreview {
 		item.LineRanges = file.LineRanges[:low]
 		item.LineRangesTruncated = low < len(file.LineRanges)
 		candidate := append(shown, item)
-		if utf8.RuneCountInString(jsonString(candidate)) > modelResultHeadChars {
+		if utf8.RuneCountInString(jsonString(candidate)) > maxChars {
 			break
 		}
 		shown = candidate
@@ -250,6 +260,7 @@ func resultJSON(value any) json.RawMessage {
 }
 
 func copyResultMetadata(out map[string]any, fields map[string]json.RawMessage) {
+	copyRenameResultMetadata(out, fields)
 	// Log truncation must not hide the bounded diagnostics extracted before it.
 	var diagnostics []map[string]json.RawMessage
 	if json.Unmarshal(fields["diagnostics"], &diagnostics) == nil && len(diagnostics) > 0 {
@@ -301,4 +312,49 @@ func copyResultMetadata(out map[string]any, fields map[string]json.RawMessage) {
 			out[key] = value
 		}
 	}
+}
+
+// Rename can succeed on disk while the subsequent language-service refresh
+// fails. Keep both facts together even when file ranges or server errors force
+// a model-only preview; the canonical result remains available through result_ref.
+func copyRenameResultMetadata(out map[string]any, fields map[string]json.RawMessage) {
+	var operation string
+	if json.Unmarshal(fields["operation"], &operation) != nil || operation != "rename" {
+		return
+	}
+	for _, key := range []string{"operation", "oldName", "newName", "editCount", "language", "server", "languageServiceSynced"} {
+		// Symbol names are bounded to 256 runes; 2048 bytes also allows JSON
+		// escaping without silently dropping a valid name from the preview.
+		if value := fields[key]; len(value) > 0 && len(value) <= 2048 {
+			out[key] = value
+		}
+	}
+	copyString := func(target map[string]any, source map[string]json.RawMessage, key string, budget int) {
+		var value string
+		if json.Unmarshal(source[key], &value) != nil {
+			return
+		}
+		runes := []rune(value)
+		count := modelCommandExcerptChars(runes, budget, false)
+		target[key] = string(runes[:count])
+		if count < len(runes) {
+			target[key+"Truncated"] = true
+		}
+	}
+	copyString(out, fields, "languageRoot", 512)
+	var synced bool
+	if json.Unmarshal(fields["languageServiceSynced"], &synced) != nil || synced {
+		return
+	}
+	out["languageServiceSyncWarning"] = "Rename is already applied. Do not repeat it. The next code query will retry language-service synchronization."
+	var failure map[string]json.RawMessage
+	if json.Unmarshal(fields["languageServiceSyncError"], &failure) != nil {
+		return
+	}
+	short := map[string]any{"ok": false}
+	copyString(short, failure, "reason", 128)
+	copyString(short, failure, "errorKind", 128)
+	copyString(short, failure, "detail", 1024)
+	copyString(short, failure, "hint", 256)
+	out["languageServiceSyncError"] = short
 }

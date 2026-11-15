@@ -17,6 +17,7 @@ import (
 	"github.com/teatak/pudding-core/internal/attachment"
 	"github.com/teatak/pudding-core/internal/prompt"
 	"github.com/teatak/pudding-core/internal/provider"
+	"github.com/teatak/pudding-core/internal/sessionworkspace"
 	"github.com/teatak/pudding-core/internal/store"
 	"github.com/teatak/pudding-core/internal/tool"
 )
@@ -26,6 +27,8 @@ type Builder struct {
 	prompts        PromptSource
 	attachmentHome string
 	plugins        PluginSkillSource
+
+	deferProjectContext bool
 
 	coolingSettings CoolingSettings
 	skills          SkillSource
@@ -38,6 +41,14 @@ type Option func(*Builder)
 func WithAttachmentHome(home string) Option {
 	return func(b *Builder) {
 		b.attachmentHome = strings.TrimSpace(home)
+	}
+}
+
+// WithDeferredProjectContext lets the engine append effective directory context
+// at each request boundary, including grants changed between tool calls.
+func WithDeferredProjectContext() Option {
+	return func(b *Builder) {
+		b.deferProjectContext = true
 	}
 }
 
@@ -205,14 +216,13 @@ func (b *Builder) buildMessagesWithCooling(ctx context.Context, sess *store.Sess
 			}
 		}
 	}
-	if currentMode == store.ModeCode && strings.TrimSpace(sess.ProjectID) != "" {
-		project, err := b.store.GetProject(ctx, sess.ProjectID)
+	if currentMode == store.ModeCode && !b.deferProjectContext {
+		workspace, err := sessionworkspace.Resolve(ctx, b.store, b.attachmentHome, sessionID, sessionworkspace.ScratchDisabled)
 		if err != nil {
 			return provider.Request{}, err
 		}
-		projectDirs := store.NormalizeProjectDirs(project.RootDirs)
-		system = appendProjectDirectories(system, projectDirs)
-		system = appendProjectInstructions(system, loadProjectRootInstructions(projectDirs))
+		system = appendProjectDirectories(system, workspace.RootDirs)
+		system = appendProjectInstructions(system, loadProjectRootInstructions(workspace.RootDirs))
 	}
 	var cfg provider.ModelConfig
 	if len(configs) > 0 {
@@ -402,6 +412,15 @@ func cloneContinuations(in []provider.Continuation) []provider.Continuation {
 	return out
 }
 
+// AppendProjectContext projects the same effective roots used by tool dispatch.
+// Call with the base system prompt so revoked roots and stale instructions are
+// not carried into the next provider request.
+func AppendProjectContext(system string, projectDirs []string) string {
+	output := appendProjectDirectories(prompt.Output{SystemInstruction: system}, projectDirs)
+	output = appendProjectInstructions(output, loadProjectRootInstructions(projectDirs))
+	return output.SystemInstruction
+}
+
 func appendProjectDirectories(system prompt.Output, projectDirs []string) prompt.Output {
 	projectDirs = store.NormalizeProjectDirs(projectDirs)
 	if len(projectDirs) == 0 {
@@ -409,7 +428,7 @@ func appendProjectDirectories(system prompt.Output, projectDirs []string) prompt
 	}
 	var content strings.Builder
 	content.WriteString("## Project Directories\n\n")
-	content.WriteString("The current Project authorizes every directory below as a distinct root. Consider all roots when inspecting or changing the Project. When multiple roots are listed, use the absolute path to select the intended root; do not assume the first root is the whole Project.\n")
+	content.WriteString("These are the effective roots for this Code request, including authorized project, session, and turn directories and any existing session scratch. Consider all roots when inspecting or changing files. When multiple roots are listed, use the absolute path to select the intended root; do not assume the first root is the whole workspace.\n")
 	for index, projectDir := range projectDirs {
 		encoded, _ := json.Marshal(projectDir)
 		content.WriteString("\n")
@@ -433,7 +452,7 @@ func appendProjectInstructions(system prompt.Output, instructions []projectInstr
 	}
 	var content strings.Builder
 	content.WriteString("## Project Instructions\n\n")
-	content.WriteString("These root-level files were loaded from the authorized Project before this Code turn. Follow them for work in the corresponding root. More specific instruction files in child directories override them within their directory scope.\n")
+	content.WriteString("The root-level instruction files listed below were loaded for this Code context. Follow them for work in the corresponding root. An authorized root not listed here may still have an instruction file that must be read before changing it. More specific instruction files in child directories override root instructions within their directory scope.\n")
 	for _, instruction := range instructions {
 		content.WriteString("\n### `")
 		content.WriteString(instruction.projectRoot)

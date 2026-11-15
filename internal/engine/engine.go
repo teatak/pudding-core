@@ -221,7 +221,12 @@ func WithAttachmentHome(home string) Option {
 }
 
 func (e *Engine) rebuildBuilder() {
-	e.builder = contextbuilder.New(e.store, e.promptSource, contextbuilder.WithAttachmentHome(e.attachmentHome), contextbuilder.WithSkillSources(e.plugins, e.skills), contextbuilder.WithCoolingSettings(e.config))
+	e.builder = contextbuilder.New(e.store, e.promptSource,
+		contextbuilder.WithAttachmentHome(e.attachmentHome),
+		contextbuilder.WithSkillSources(e.plugins, e.skills),
+		contextbuilder.WithCoolingSettings(e.config),
+		contextbuilder.WithDeferredProjectContext(),
+	)
 }
 
 func New(s store.Store, hub *event.Hub, resolver Resolver, cfg ConfigSource, opts ...Option) *Engine {
@@ -236,7 +241,6 @@ func New(s store.Store, hub *event.Hub, resolver Resolver, cfg ConfigSource, opt
 		config:                  cfg,
 		hub:                     hub,
 		resolver:                resolver,
-		builder:                 contextbuilder.New(s, nil, contextbuilder.WithCoolingSettings(cfg)),
 		auxCtx:                  auxCtx,
 		auxCancel:               auxCancel,
 		running:                 make(map[string]*activeTurn),
@@ -249,6 +253,7 @@ func New(s store.Store, hub *event.Hub, resolver Resolver, cfg ConfigSource, opt
 		compacting:              make(map[string]bool),
 		turnFiles:               turnfiles.New(),
 	}
+	e.rebuildBuilder()
 	for _, opt := range opts {
 		opt(e)
 	}
@@ -609,6 +614,9 @@ func (e *Engine) SessionUsage(ctx context.Context, sessionID string) (*SessionUs
 	}
 	req.Config = resolved.config
 	req.Tools = defs
+	if err := e.appendDirectoryAccess(ctx, sessionID, "", mode, &req); err != nil {
+		return nil, err
+	}
 	req, err = e.builder.ResolveSkillReferences(ctx, sessionID, string(mode), req)
 	if err != nil {
 		return nil, err

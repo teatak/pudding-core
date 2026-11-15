@@ -21,8 +21,8 @@ type projectInstructionContext struct {
 	truncated   bool
 }
 
-// loadProjectRootInstructions reads AGENTS.md from each authorized Project
-// root before a Code turn. Nested rules are not globally injected because
+// loadProjectRootInstructions reads AGENTS.md from each effective authorized
+// root for a Code request. Nested rules are not globally injected because
 // their scope depends on the concrete target path.
 func loadProjectRootInstructions(projectDirs []string) []projectInstructionContext {
 	out := make([]projectInstructionContext, 0, min(len(projectDirs), projectInstructionMaxFiles))
@@ -32,7 +32,6 @@ func loadProjectRootInstructions(projectDirs []string) []projectInstructionConte
 		if len(out) >= projectInstructionMaxFiles || totalBytes >= projectInstructionMaxTotal {
 			break
 		}
-		root = strings.TrimSpace(root)
 		if root == "" {
 			continue
 		}

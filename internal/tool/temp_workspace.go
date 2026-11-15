@@ -76,8 +76,9 @@ func (r *BuiltinRunner) cleanupSessionScratch(sessionID string) {
 	delete(r.scratchSessions, sessionID)
 }
 
-// Serialize cleanup with commands and file/media operations using temp paths.
-// Background commands retain the lock until exit; the engine preflights cleanup.
+// Serialize cleanup with command startup and file/media operations using temp
+// paths. Running background processes protect scratch through the process count,
+// leaving artifact reads and other commands free to proceed.
 func UsesSessionArtifacts(call Call) bool {
 	if call.Name == TempWorkspace || call.Name == CommandRun {
 		return true

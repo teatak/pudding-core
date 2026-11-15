@@ -1,8 +1,10 @@
 package lsp
 
 import (
+	"context"
 	"crypto/sha256"
 	"errors"
+	"sort"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -18,6 +20,68 @@ type documentState struct {
 }
 
 func (p *Process) SyncDocument(document Document) (DocumentState, error) {
+	p.documentsMu.Lock()
+	defer p.documentsMu.Unlock()
+	return p.syncDocumentLocked(document, true)
+}
+
+// RefreshDocuments only reloads the bounded set of documents already held by
+// this process. Refreshing does not make a document more recently used: the next
+// explicit SyncDocument still determines which documents are kept at capacity.
+// A change or close invalidates diagnostics for every open document in the
+// workspace, even if a dependent document's own text and version stay unchanged.
+func (p *Process) RefreshDocuments(ctx context.Context, load DocumentLoader) (map[string]DocumentState, error) {
+	p.documentsMu.Lock()
+	defer p.documentsMu.Unlock()
+	URIs := make([]string, 0, len(p.documents))
+	generations := make(map[string]uint64, len(p.documents))
+	for uri := range p.documents {
+		URIs = append(URIs, uri)
+		generations[uri] = p.diagnostics.generationForURI(uri)
+	}
+	sort.Strings(URIs)
+	states := make(map[string]DocumentState, len(URIs))
+	workspaceChanged := false
+	for _, uri := range URIs {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		text, keep, err := load(uri)
+		if err != nil {
+			return nil, err
+		}
+		if !keep {
+			if err := p.closeDocumentLocked(uri); err != nil {
+				return nil, err
+			}
+			workspaceChanged = true
+			continue
+		}
+		state, err := p.syncDocumentLocked(Document{URI: uri, LanguageID: p.documents[uri].languageID, Text: text}, false)
+		if err != nil {
+			return nil, err
+		}
+		workspaceChanged = workspaceChanged || state.Changed
+		states[uri] = state
+	}
+	for uri, state := range states {
+		state.Changed = workspaceChanged
+		state.PreviousDiagnosticGeneration = generations[uri]
+		states[uri] = state
+	}
+	return states, nil
+}
+
+func (p *Process) closeDocumentLocked(uri string) error {
+	p.diagnostics.invalidate()
+	if err := p.Notify("textDocument/didClose", map[string]any{"textDocument": map[string]string{"uri": uri}}); err != nil {
+		return err
+	}
+	delete(p.documents, uri)
+	return nil
+}
+
+func (p *Process) syncDocumentLocked(document Document, touch bool) (DocumentState, error) {
 	document.URI = strings.TrimSpace(document.URI)
 	document.LanguageID = strings.TrimSpace(document.LanguageID)
 	if document.URI == "" || document.LanguageID == "" {
@@ -29,11 +93,13 @@ func (p *Process) SyncDocument(document Document) (DocumentState, error) {
 	hash := sha256.Sum256([]byte(document.Text))
 	previousDiagnosticGeneration := p.diagnostics.generationForURI(document.URI)
 
-	p.documentsMu.Lock()
-	defer p.documentsMu.Unlock()
 	current, exists := p.documents[document.URI]
+	lastUsed := current.lastUsed
+	if touch || !exists {
+		lastUsed = time.Now()
+	}
 	if exists && current.hash == hash && current.languageID == document.LanguageID {
-		current.lastUsed = time.Now()
+		current.lastUsed = lastUsed
 		p.documents[document.URI] = current
 		return DocumentState{
 			URI:                          document.URI,
@@ -44,10 +110,9 @@ func (p *Process) SyncDocument(document Document) (DocumentState, error) {
 		}, nil
 	}
 	if exists && current.languageID != document.LanguageID {
-		if err := p.Notify("textDocument/didClose", map[string]any{"textDocument": map[string]string{"uri": document.URI}}); err != nil {
+		if err := p.closeDocumentLocked(document.URI); err != nil {
 			return DocumentState{}, err
 		}
-		delete(p.documents, document.URI)
 		exists = false
 	}
 	if !exists && len(p.documents) >= maxOpenDocuments {
@@ -60,10 +125,9 @@ func (p *Process) SyncDocument(document Document) (DocumentState, error) {
 			}
 		}
 		if oldestURI != "" {
-			if err := p.Notify("textDocument/didClose", map[string]any{"textDocument": map[string]string{"uri": oldestURI}}); err != nil {
+			if err := p.closeDocumentLocked(oldestURI); err != nil {
 				return DocumentState{}, err
 			}
-			delete(p.documents, oldestURI)
 		}
 	}
 	version := 1
@@ -84,6 +148,7 @@ func (p *Process) SyncDocument(document Document) (DocumentState, error) {
 			"contentChanges": []map[string]any{{"text": document.Text}},
 		}
 	}
+	p.diagnostics.invalidate()
 	if err := p.Notify(method, params); err != nil {
 		return DocumentState{}, err
 	}
@@ -91,7 +156,7 @@ func (p *Process) SyncDocument(document Document) (DocumentState, error) {
 		hash:       hash,
 		languageID: document.LanguageID,
 		version:    version,
-		lastUsed:   time.Now(),
+		lastUsed:   lastUsed,
 	}
 	return DocumentState{
 		URI:                          document.URI,

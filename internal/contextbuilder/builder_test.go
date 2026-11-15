@@ -146,6 +146,45 @@ func TestBuildInjectsRootProjectInstructionsForCodeMode(t *testing.T) {
 	}
 }
 
+func TestBuildIncludesSessionDirectoryInstructionsWithoutProject(t *testing.T) {
+	ctx := context.Background()
+	ms := storetest.New(t)
+	root := t.TempDir()
+	const guidance = "session-root instruction fixture"
+	if err := os.WriteFile(filepath.Join(root, "AGENTS.md"), []byte(guidance), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := ms.CreateSession(ctx, &store.Session{ID: "s1", Provider: "mock", Model: "mock"}); err != nil {
+		t.Fatal(err)
+	}
+	dirs := []string{root}
+	if _, err := ms.UpdateSession(ctx, "s1", store.SessionUpdate{DirectoryGrants: &dirs}); err != nil {
+		t.Fatal(err)
+	}
+	builder := New(ms, nil)
+	for _, mode := range []store.AgentMode{store.ModeCode, store.ModeWork, store.ModeChat} {
+		req, err := builder.Build(ctx, "s1", "m", string(mode))
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := mode == store.ModeCode
+		if strings.Contains(req.System, guidance) != want {
+			t.Fatalf("mode %s: session instructions included=%v, want %v", mode, strings.Contains(req.System, guidance), want)
+		}
+	}
+	dirs = nil
+	if _, err := ms.UpdateSession(ctx, "s1", store.SessionUpdate{DirectoryGrants: &dirs}); err != nil {
+		t.Fatal(err)
+	}
+	req, err := builder.Build(ctx, "s1", "m", string(store.ModeCode))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(req.System, guidance) {
+		t.Fatal("revoked session instructions survived a context rebuild")
+	}
+}
+
 func TestBuildInjectsEveryProjectDirectoryWithoutInstructionFiles(t *testing.T) {
 	ms := storetest.New(t)
 	ctx := context.Background()
