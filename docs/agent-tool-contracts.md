@@ -160,6 +160,9 @@ verbose 模式的 PASS/SKIP；单独的 `ok` 不足以区分执行与全部跳�
 它返回当前会话由现有后台进程管理器持有的进程快照，不读取全系统进程，也不附带日志。
 已结束的进程遵循现有保留和清理规则；结果可能同时包含运行中和仍保留的已结束进程。
 将返回的 `processes[].processID` 作为 `process_id`，继续使用原有 `poll`、`write`、`stop`。
+各操作按字段是否提供校验参数：`poll` 不接受 `data`，`write` 不接受轮询字段，
+`stop` 只接受操作和进程 ID；空值、错误大小写或不适用的字段返回结构化字段诊断，
+不把输入内容静默忽略，也不把 `null` 游标当作从头读取。
 macOS、Linux 和 BSD 的后台命令退出时先清理原进程组的剩余成员，再发布完成状态和释放运行配额；长期任务应
 保持受管理的前台命令运行，并用 `background=true` 交给工具管理。输出中的 UTF-8 字符
 可跨读取块，stdout 与 stderr 分别拼接未完整字符；拒绝启动也会及时释放已创建的管道。
@@ -175,6 +178,10 @@ macOS、Linux 和 BSD 的后台命令退出时先清理原进程组的剩余成�
 切换目录后的诊断再应用包管理器的目录参数，源码仍受原授权范围约束。目录变量、展开、
 `cd -`、额外命令、管道、取反等复杂 shell 表达式不生成验证结论；显式 CDPATH 可能
 改变相对目录时也不猜测。只解析执行信息，不改写原命令、cwd 或审批规则。
+静态识别的上游验证管道返回 `verificationWarning.code=pipeline_exit_status`；
+`|| true` 等成功分支，以及 `go test; echo done` 这类紧接独立输出或成功命令的序列，
+返回 `masked_exit_status`，提醒最终 shell 退出码不能证明前面的验证通过。
+带 shell 选项切换或状态保存的复杂序列不猜测；前台、后台、轮询及模型预览保留同一提示。
 Unix 命令使用 POSIX `/bin/sh`，不会自动切换 shell 或改写执行选项。长前台结果的模型
 预览将 stdout／stderr 分别表示为 `head`、`tail`、`chars`、`omitted_chars`，并保留退出
 及执行边界元数据。`preview_only` 表示模型预览省略；`stdoutTruncated`／`stderrTruncated`
@@ -378,6 +385,10 @@ Git 元数据路径拒绝，未知参数也明确报错。`files/additions/delet
 省略 paths 保持全仓已跟踪文件的 staged/unstaged 语义；未跟踪文件仍用 `git_status`
 定位并直接读取。补丁继续受 128 KiB 上限约束，截断后缩小 paths 或上下文，单个超大
 hunk 仍可使用有界 Git CLI 读取，不把摘要或截断补丁声称为完整审查。
+
+Git 暂存、取消暂存和项目版本管理的单文件 diff、丢弃操作保留文件名首尾空白，
+不会把它改成另一个同名文件。尚无首次提交时，取消暂存只移除选定的索引条目；
+即使文件在暂存后又被编辑，也保留工作区内容及其他文件的暂存状态。
 
 项目 Git API 与结构化 Git 工具共用仓库探测错误分类。只有 Git 明确报告非仓库，才返回
 `not_git_repository`；配置、权限等导致的探测失败返回 `git_discovery_failed`，工具保留

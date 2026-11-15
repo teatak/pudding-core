@@ -258,7 +258,7 @@ func cleanGitPath(root, raw string) (string, error) {
 	if strings.ContainsRune(raw, 0) || filepath.IsAbs(filepath.FromSlash(raw)) {
 		return "", newError(CodeInvalidPath, "Git path is not authorized", nil)
 	}
-	clean := filepath.Clean(filepath.FromSlash(strings.TrimSpace(raw)))
+	clean := filepath.Clean(filepath.FromSlash(raw))
 	if clean == "." || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
 		return "", newError(CodeInvalidPath, "Git path is not authorized", nil)
 	}

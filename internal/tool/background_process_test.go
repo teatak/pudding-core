@@ -171,6 +171,40 @@ func TestBackgroundProcessListRejectsInapplicableArguments(t *testing.T) {
 	}
 }
 
+func TestCommandSessionRejectsIgnoredFieldsBeforeProcessLookup(t *testing.T) {
+	runner := NewBuiltinRunner()
+	defer runner.Close()
+	for _, tc := range []struct{ raw, kind, field string }{
+		{`{"action":"poll","process_id":"proc_test","data":"confirm\n"}`, "invalid_field", "data"},
+		{`{"action":"poll","process_id":"proc_test","data":""}`, "invalid_field", "data"},
+		{`{"action":"write","process_id":"proc_test","data":"confirm\n","offset":0}`, "invalid_field", "offset"},
+		{`{"action":"stop","process_id":"proc_test","wait_ms":0}`, "invalid_field", "wait_ms"},
+		{`{"action":"poll","process_id":"proc_test","offset":null}`, "invalid_type", "offset"},
+		{`{"action":"poll","process_id":"proc_test","max_bytes":null}`, "invalid_type", "max_bytes"},
+		{`{"action":"poll","process_id":"proc_test","Offset":100}`, "unknown_field", "Offset"},
+		{`{"action":"poll","process_id":"proc_test","waitMs":100}`, "unknown_field", "waitMs"},
+	} {
+		t.Run(tc.raw, func(t *testing.T) {
+			result := runner.Call(context.Background(), Call{SessionID: "sess_input", Name: CommandSession, Args: json.RawMessage(tc.raw)})
+			fields := decodeToolResult(t, result)
+			hint, _ := fields["hint"].(string)
+			if result.Ok || fields["reason"] != "invalid_arguments" || fields["errorKind"] != tc.kind || fields["field"] != tc.field || fields["receivedBytes"] != float64(len(tc.raw)) || hint == "" {
+				t.Fatalf("bad arguments reached process lookup or lacked recovery: %s", result.Content)
+			}
+		})
+	}
+	for _, raw := range []string{
+		`{"action":"list"}`,
+		`{"action":"poll","process_id":"proc_test","offset":0,"max_bytes":1024,"wait_ms":0}`,
+		`{"action":"write","process_id":"proc_test","data":" \n"}`,
+		`{"action":"stop","process_id":"proc_test"}`,
+	} {
+		if _, err := decodeCommandSessionArgs(json.RawMessage(raw)); err != nil {
+			t.Errorf("valid action rejected: %s: %v", raw, err)
+		}
+	}
+}
+
 func TestBackgroundProcessStartPollStop(t *testing.T) {
 	runner := NewBuiltinRunner()
 	t.Cleanup(func() { _ = runner.Close() })

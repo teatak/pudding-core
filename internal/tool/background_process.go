@@ -7,6 +7,7 @@ import (
 	"io"
 	"os/exec"
 	"runtime"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -219,6 +220,10 @@ func (r *BuiltinRunner) commandSession(ctx context.Context, call Call) Result {
 	out := Result{CallID: call.CallID, Name: call.Name}
 	args, err := decodeCommandSessionArgs(call.Args)
 	if err != nil {
+		var argumentErr *toolArgumentError
+		if errors.As(err, &argumentErr) {
+			return toolArgumentFailure(out, argumentErr)
+		}
 		return toolJSONError(out, "invalid_arguments", err.Error())
 	}
 	if args.Action == "list" {
@@ -264,32 +269,38 @@ func (r *BuiltinRunner) commandSession(ctx context.Context, call Call) Result {
 
 func decodeCommandSessionArgs(raw json.RawMessage) (commandSessionArgs, error) {
 	var args commandSessionArgs
-	trimmed := strings.TrimSpace(string(raw))
-	if !strings.HasPrefix(trimmed, "{") {
-		return args, errors.New("command session arguments must be a JSON object")
-	}
-	decoder := json.NewDecoder(strings.NewReader(trimmed))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&args); err != nil {
+	if err := decodeToolArgumentObject(raw, &args, toolArgumentField{"action", "string"}); err != nil {
 		return args, err
-	}
-	if err := decoder.Decode(new(any)); err != io.EOF {
-		return args, errors.New("command session arguments must contain exactly one JSON object")
 	}
 	args.Action = strings.TrimSpace(args.Action)
 	args.ProcessID = strings.TrimSpace(args.ProcessID)
-	if args.Action == "list" {
-		var fields map[string]json.RawMessage
-		if err := json.Unmarshal(raw, &fields); err != nil {
-			return args, err
-		}
-		if len(fields) != 1 || fields["action"] == nil {
-			return args, errors.New("list accepts only action")
-		}
-		return args, nil
-	}
-	if args.Action != "poll" && args.Action != "write" && args.Action != "stop" {
+	allowedFields := []string{"action"}
+	switch args.Action {
+	case "list":
+	case "poll":
+		allowedFields = append(allowedFields, "process_id", "offset", "max_bytes", "wait_ms")
+	case "write":
+		allowedFields = append(allowedFields, "process_id", "data")
+	case "stop":
+		allowedFields = append(allowedFields, "process_id")
+	default:
 		return args, errors.New("action must be list, poll, write, or stop")
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		return args, err
+	}
+	for _, field := range []string{"process_id", "data", "offset", "max_bytes", "wait_ms"} {
+		if _, present := fields[field]; present && !slices.Contains(allowedFields, field) {
+			return args, &toolArgumentError{
+				kind: "invalid_field", field: field, receivedBytes: len(raw), allowedFields: allowedFields,
+				detail: field + " is not supported for action=" + args.Action,
+				hint:   "Use only " + strings.Join(allowedFields, ", ") + " for this action. To send stdin, use action=write with data.",
+			}
+		}
+	}
+	if args.Action == "list" {
+		return args, nil
 	}
 	if args.ProcessID == "" {
 		return args, errors.New("process_id is required")
@@ -301,15 +312,9 @@ func decodeCommandSessionArgs(raw json.RawMessage) (commandSessionArgs, error) {
 		if len(args.Data) > backgroundProcessInputMax {
 			return args, errors.New("data must not exceed 65536 bytes")
 		}
-		if args.Offset != 0 || args.MaxBytes != 0 || args.WaitMS != 0 {
-			return args, errors.New("offset, max_bytes, and wait_ms are available only for poll")
-		}
 		return args, nil
 	}
 	if args.Action == "stop" {
-		if args.Data != "" || args.Offset != 0 || args.MaxBytes != 0 || args.WaitMS != 0 {
-			return args, errors.New("stop accepts only action and process_id")
-		}
 		return args, nil
 	}
 	if args.Offset < 0 {

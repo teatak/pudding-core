@@ -88,7 +88,8 @@ func Unstage(ctx context.Context, repo Repository, rawPaths []string) (Status, e
 		if hasHead {
 			args = append(args, "restore", "--staged", "--")
 		} else {
-			args = append(args, "rm", "--cached", "-r", "--ignore-unmatch", "--")
+			// Only remove index entries; worktree edits after staging must survive.
+			args = append(args, "rm", "--cached", "--force", "-r", "--ignore-unmatch", "--")
 		}
 		args = append(args, paths...)
 		result := run(commandCtx, repo.Root, metadataLimitBytes, args...)
@@ -355,7 +356,6 @@ func normalizeWritePaths(repo Repository, rawPaths []string) ([]string, error) {
 	seen := make(map[string]bool, len(rawPaths))
 	paths := make([]string, 0, len(rawPaths))
 	for _, raw := range rawPaths {
-		raw = strings.TrimSpace(raw)
 		if raw == "" || strings.ContainsRune(raw, '\x00') || filepath.IsAbs(filepath.FromSlash(raw)) {
 			return nil, newError(CodeInvalidPath, "Git write path is invalid", nil)
 		}

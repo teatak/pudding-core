@@ -11,6 +11,15 @@ import (
 )
 
 func TestVerificationPipelineWarnsWithoutChangingShellExitStatus(t *testing.T) {
+	checkVerificationWarningExecution(t, "./go test | tail -n 1", "pipeline_exit_status")
+}
+
+func TestVerificationSequenceWarnsWithoutChangingShellExitStatus(t *testing.T) {
+	checkVerificationWarningExecution(t, "./go test; echo done", "masked_exit_status")
+}
+
+func checkVerificationWarningExecution(t *testing.T, command, warningCode string) {
+	t.Helper()
 	if runtime.GOOS == "windows" {
 		t.Skip("POSIX pipeline semantics")
 	}
@@ -18,19 +27,19 @@ func TestVerificationPipelineWarnsWithoutChangingShellExitStatus(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "go"), []byte("#!/bin/sh\nprintf 'test failed' >&2\nexit 7\n"), 0700); err != nil {
 		t.Fatal(err)
 	}
-	result := commandTestCall(context.Background(), root, map[string]any{"scope": "project", "command": "./go test | tail -n 1"})
+	result := commandTestCall(context.Background(), root, map[string]any{"scope": "project", "command": command})
 	fields := decodeToolResult(t, result)
 	if !result.Ok || fields["exitCode"] != float64(0) || fields["verificationStatus"] != nil || !strings.Contains(fields["stderr"].(string), "test failed") {
 		t.Fatalf("changed shell semantics or inferred test success: %s", result.Content)
 	}
 	warning, _ := fields["verificationWarning"].(map[string]any)
-	if warning["code"] != "pipeline_exit_status" || !strings.Contains(warning["message"].(string), "does not prove") {
+	if warning["code"] != warningCode || !strings.Contains(warning["message"].(string), "does not prove") {
 		t.Fatalf("missing actionable verification warning: %s", result.Content)
 	}
 	// Background start, poll and the REST snapshot must expose the same facts.
 	runner := NewBuiltinRunner()
 	defer runner.Close()
-	start := backgroundToolCall(runner, "pipeline", root, CommandRun, map[string]any{"scope": "project", "command": "./go test | tail -n 1"})
+	start := backgroundToolCall(runner, "pipeline", root, CommandRun, map[string]any{"scope": "project", "command": command})
 	started := decodeBackgroundProcessPayload(t, start)
 	if !start.Ok {
 		t.Fatal(start.Content)
@@ -83,6 +92,23 @@ func TestVerificationPipelineWarningUsesShellStructure(t *testing.T) {
 		{"cd web && npm test || exit 0", true},
 		{"go test ./... || exit 1", false},
 		{"go test ./... || notify_failure", false},
+		{"go test ./...; echo done", true},
+		{"npm test\nprintf 'done\\n'", true},
+		{"cd web && pnpm test; echo done", true},
+		{"go test ./... && echo passed; echo done", true},
+		{"{ go test ./...; echo done; }", true},
+		{"(go test ./...; true)", true},
+		{"go test ./...; exit 0", true},
+		{"go test ./...; :", true},
+		{"go test ./... && echo done", false},
+		{"go test ./...; exit $?", false},
+		{"go test ./...; status=$?; echo done; exit \"$status\"", false},
+		{"go test ./... || exit 1; echo done", false},
+		{"set -e; go test ./...; echo done", false},
+		{"set -e; (go test ./...; echo done)", false},
+		{"echo preparing; go test ./...", false},
+		{`printf 'go test ./...; echo done'`, false},
+		{"f() { go test ./...; echo done; }; printf defined", false},
 		{"command -v tool || true", false},
 		{`printf 'go test || true'`, false},
 		{"cat data | go test ./...", false},
@@ -98,8 +124,8 @@ func TestVerificationPipelineWarningUsesShellStructure(t *testing.T) {
 		if got := fields["verificationWarning"] != nil; got != want {
 			t.Errorf("%q: warning=%v, want %v", tc.command, got, want)
 		}
-		if want && strings.Contains(tc.command, "||") {
-			warning := fields["verificationWarning"].(map[string]any)
+		if want && (!strings.Contains(tc.command, "|") || strings.Contains(tc.command, "||")) {
+			warning, _ := fields["verificationWarning"].(map[string]any)
 			if warning["code"] != "masked_exit_status" {
 				t.Errorf("%q: wrong warning %v", tc.command, warning)
 			}

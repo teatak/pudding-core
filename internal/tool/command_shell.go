@@ -340,6 +340,21 @@ func commandPipelineWarning(command string) *CommandVerificationWarning {
 	if err != nil {
 		return nil
 	}
+	// An explicit `set` can enable errexit, including inside enclosing groups.
+	// Keep option-changing scripts opaque instead of guessing their exit flow.
+	sequenceChecks := true
+	syntax.Walk(analysis.file, func(node syntax.Node) bool {
+		if _, ok := node.(*syntax.FuncDecl); ok {
+			return false
+		}
+		if call, ok := node.(*syntax.CallExpr); ok {
+			argv, static := staticCallArgv(call)
+			if static && len(argv) > 0 && argv[0] == "set" {
+				sequenceChecks = false
+			}
+		}
+		return sequenceChecks
+	})
 	code := ""
 	containsVerification := func(node syntax.Node) bool {
 		found := false
@@ -366,6 +381,23 @@ func commandPipelineWarning(command string) *CommandVerificationWarning {
 		if _, ok := node.(*syntax.FuncDecl); ok {
 			return false
 		}
+		if sequenceChecks {
+			var statements []*syntax.Stmt
+			switch node := node.(type) {
+			case *syntax.File:
+				statements = node.Stmts
+			case *syntax.Block:
+				statements = node.Stmts
+			case *syntax.Subshell:
+				statements = node.Stmts
+			}
+			for i := 1; i < len(statements); i++ {
+				if verificationExitStatement(statements[i-1]) && replacesVerificationExit(statements[i]) {
+					code = "masked_exit_status"
+					return false
+				}
+			}
+		}
 		binary, ok := node.(*syntax.BinaryCmd)
 		if !ok {
 			return true
@@ -390,9 +422,52 @@ func commandPipelineWarning(command string) *CommandVerificationWarning {
 	}
 	message := "This pipeline's shell exit code does not prove that upstream verification passed. Run the verification command directly, then use the result reader to inspect bounded output."
 	if code == "masked_exit_status" {
-		message = "The success fallback can hide a failed verification. This shell exit code does not prove verification passed. Run the verification command directly and inspect its own exit code."
+		message = "A later command or success fallback can hide a failed verification. This shell exit code does not prove verification passed. Run the verification command directly and inspect its own exit code."
 	}
 	return &CommandVerificationWarning{Code: code, Message: message}
+}
+
+// These simple statements expose a verification failure as their own status.
+// OR branches, status capture and opaque scripts need shell evaluation.
+func verificationExitStatement(stmt *syntax.Stmt) bool {
+	if stmt.Negated || stmt.Background {
+		return false
+	}
+	switch command := stmt.Cmd.(type) {
+	case *syntax.CallExpr:
+		argv, static := staticCallArgv(command)
+		return static && commandVerificationKind(unwrapCommand(argv)) != ""
+	case *syntax.BinaryCmd:
+		return command.Op == syntax.AndStmt && (verificationExitStatement(command.X) || verificationExitStatement(command.Y))
+	case *syntax.Block:
+		return len(command.Stmts) > 0 && verificationExitStatement(command.Stmts[len(command.Stmts)-1])
+	case *syntax.Subshell:
+		return len(command.Stmts) > 0 && verificationExitStatement(command.Stmts[len(command.Stmts)-1])
+	}
+	return false
+}
+
+func replacesVerificationExit(stmt *syntax.Stmt) bool {
+	if stmt.Negated || stmt.Background {
+		return false
+	}
+	call, ok := stmt.Cmd.(*syntax.CallExpr)
+	if !ok {
+		return false
+	}
+	argv, static := staticCallArgv(call)
+	if !static || len(argv) == 0 {
+		return false
+	}
+	switch argv[0] {
+	case "echo", "printf":
+		return true
+	case "true", ":":
+		return len(argv) == 1
+	case "exit":
+		return len(argv) == 2 && argv[1] == "0"
+	}
+	return false
 }
 
 func joinShellCommand(argv []string) string {

@@ -124,7 +124,8 @@ func (r *BuiltinRunner) gitUnstage(ctx context.Context, call Call) Result {
 	if hasHead {
 		gitArgs = append(gitArgs, "restore", "--staged", "--")
 	} else {
-		gitArgs = append(gitArgs, "rm", "--cached", "-r", "--ignore-unmatch", "--")
+		// Only remove index entries; worktree edits after staging must survive.
+		gitArgs = append(gitArgs, "rm", "--cached", "--force", "-r", "--ignore-unmatch", "--")
 	}
 	gitArgs = append(gitArgs, paths...)
 	result := runGit(ctx, repo.Root, gitMetadataLimitBytes, gitArgs...)
@@ -379,7 +380,6 @@ func normalizeGitWritePaths(repo gitWriteRepository, rawPaths []string) ([]strin
 	seen := make(map[string]bool, len(rawPaths))
 	paths := make([]string, 0, len(rawPaths))
 	for _, raw := range rawPaths {
-		raw = strings.TrimSpace(raw)
 		if raw == "" || strings.ContainsRune(raw, '\x00') {
 			return nil, newGitWriteError("path_required", "Git write paths must be non-empty")
 		}
