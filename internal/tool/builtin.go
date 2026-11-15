@@ -784,6 +784,8 @@ func (r *BuiltinRunner) ToolAvailable(name string) bool {
 }
 
 func (r *BuiltinRunner) Call(ctx context.Context, call Call) (result Result) {
+	ctx, completeCodeChanges := r.trackCodeFileChanges(ctx, call)
+	defer func() { completeCodeChanges(result) }()
 	defer func() {
 		if result.ModelOutput == nil {
 			result.ModelOutput = builtinModelOutput(call.Name)

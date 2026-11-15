@@ -781,6 +781,9 @@ func TestUnifiedPatchPreservesTextBytes(t *testing.T) {
 
 func TestUnifiedPatchGitBatchUsesApprovalAndTracking(t *testing.T) {
 	root := newGitTestRepository(t, true)
+	// This test compares physical worktree bytes with Git's index diff. Do not
+	// inherit a host setting that normalizes CRLF to LF while adding the fixture.
+	runGitTest(t, root, "config", "core.autocrlf", "false")
 	before := map[string]string{"notes.txt": "old\r\n", "删除.txt": "remove", "space name.txt": "old\n"}
 	for name, content := range before {
 		writePatchTestFile(t, filepath.Join(root, name), content)

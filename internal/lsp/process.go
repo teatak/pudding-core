@@ -125,10 +125,11 @@ func (p *Process) initialize(ctx context.Context) error {
 	capabilities.TextDocument.Rename.PrepareSupport = true
 	capabilities.TextDocument.PublishDiagnostics.RelatedInformation = true
 	params := initializeParams{
-		ProcessID:    os.Getpid(),
-		RootURI:      p.rootURI,
-		ClientInfo:   clientInfo{Name: "pudding"},
-		Capabilities: capabilities,
+		ProcessID:             os.Getpid(),
+		RootURI:               p.rootURI,
+		ClientInfo:            clientInfo{Name: "pudding"},
+		Capabilities:          capabilities,
+		InitializationOptions: p.workspaceConfiguration(),
 		WorkspaceFolders: []workspaceFolder{{
 			URI:  p.rootURI,
 			Name: filepath.Base(p.spec.Key.LanguageRoot),
@@ -278,10 +279,18 @@ func (p *Process) handleServerRequest(message wireMessage) {
 	switch message.Method {
 	case "workspace/configuration":
 		var params struct {
-			Items []json.RawMessage `json:"items"`
+			Items []struct {
+				Section string `json:"section"`
+			} `json:"items"`
 		}
 		_ = json.Unmarshal(message.Params, &params)
-		result = make([]any, len(params.Items))
+		configuration := make([]any, len(params.Items))
+		for index, item := range params.Items {
+			if item.Section == "" || item.Section == "gopls" {
+				configuration[index] = p.workspaceConfiguration()
+			}
+		}
+		result = configuration
 	case "client/registerCapability", "window/workDoneProgress/create":
 		result = nil
 	case "workspace/workspaceFolders":
@@ -306,6 +315,17 @@ func (p *Process) handleServerRequest(message wireMessage) {
 		Result:  resultRaw,
 		Error:   responseErr,
 	})
+}
+
+func (p *Process) workspaceConfiguration() map[string]any {
+	if p.spec.Key.ServerKind == "gopls" {
+		// The pinned gopls defaults to client-driven watching. Pudding sends
+		// its known mutations synchronously and uses this watcher for external
+		// edits and commands whose changed paths are unknown. Those filesystem
+		// events are asynchronous; they are not a query freshness barrier.
+		return map[string]any{"fileWatcher": "fsnotify"}
+	}
+	return nil
 }
 
 func (p *Process) waitLoop() {

@@ -129,11 +129,7 @@ func buildReplayActions(changes []*store.TurnFileChange, direction ReplayDirecti
 		if err != nil {
 			return ErrReplayUnauthorized
 		}
-		resolvedRoot := authorized[filepath.Clean(historicalRoot)]
-		if resolvedRoot == "" {
-			return ErrReplayUnauthorized
-		}
-		target, err := replayTarget(resolvedRoot, rel)
+		target, err := replayTarget(authorized, filepath.Clean(historicalRoot), rel)
 		if err != nil {
 			return err
 		}
@@ -192,8 +188,9 @@ func buildReplayActions(changes []*store.TurnFileChange, direction ReplayDirecti
 	return out, nil
 }
 
-func authorizedReplayRoots(roots []string) (map[string]string, error) {
-	out := make(map[string]string)
+func authorizedReplayRoots(roots []string) ([]string, error) {
+	out := make([]string, 0, len(roots))
+	seen := make(map[string]bool)
 	for _, root := range projectpath.NormalizeRoots(roots) {
 		resolved, err := filepath.EvalSymlinks(root)
 		if err != nil {
@@ -204,7 +201,10 @@ func authorizedReplayRoots(roots []string) (map[string]string, error) {
 			continue
 		}
 		resolved = filepath.Clean(resolved)
-		out[resolved] = resolved
+		if !seen[resolved] {
+			out = append(out, resolved)
+			seen[resolved] = true
+		}
 	}
 	if len(out) == 0 {
 		return nil, ErrReplayUnauthorized
@@ -212,13 +212,16 @@ func authorizedReplayRoots(roots []string) (map[string]string, error) {
 	return out, nil
 }
 
-func replayTarget(root, rel string) (string, error) {
+func replayTarget(authorized []string, root, rel string) (string, error) {
 	rel = filepath.Clean(filepath.FromSlash(rel))
 	if rel == "." || filepath.IsAbs(rel) || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return "", ErrReplayUnauthorized
 	}
 	lexical := filepath.Join(root, rel)
-	_, resolved, _, err := projectpath.Resolve([]string{root}, lexical, false, true)
+	// Historical roots identify the snapshot, not current authority. A parent
+	// grant may replace a child grant, but every actual target must still be
+	// authorized and must not have been redirected through a symlink.
+	_, resolved, _, err := projectpath.Resolve(authorized, lexical, false, true)
 	if err != nil || filepath.Clean(resolved) != filepath.Clean(lexical) {
 		return "", ErrReplayUnauthorized
 	}

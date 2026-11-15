@@ -133,7 +133,7 @@ func finishCommandDiagnostics(first, second *commandDiagnosticCollector, failed 
 
 func newCommandOutputBuffers(args commandRunArgs, cwd string, projectDirs []string) (*truncatingBuffer, *truncatingBuffer) {
 	stdout, stderr := newTruncatingBuffer(commandOutputLimitBytes), newTruncatingBuffer(commandOutputLimitBytes)
-	argv, cwd := commandVerificationDetails(args, cwd)
+	argv, cwd := commandDiagnosticDetails(args, cwd)
 	if kind := commandVerificationKind(argv); kind != "" {
 		stdout.diagnostics = newCommandDiagnosticCollector(cwd, projectDirs)
 		stderr.diagnostics = newCommandDiagnosticCollector(cwd, projectDirs)

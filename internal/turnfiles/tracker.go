@@ -35,6 +35,8 @@ type turnState struct {
 	final   map[fileKey]fileSnapshot
 	touched map[fileKey]struct{}
 	origins map[fileKey]store.FileChangeOrigin
+	// First-seen canonical roots group entries consistently, not grant access.
+	roots []string
 }
 
 type callSnapshot struct {
@@ -49,6 +51,10 @@ type callSnapshot struct {
 type fileKey struct {
 	root string
 	path string
+}
+
+func (key fileKey) absolutePath() string {
+	return filepath.Join(key.root, filepath.FromSlash(key.path))
 }
 
 type fileSnapshot struct {
@@ -106,9 +112,17 @@ func (t *Tracker) BeginCallWithOrigin(turnID, callID string, roots, targets []st
 		// Opaque commands may modify or remove files already owned by this turn.
 		// Observe those exact files, never discover additional project content.
 		for key := range tracked.touched {
-			if containingRoot(roots, key.root) != "" {
-				known = append(known, key)
+			path := key.absolutePath()
+			root := containingRoot(roots, path)
+			if root == "" || path == root {
+				continue
 			}
+			relative, err := filepath.Rel(root, path)
+			if err != nil {
+				t.mu.Unlock()
+				return err
+			}
+			known = append(known, fileKey{root: root, path: filepath.ToSlash(relative)})
 		}
 		sort.Slice(known, func(i, j int) bool {
 			if known[i].root != known[j].root {
@@ -124,6 +138,18 @@ func (t *Tracker) BeginCallWithOrigin(turnID, callID string, roots, targets []st
 	if tracked == nil {
 		tracked = newTurnState()
 		t.turns[turnID] = tracked
+	}
+	for _, root := range roots {
+		known := false
+		for _, existing := range tracked.roots {
+			if existing == root {
+				known = true
+				break
+			}
+		}
+		if !known {
+			tracked.roots = append(tracked.roots, root)
+		}
 	}
 	call := &callSnapshot{
 		roots:   roots,
@@ -188,18 +214,21 @@ func (t *Tracker) EndCall(turnID, callID string) error {
 	}
 	delete(current.calls, callID)
 	for _, key := range changed {
-		if _, seen := current.touched[key]; !seen {
-			current.touched[key] = struct{}{}
+		// A new parent grant can change the root-relative spelling without
+		// changing the entry. Retain its first baseline and latest result.
+		stableKey := current.stableFileKey(key)
+		if _, seen := current.touched[stableKey]; !seen {
+			current.touched[stableKey] = struct{}{}
 			if file, exists := call.before[key]; exists {
-				current.initial[key] = file
+				current.initial[stableKey] = file
 			}
 		}
 		if file, exists := after[key]; exists {
-			current.final[key] = file
+			current.final[stableKey] = file
 		} else {
-			delete(current.final, key)
+			delete(current.final, stableKey)
 		}
-		current.origins[key] = mergeFileChangeOrigin(current.origins[key], call.origin)
+		current.origins[stableKey] = mergeFileChangeOrigin(current.origins[stableKey], call.origin)
 	}
 	return nil
 }
@@ -242,6 +271,15 @@ func newTurnState() *turnState {
 	}
 }
 
+func (t *turnState) stableFileKey(key fileKey) fileKey {
+	path := key.absolutePath()
+	root := containingRoot(t.roots, path)
+	if relative, err := filepath.Rel(root, path); root != "" && err == nil {
+		return fileKey{root: root, path: filepath.ToSlash(relative)}
+	}
+	return key
+}
+
 func mergeFileChangeOrigin(current, next store.FileChangeOrigin) store.FileChangeOrigin {
 	if current == store.FileChangeOriginCommandObserved || next == store.FileChangeOriginCommandObserved {
 		return store.FileChangeOriginCommandObserved
@@ -254,15 +292,19 @@ func sameFileContentAndType(left, right fileSnapshot) bool {
 	return left.digest == right.digest && left.typeName == right.typeName
 }
 
+func sameFileState(left, right fileSnapshot) bool {
+	return sameFileContentAndType(left, right) && left.mode == right.mode
+}
+
 func changedFileKeys(before, after map[fileKey]fileSnapshot) []fileKey {
 	keys := make(map[fileKey]struct{}, len(before)+len(after))
 	for key, file := range before {
-		if next, ok := after[key]; !ok || !sameFileContentAndType(file, next) {
+		if next, ok := after[key]; !ok || !sameFileState(file, next) {
 			keys[key] = struct{}{}
 		}
 	}
 	for key, file := range after {
-		if previous, ok := before[key]; !ok || !sameFileContentAndType(file, previous) {
+		if previous, ok := before[key]; !ok || !sameFileState(file, previous) {
 			keys[key] = struct{}{}
 		}
 	}
@@ -548,7 +590,7 @@ func compareSnapshots(before, after map[fileKey]fileSnapshot) []store.TurnFileCh
 			deleted[key] = oldFile
 			continue
 		}
-		if sameFileContentAndType(oldFile, newFile) {
+		if sameFileState(oldFile, newFile) {
 			continue
 		}
 		changes = append(changes, buildChange(store.FileChangeModified, key, "", oldFile, newFile))

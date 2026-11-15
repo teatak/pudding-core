@@ -445,25 +445,40 @@ func commandResult(out Result, args commandRunArgs, shell, cwd string, projectDi
 	}
 	verificationArgv, _ := commandVerificationDetails(args, cwd)
 	verificationKind := commandVerificationKind(verificationArgv)
+	verificationStatus := commandVerificationStatus(verificationKind, exitCode, timedOut, cancelled, reason)
+	diagnosticArgv, _ := commandDiagnosticDetails(args, cwd)
+	ignoresFailure := commandVerificationIgnoresFailure(diagnosticArgv)
+	if verificationStatus == "passed" && ignoresFailure {
+		verificationStatus = "completed"
+	}
 	if verificationKind != "" {
-		verificationStatus := commandVerificationStatus(verificationKind, exitCode, timedOut, cancelled, reason)
-		first, second := stdout.diagnostics, stderr.diagnostics
+		payload["verificationKind"] = verificationKind
+		payload["verificationStatus"] = verificationStatus
+	}
+	// Observed error locations and test failures do not depend on proving that
+	// this shell's exit code represents a successful verification invocation.
+	first, second := stdout.diagnostics, stderr.diagnostics
+	if first == nil || second == nil {
 		fallbackOut, fallbackErr := newCommandOutputBuffers(args, cwd, projectDirs)
 		if first == nil {
 			first = fallbackOut.diagnostics
-			first.write([]byte(stdoutText))
+			if first != nil {
+				first.write([]byte(stdoutText))
+			}
 		}
 		if second == nil {
 			second = fallbackErr.diagnostics
-			second.write([]byte(stderrText))
+			if second != nil {
+				second.write([]byte(stderrText))
+			}
 		}
-		diagnostics, truncated := finishCommandDiagnostics(first, second, verificationStatus != "passed")
-		payload["verificationKind"] = verificationKind
-		payload["verificationStatus"] = verificationStatus
+	}
+	if first != nil && second != nil {
+		diagnostics, truncated := finishCommandDiagnostics(first, second, exitCode != 0 || timedOut || cancelled || ignoresFailure)
 		payload["diagnostics"] = diagnostics
 		payload["diagnosticCount"] = len(diagnostics)
 		payload["diagnosticsTruncated"] = truncated
-		if first.tests != nil {
+		if first.tests != nil && second.tests != nil {
 			testExecutionStatus, failures, failuresTruncated := finishCommandTests(first.tests, second.tests)
 			payload["testExecutionStatus"] = testExecutionStatus
 			if verificationStatus == "passed" && (testExecutionStatus == "no_tests" || testExecutionStatus == "all_skipped" || testExecutionStatus == "collected") {

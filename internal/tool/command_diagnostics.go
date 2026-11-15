@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"unicode/utf8"
@@ -167,6 +168,9 @@ func commandVerificationKind(argv []string) string {
 	case "gradle", "gradlew":
 		return verificationTargetKind(first)
 	case "make":
+		if makeDryRun(args) {
+			return ""
+		}
 		return verificationTargetKind(first)
 	}
 	return ""
@@ -183,7 +187,7 @@ func typeScriptVerificationKind(args []string) string {
 		}
 		flag, value, inline := strings.Cut(strings.ToLower(args[i]), "=")
 		switch flag {
-		case "--all", "--init", "--showconfig", "--listfilesonly", "--clean", "--dry":
+		case "--all", "--init", "--showconfig", "--listfilesonly", "--clean", "--dry", "--nocheck":
 			if !inline && i+1 < len(args) && (args[i+1] == "true" || args[i+1] == "false") {
 				i++
 				value = args[i]
@@ -197,6 +201,73 @@ func typeScriptVerificationKind(args []string) string {
 		}
 	}
 	return "check"
+}
+
+func makeDryRun(args []string) bool {
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if arg == "--" {
+			break
+		}
+		if strings.HasPrefix(arg, "--") {
+			flag, _, inline := strings.Cut(arg, "=")
+			switch flag {
+			case "--just-print", "--dry-run", "--recon":
+				return true
+			case "--file", "--makefile", "--directory", "--include-dir", "--old-file", "--assume-old", "--new-file", "--assume-new", "--what-if", "--eval":
+				if !inline {
+					i++
+				}
+			}
+			continue
+		}
+		if !strings.HasPrefix(arg, "-") {
+			continue
+		}
+		for at := 1; at < len(arg); at++ {
+			switch arg[at] {
+			case 'n':
+				return true
+			case 'f', 'C', 'I', 'o', 'W':
+				if at == len(arg)-1 {
+					i++
+				}
+				at = len(arg) // The remaining bytes are an option value, not flags.
+			case 'j', 'l':
+				at = len(arg) // Optional numeric values may be attached.
+			}
+		}
+	}
+	return false
+}
+
+// Ruff still runs and emits useful diagnostics with --exit-zero, but its exit
+// status cannot establish that lint passed. Follow only the package runners
+// already recognized by commandVerificationKind, never opaque named scripts.
+func commandVerificationIgnoresFailure(argv []string) bool {
+	if len(argv) == 0 {
+		return false
+	}
+	op, args := commandOperation(argv[0]), argv[1:]
+	switch op {
+	case "ruff":
+		return lowerArg(args, 0) == "check" && commandHasOption(args[1:], "--exit-zero", "-e")
+	case "npx":
+		if first := lowerArg(args, 0); first == "--yes" || first == "-y" || first == "--no-install" {
+			args = args[1:]
+		}
+		return commandVerificationIgnoresFailure(args)
+	case "npm", "pnpm", "yarn", "bun":
+		args = packageManagerVerificationArgs(op, args)
+		if first := lowerArg(args, 0); op != "bun" && first == "exec" || op == "bun" && first == "x" {
+			args = args[1:]
+			if len(args) > 0 && args[0] == "--" {
+				args = args[1:]
+			}
+			return commandVerificationIgnoresFailure(args)
+		}
+	}
+	return false
 }
 
 // Build and vet share Go's -n option. Consume known value flags so a linker
@@ -422,6 +493,14 @@ func commandVerificationDetails(args commandRunArgs, cwd string) ([]string, stri
 		cwd = filepath.Clean(directory)
 	}
 	return argv, commandDiagnosticCWD(argv, cwd)
+}
+
+func commandDiagnosticDetails(args commandRunArgs, cwd string) ([]string, string) {
+	if runtime.GOOS == "windows" {
+		argv := powerShellDiagnosticArgv(args.Command)
+		return argv, commandDiagnosticCWD(argv, cwd)
+	}
+	return commandVerificationDetails(args, cwd)
 }
 
 func commandDiagnosticCWD(argv []string, cwd string) string {

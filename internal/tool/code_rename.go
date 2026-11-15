@@ -221,6 +221,11 @@ func (r *BuiltinRunner) codeRename(ctx context.Context, call Call) Result {
 		}
 		return applied
 	}
+	changes := make([]lsp.FileChange, 0, len(mutatedPaths))
+	for _, path := range mutatedPaths {
+		changes = append(changes, lsp.FileChange{Path: path, Type: lsp.FileChanged})
+	}
+	r.recordCodeFileChanges(call.ProjectDirs, changes)
 	_, syncFailure := r.refreshCodeDocuments(ctx, out, call, target)
 	var payload map[string]any
 	if err := json.Unmarshal([]byte(applied.Content), &payload); err != nil {

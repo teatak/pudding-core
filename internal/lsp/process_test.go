@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -422,6 +423,13 @@ type fakeLSP struct {
 	documentChanges int
 	documentCloses  int
 	documents       map[string]fakeLSPDocument
+	fileChanges     []fakeLSPFileChange
+	initialOptions  map[string]any
+}
+
+type fakeLSPFileChange struct {
+	URI  string `json:"uri"`
+	Type int    `json:"type"`
 }
 
 type fakeLSPDocument struct {
@@ -473,6 +481,7 @@ func (s *fakeLSP) handleClientMessage(message wireMessage) (bool, error) {
 			return false, errors.New("client did not advertise required configuration, rename, and diagnostics capabilities")
 		}
 		s.rootURI = params.RootURI
+		s.initialOptions = params.InitializationOptions
 		return false, s.respond(message.ID, map[string]any{
 			"capabilities": map[string]any{"positionEncoding": "utf-8"},
 		})
@@ -515,6 +524,18 @@ func (s *fakeLSP) handleClientMessage(message wireMessage) (bool, error) {
 			ID:      json.RawMessage(strconv.Quote(serverID)),
 			Method:  "workspace/configuration",
 			Params:  mustJSON(map[string]any{"items": []map[string]string{{"section": "one"}, {"section": "two"}}}),
+		})
+	case "test/initialOptions":
+		return false, s.respond(message.ID, s.initialOptions)
+	case "test/goplsConfiguration":
+		s.nextServerID++
+		serverID := "configuration-" + strconv.Itoa(s.nextServerID)
+		s.serverRequest[serverID] = append(json.RawMessage(nil), message.ID...)
+		return false, s.write(wireMessage{
+			JSONRPC: "2.0",
+			ID:      json.RawMessage(strconv.Quote(serverID)),
+			Method:  "workspace/configuration",
+			Params:  mustJSON(map[string]any{"items": []map[string]string{{"section": "gopls"}, {"section": "unrelated"}}}),
 		})
 	case "test/crash":
 		os.Exit(42)
@@ -564,6 +585,16 @@ func (s *fakeLSP) handleClientMessage(message wireMessage) (bool, error) {
 		delete(s.documents, params.TextDocument.URI)
 	case "test/documents":
 		return false, s.respond(message.ID, s.documents)
+	case "workspace/didChangeWatchedFiles":
+		var params struct {
+			Changes []fakeLSPFileChange `json:"changes"`
+		}
+		if err := json.Unmarshal(message.Params, &params); err != nil {
+			return false, err
+		}
+		s.fileChanges = append(s.fileChanges, params.Changes...)
+	case "test/fileChanges":
+		return false, s.respond(message.ID, s.fileChanges)
 	case "test/documentState":
 		return false, s.respond(message.ID, map[string]int{"opens": s.documentOpens, "changes": s.documentChanges, "closes": s.documentCloses})
 	case "shutdown":
@@ -606,6 +637,10 @@ func (s *fakeLSP) handleClientResponse(message wireMessage) {
 	}
 	var values []any
 	ok := json.Unmarshal(message.Result, &values) == nil && len(values) == 2
+	if strings.HasPrefix(serverID, "configuration-") {
+		_ = s.respond(clientID, values)
+		return
+	}
 	_ = s.respond(clientID, ok)
 }
 

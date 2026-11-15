@@ -25,6 +25,15 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: 24
+      - name: Prepare bundled language servers
+        run: |
+          make language-servers
+          echo "$PWD/bin/language-servers" >> "$GITHUB_PATH"
+      - name: Verify real Go and TypeScript language servers
+        env:
+          PUDDING_LSP_INTEGRATION: '1'
+          PUDDING_LSP_TS_INTEGRATION: '1'
+        run: go test -count=1 -v -tags "sqlite_fts5 webrtcaec" ./internal/tool -run '^TestCode'
       - run: node scripts/scan-secrets.cjs
   windows-x64:
     runs-on: windows-latest

@@ -207,7 +207,11 @@ func TestFileDiscoverySharesIgnoreRulesAndSupportsExplicitOverride(t *testing.T)
 				if payload["matches"] != nil || payload["matchCount"] != nil || payload["fileCount"] != float64(len(want)) {
 					t.Fatalf("files mode returned snippets or line counts: %s", result.Content)
 				}
-				if model := ModelResultContent(name, true, result.Content, "turn", "call", true); strings.Contains(model, "numberedExcerpt") || !strings.Contains(model, "src/main.go") {
+				model := ModelResultContent(name, true, result.Content, "turn", "call", true)
+				var modelPaths struct {
+					Files []string `json:"files"`
+				}
+				if err := json.Unmarshal([]byte(model), &modelPaths); err != nil || strings.Contains(model, "numberedExcerpt") || !reflect.DeepEqual(modelPaths.Files, paths) {
 					t.Fatalf("model lost path result: %s", model)
 				}
 			} else {
