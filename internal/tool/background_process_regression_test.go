@@ -183,7 +183,7 @@ func TestBackgroundProcessForegroundGlobalQuotaIsolation(t *testing.T) {
 					if payload["reason"] != "global_process_limit" {
 						t.Fatalf("full pool admitted command: %v", err)
 					}
-				} else if !errors.Is(err, os.ErrNotExist) {
+				} else if !errors.Is(err, os.ErrNotExist) && !errors.Is(err, exec.ErrNotFound) {
 					t.Fatalf("other pool blocked command admission: %v", err)
 				}
 				wantForeground := 0

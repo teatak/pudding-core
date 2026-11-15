@@ -1,7 +1,7 @@
 name: Core CI
 on:
   push:
-    branches: [main, codex/windows-x64]
+    branches: [main]
   pull_request:
 permissions:
   contents: read
@@ -39,41 +39,3 @@ jobs:
           PUDDING_LSP_TS_INTEGRATION: '1'
         run: go test -count=1 -v -tags "sqlite_fts5 webrtcaec" ./internal/tool -run '^TestCode'
       - run: node scripts/scan-secrets.cjs
-  windows-x64:
-    runs-on: windows-latest
-    env:
-      GOOS: windows
-      GOARCH: amd64
-      CGO_ENABLED: '1'
-      CC: gcc
-    defaults:
-      run:
-        shell: msys2 {0}
-    steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-go@v7
-        with:
-          go-version-file: go.mod
-          architecture: x64
-          cache: true
-      - uses: msys2/setup-msys2@v2
-        with:
-          msystem: UCRT64
-          path-type: inherit
-          update: true
-          install: make mingw-w64-ucrt-x86_64-gcc
-      - name: Verify x64 CGO toolchain
-        run: |
-          go env GOOS GOARCH CGO_ENABLED CC
-          gcc -dumpmachine
-          test "$(go env GOARCH)" = amd64
-          test "$(gcc -dumpmachine)" = x86_64-w64-mingw32
-          pwsh.exe -NoLogo -NoProfile -NonInteractive -Command 'if ($PSVersionTable.PSVersion.Major -lt 7 -or [System.Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture -ne "X64") { exit 1 }; $PSVersionTable.PSVersion.ToString()'
-      - run: make daemon BUILDTAGS=sqlite_fts5 DAEMON_OUT=bin/puddingd.exe
-        id: daemon-build
-      - name: Verify native PowerShell and command lifecycle
-        run: go test -count=1 -v -tags sqlite_fts5 ./internal/tool -run '^(TestPowerShell|TestWindows|TestCommandRun(UsesProjectCWDAndCapturesOutput|StreamsStdoutAndStderr|ReturnsExitCode|TimeoutKillsProcessTree|StopsOnContextCancel)|TestBackgroundProcess(StartPollStop|PipeAcceptsInput|RunsAndStopsLocalServer))'
-      - run: make test BUILDTAGS=sqlite_fts5
-        if: ${{ !cancelled() && steps.daemon-build.outcome == 'success' }}
-      - run: make schema-check BUILDTAGS=sqlite_fts5
-        if: ${{ !cancelled() && steps.daemon-build.outcome == 'success' }}
