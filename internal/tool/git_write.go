@@ -431,6 +431,10 @@ func normalizeGitWritePaths(repo gitWriteRepository, rawPaths []string) ([]strin
 }
 
 func stageGitPaths(ctx context.Context, repo gitWriteRepository, paths []string) error {
+	filterArgs, err := gitStageFilterArguments(ctx, repo.Root)
+	if err != nil {
+		return err
+	}
 	formatResult := runGit(ctx, repo.Root, 64, "rev-parse", "--show-object-format")
 	if formatResult.err != nil || formatResult.stdout.Truncated() {
 		return newGitWriteError("git_object_format_failed", gitExecDetail(formatResult))
@@ -484,7 +488,14 @@ func stageGitPaths(ctx context.Context, repo gitWriteRepository, paths []string)
 		if totalBytes > gitStageMaxTotalBytes {
 			return newGitWriteError("git_stage_too_large", "Git stage input exceeds the 256 MiB safety limit")
 		}
-		hashResult := runGitInput(ctx, repo.Root, 256, content, "hash-object", "-w", "--stdin")
+		hashArgs := append([]string(nil), filterArgs...)
+		hashArgs = append(hashArgs, "hash-object", "-w", "--stdin")
+		if mode != "120000" {
+			// Retain Git's built-in text/eol and encoding conversions for this
+			// path. Symlink targets are always stored verbatim.
+			hashArgs = append(hashArgs, "--path="+path)
+		}
+		hashResult := runGitInput(ctx, repo.Root, 256, content, hashArgs...)
 		if hashResult.err != nil || hashResult.stdout.Truncated() {
 			return newGitWriteError(gitFailureReason(ctx, hashResult.err, "git_hash_failed"), gitExecDetail(hashResult))
 		}
@@ -499,6 +510,43 @@ func stageGitPaths(ctx context.Context, repo gitWriteRepository, paths []string)
 		return newGitWriteError(gitFailureReason(ctx, result.err, "git_stage_failed"), gitExecDetail(result))
 	}
 	return nil
+}
+
+// Apply path-aware built-in conversions without running repository-configured
+// filter commands. Empty commands disable drivers rather than spawning a shell.
+func gitStageFilterArguments(ctx context.Context, root string) ([]string, error) {
+	config := runGit(ctx, root, gitMetadataLimitBytes, "config", "--null", "--name-only", "--get-regexp", `^filter\..*\.(clean|smudge|process|required)$`)
+	if config.err != nil && (gitExitCode(config.err) != 1 || ctx.Err() != nil) {
+		return nil, newGitWriteError(gitFailureReason(ctx, config.err, "git_filter_config_failed"), gitExecDetail(config))
+	}
+	if config.stdout.Truncated() {
+		return nil, newGitWriteError("git_filter_config_failed", "Git filter configuration exceeded the safety limit")
+	}
+	drivers := make(map[string]bool)
+	// Subsection names can contain spaces or newlines. Do not split keys on
+	// whitespace and accidentally leave such a driver's command enabled.
+	for _, key := range strings.Split(config.stdout.String(), "\x00") {
+		for _, suffix := range []string{".clean", ".smudge", ".process", ".required"} {
+			if strings.HasPrefix(key, "filter.") && strings.HasSuffix(key, suffix) {
+				drivers[strings.TrimSuffix(strings.TrimPrefix(key, "filter."), suffix)] = true
+			}
+		}
+	}
+	names := make([]string, 0, len(drivers))
+	for driver := range drivers {
+		names = append(names, driver)
+	}
+	sort.Strings(names)
+	args := make([]string, 0, len(names)*8)
+	for _, driver := range names {
+		args = append(args,
+			"-c", "filter."+driver+".clean=",
+			"-c", "filter."+driver+".smudge=",
+			"-c", "filter."+driver+".process=",
+			"-c", "filter."+driver+".required=false",
+		)
+	}
+	return args, nil
 }
 
 func readGitWriteStatus(ctx context.Context, repo gitRepository) (gitStatusSnapshot, error) {
