@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
+	"log/slog"
 
 	"github.com/teatak/pudding-core/internal/event"
 	"github.com/teatak/pudding-core/internal/provider"
@@ -59,7 +59,9 @@ func (e *Engine) PrepareDebugPlugins(ctx context.Context, sessionID string, mode
 		}
 		result, _, _ := e.loadPlugin(ctx, sessionID, call, mode)
 		if !result.Ok {
-			return fmt.Errorf("prepare debug plugin %s: %s", definition.ID, result.Content)
+			// A broken plugin must not hide unrelated Core or Desktop tools.
+			slog.WarnContext(ctx, "engine: debug plugin load failed", "sessionID", sessionID, "pluginID", definition.ID, "error", result.Content)
+			continue
 		}
 		prepared[definition.ID] = true
 	}
