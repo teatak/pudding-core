@@ -59,6 +59,7 @@ type Server struct {
 	browser    browser.Service
 	camera     desktopcamera.Capturer
 	browserMCP browserMCPService
+	debugMCP   debugMCPBinding
 	browserMu  sync.Mutex
 	// browserAllowedTabs is absent until a session's browser surface is explicitly closed or rebound.
 	// Once present, only listed tabs are visible; an empty set means the session has no browser tab.
@@ -387,11 +388,16 @@ func (s *Server) Handler(token string, static http.Handler) http.Handler {
 	public.Route("/desktop/health").GET(desktopHealth(token))
 	app.Route("/usage/daily").GET(s.getDailyUsage)
 	authed := withAuth(token, app)
+	debugMCPAuthed := withAuth(token, http.HandlerFunc(s.serveDebugMCP))
 	var mcpAuthed http.Handler
 	if s.browserMCP != nil {
 		mcpAuthed = withAuth(token, s.browserMCP)
 	}
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/mcp" {
+			debugMCPAuthed.ServeHTTP(w, r)
+			return
+		}
 		if r.URL.Path == "/mcp/ws" && mcpAuthed != nil {
 			mcpAuthed.ServeHTTP(w, r)
 			return

@@ -14,7 +14,7 @@
 | 文档 | 内容 |
 | --- | --- |
 | [技术选型与当前架构](technology-decisions.md) | 仓库边界、状态所有权、Provider、存储、API 与 SSE |
-| [API 快速开始](api-quickstart.md) | 临时 daemon 的创建会话、提交、取消与续传 |
+| [API 快速开始](api-quickstart.md) | 临时 daemon 的创建会话、提交、取消与续传；本地 MCP / Codex 调试 |
 | [公共契约](../contracts/README.md)／[字段对照](contracts-checklist.md) | runtime、REST、SSE、消息与工具协议 |
 | [模型预设](provider-presets.md) | 模板与运行配置的边界、provider 适配记录 |
 | [插件](plugins.md)／[内置插件](builtin-plugins-design.md) | 包、连接、动态加载与 runtime-provided 插件 |
