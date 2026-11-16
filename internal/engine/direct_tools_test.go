@@ -141,6 +141,51 @@ func TestDirectToolPluginLoadAndUnload(t *testing.T) {
 	}
 }
 
+// A broken plugin skill must not prevent the debug session from exposing other
+// plugins or executing ordinary tools.
+type directBrokenPluginSource struct{ directPluginSource }
+
+func (directBrokenPluginSource) ListDefinitions(context.Context) ([]*plugin.Definition, error) {
+	return []*plugin.Definition{
+		{ID: "broken", Name: "Broken", Enabled: true, RequiredMode: "code", DefaultSkillID: "missing"},
+		{ID: "healthy", Name: "Healthy", Enabled: true, RequiredMode: "code"},
+	}, nil
+}
+
+func TestDirectToolDebugPluginFailureDoesNotBlockOtherTools(t *testing.T) {
+	ctx := context.Background()
+	eng, _ := newDirectToolEngine(t, WithPlugins(directBrokenPluginSource{}), WithTools(directToolRunner{
+		defs: []provider.ToolDef{
+			{Name: "broken_tool", PluginID: "broken", Capability: store.ModeCode, InputSchema: json.RawMessage(`{"type":"object"}`)},
+			{Name: "healthy_tool", PluginID: "healthy", Capability: store.ModeCode, InputSchema: json.RawMessage(`{"type":"object"}`)},
+		},
+		run: func(_ context.Context, call tool.Call) tool.Result {
+			return tool.Result{CallID: call.CallID, Name: call.Name, Ok: true, Content: "healthy result"}
+		},
+	}))
+	session, err := eng.DebugSession(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prepared := map[string]bool{}
+	for range 2 {
+		if err := eng.PrepareDebugPlugins(ctx, session.ID, store.ModeCode, prepared); err != nil {
+			t.Fatalf("one broken plugin blocked debug preparation: %v", err)
+		}
+		defs, err := eng.ToolDefinitions(ctx, session.ID, store.ModeCode)
+		if err != nil || !tool.HasDefinition(defs, "healthy_tool") || tool.HasDefinition(defs, "broken_tool") {
+			t.Fatalf("healthy tool unavailable or broken tool exposed: defs=%+v err=%v", defs, err)
+		}
+	}
+	if prepared["broken"] || !prepared["healthy"] {
+		t.Fatalf("incorrect prepared plugin state: %v", prepared)
+	}
+	result, err := eng.CallTool(ctx, session.ID, store.ModeCode, "healthy_tool", json.RawMessage(`{}`))
+	if err != nil || !result.Ok || result.Content != "healthy result" {
+		t.Fatalf("healthy tool call blocked by broken plugin: %+v, %v", result, err)
+	}
+}
+
 func TestDirectToolEngineDispatchAndSessionScope(t *testing.T) {
 	ctx := context.Background()
 	eng, db := newDirectToolEngine(t)
