@@ -5,7 +5,6 @@ package engine
 import (
 	"context"
 	"encoding/json"
-	"strings"
 	"testing"
 
 	"github.com/teatak/pudding-core/internal/store"
@@ -29,15 +28,16 @@ func TestDirectToolForegroundCommandFinishesBeforeTurn(t *testing.T) {
 	}
 	// yield_ms=0 is a normal command option. The shell performs finite work;
 	// there are no sleep barriers or injected execution timing hooks.
-	args := json.RawMessage(`{"scope":"project","command":"i=0; while [ \"$i\" -lt 20000 ]; do i=$((i+1)); done; printf mcp-complete","yield_ms":0}`)
+	args := json.RawMessage(`{"scope":"project","command":"printf mcp-early; i=0; while [ \"$i\" -lt 20000 ]; do i=$((i+1)); done; printf mcp-late","yield_ms":0}`)
 	result, err := eng.CallTool(ctx, session.ID, store.ModeCode, tool.CommandRun, args)
 	var output struct {
 		Running   bool `json:"running"`
 		Yielded   bool `json:"yielded"`
 		Cancelled bool `json:"cancelled"`
 		ExitCode  *int `json:"exitCode"`
+		Stdout    string `json:"stdout"`
 	}
-	if err != nil || !result.Ok || json.Unmarshal([]byte(result.Content), &output) != nil || output.Running || output.Yielded || output.Cancelled || output.ExitCode == nil || *output.ExitCode != 0 || !strings.Contains(result.Content, "mcp-complete") {
+	if err != nil || !result.Ok || json.Unmarshal([]byte(result.Content), &output) != nil || output.Running || output.Yielded || output.Cancelled || output.ExitCode == nil || *output.ExitCode != 0 || output.Stdout != "mcp-earlymcp-late" {
 		t.Fatalf("foreground command ended with its MCP call before completion: %+v, %v", result, err)
 	}
 	if result.Name != tool.CommandRun || result.CallID == "" {
