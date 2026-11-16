@@ -1281,6 +1281,29 @@ func (e *Engine) finishTurnWithInterrupted(
 	assistantParts []store.ContentPart,
 	interruptedOutputCommitted bool,
 ) {
+	err := e.finishTurnState(sessionID, turnID, mode, status, errMsg, assistantParts, interruptedOutputCommitted)
+	if err != nil {
+		// session 在 turn 进行中被删除:turn 已随级联删除消失,收尾无处可写,
+		// 静默(删除路径已 cancel 本 turn,见 api deleteSession)。
+		if errors.Is(err, store.ErrNotFound) {
+			slog.Debug("engine: finish turn skipped, session/turn gone", "turnID", turnID)
+			return
+		}
+		slog.Error("engine: finish turn", "turnID", turnID, "err", err)
+		return
+	}
+
+	e.TryDrainQueued(sessionID)
+	e.childTurnFinished(sessionID, status)
+	e.wakeForAssistantTasks()
+	if status == store.TurnCompleted {
+		e.scheduleAutoCompact(sessionID)
+	}
+}
+
+// finishTurnState persists a turn and releases its execution resources. It does
+// not start a provider request or schedule automatic context compaction.
+func (e *Engine) finishTurnState(sessionID, turnID string, mode store.AgentMode, status store.TurnStatus, errMsg string, assistantParts []store.ContentPart, interruptedOutputCommitted bool) error {
 	in := store.FinishTurnInput{TurnID: turnID, Status: status, Mode: mode, Error: errMsg}
 	if runner, ok := e.tools.(interface{ FinishForegroundCommands(string, string) error }); ok {
 		if err := runner.FinishForegroundCommands(sessionID, turnID); err != nil {
@@ -1309,23 +1332,7 @@ func (e *Engine) finishTurnWithInterrupted(
 	_, err := e.store.FinishTurn(context.Background(), in)
 	e.clearRunningLocked(sessionID, turnID)
 	e.mu.Unlock()
-	if err != nil {
-		// session 在 turn 进行中被删除:turn 已随级联删除消失,收尾无处可写,
-		// 静默(删除路径已 cancel 本 turn,见 api deleteSession)。
-		if errors.Is(err, store.ErrNotFound) {
-			slog.Debug("engine: finish turn skipped, session/turn gone", "turnID", turnID)
-			return
-		}
-		slog.Error("engine: finish turn", "turnID", turnID, "err", err)
-		return
-	}
-
-	e.TryDrainQueued(sessionID)
-	e.childTurnFinished(sessionID, status)
-	e.wakeForAssistantTasks()
-	if status == store.TurnCompleted {
-		e.scheduleAutoCompact(sessionID)
-	}
+	return err
 }
 
 func (e *Engine) clearRunning(sessionID, turnID string) {
@@ -2217,83 +2224,13 @@ func (e *Engine) executePendingTools(ctx context.Context, sessionID, turnID stri
 			Name:      call.Name,
 			Phase:     "running",
 		})
-		// Preserve the stored call/result identity while authorizing and executing
-		// legacy content calls against the canonical tool definition.
-		storedName := call.Name
+		previousMode := nextMode
+		result, updatedMode, changed := e.dispatchToolCall(ctx, sessionID, turnID, nextMode, allowedTools, call)
+		nextMode = updatedMode
+		modeChanged = modeChanged || nextMode != previousMode
+		contextChanged = contextChanged || changed
 		call.Name = tool.NormalizeLegacyContentTool(call.Name)
-		var result tool.Result
-		if call.Name == tool.RequestCapability {
-			var requestedMode store.AgentMode
-			var changed bool
-			result, requestedMode, changed = e.requestCapabilityApproval(ctx, sessionID, turnID, call, nextMode)
-			if changed {
-				nextMode = requestedMode
-				modeChanged = true
-			}
-		} else if call.Name == tool.PluginLoad {
-			var changed bool
-			previousMode := nextMode
-			result, changed, nextMode = e.loadPlugin(ctx, sessionID, call, nextMode)
-			modeChanged = modeChanged || nextMode != previousMode
-			contextChanged = contextChanged || changed
-		} else if call.Name == tool.PluginUnload {
-			var changed bool
-			result, changed = e.unloadPlugin(ctx, sessionID, call)
-			contextChanged = contextChanged || changed
-		} else if pluginID, pluginTool := tool.BuiltinPluginIDForTool(call.Name); pluginTool && e.plugins != nil {
-			if !tool.NameAllowedForMode(nextMode, call.Name) {
-				result = toolNotAllowedResult(call, nextMode)
-			} else if !tool.HasDefinition(allowedTools, call.Name) || !e.pluginToolCallable(ctx, sessionID, pluginID, nextMode) {
-				result = e.pluginToolUnavailableResult(ctx, sessionID, call, pluginID)
-			} else if rejected := e.checkPageAuthoringCall(ctx, sessionID, turnID, storedName, call); rejected != nil {
-				result = *rejected
-			} else {
-				result = e.executeAllowedTool(ctx, sessionID, turnID, nextMode, call)
-			}
-		} else if definition, ok := providerToolDefinition(allowedTools, call.Name); ok && definition.PluginID != "" && e.plugins != nil {
-			// The provider received this plugin tool in allowedTools after the plugin was
-			// loaded, enabled, and mode-checked. Treat that request as the authority
-			// for this model step instead of re-reading an ephemeral runtime plugin
-			// registry immediately before execution.
-			result = e.executeAllowedTool(ctx, sessionID, turnID, nextMode, call)
-		} else if tool.IsPluginAPITool(call.Name) && e.plugins != nil {
-			pluginID, resolved := e.pluginEndpointTarget(ctx, sessionID, call)
-			switch {
-			case resolved && !e.pluginToolCallable(ctx, sessionID, pluginID, nextMode):
-				result = e.pluginToolUnavailableResult(ctx, sessionID, call, pluginID)
-			case !tool.HasDefinition(allowedTools, call.Name):
-				result = pluginAPINotLoadedResult(call)
-			default:
-				result = e.executeAllowedTool(ctx, sessionID, turnID, nextMode, call)
-			}
-		} else if !tool.HasDefinition(allowedTools, call.Name) {
-			known, err := e.toolNameKnown(ctx, sessionID, call.Name)
-			if err != nil {
-				result = tool.Result{CallID: call.CallID, Name: call.Name, Ok: false, Content: fmt.Sprintf("list tools: %v", err)}
-			} else if known {
-				if tool.NameAllowedForMode(nextMode, call.Name) {
-					if pluginID, pluginTool := tool.BuiltinPluginIDForTool(call.Name); pluginTool && e.plugins != nil {
-						result = e.pluginToolUnavailableResult(ctx, sessionID, call, pluginID)
-					} else {
-						result = toolUnavailableResult(call)
-					}
-				} else {
-					result = toolNotAllowedResult(call, nextMode)
-				}
-			} else {
-				result = unknownToolResult(call)
-			}
-		} else {
-			result = e.executeAllowedTool(ctx, sessionID, turnID, nextMode, call)
-		}
-		// Rebuild the profile before the next model step in this same turn.
-		contextChanged = contextChanged || (tool.IsAssistantTool(call.Name) && result.Ok)
-		// Cancellation stops subsequent work, but must not discard the result of
-		// an already dispatched tool (including completed prefixes/unknown effects).
-		// Persist and publish that result before the cancellation check below.
-		if storedName != call.Name || result.Name == "" {
-			result.Name = storedName
-		}
+		// Keep completed results even when the request was cancelled during execution.
 		if err := e.completeToolCall(sessionID, turnID, allowedTools, parts, call, result); err != nil {
 			return store.TurnFailed, fmt.Sprintf("append output: %v", err), nextMode, modeChanged
 		}
@@ -2305,6 +2242,84 @@ func (e *Engine) executePendingTools(ctx context.Context, sessionID, turnID stri
 		return store.TurnCancelled, "", nextMode, modeChanged
 	}
 	return store.TurnRunning, "", nextMode, modeChanged || contextChanged
+}
+
+// dispatchToolCall authorizes and routes one call using the definitions advertised
+// for this request. Both model turns and direct MCP turns use this path.
+func (e *Engine) dispatchToolCall(ctx context.Context, sessionID, turnID string, mode store.AgentMode, allowedTools []provider.ToolDef, call tool.Call) (result tool.Result, nextMode store.AgentMode, contextChanged bool) {
+	nextMode = mode
+	// Preserve the stored call/result identity while authorizing and executing
+	// legacy content calls against the canonical tool definition.
+	storedName := call.Name
+	call.Name = tool.NormalizeLegacyContentTool(call.Name)
+	if call.Name == tool.RequestCapability {
+		var requestedMode store.AgentMode
+		var changed bool
+		result, requestedMode, changed = e.requestCapabilityApproval(ctx, sessionID, turnID, call, nextMode)
+		if changed {
+			nextMode = requestedMode
+			contextChanged = true
+		}
+	} else if call.Name == tool.PluginLoad {
+		var changed bool
+		result, changed, nextMode = e.loadPlugin(ctx, sessionID, call, nextMode)
+		contextChanged = contextChanged || changed
+	} else if call.Name == tool.PluginUnload {
+		var changed bool
+		result, changed = e.unloadPlugin(ctx, sessionID, call)
+		contextChanged = contextChanged || changed
+	} else if pluginID, pluginTool := tool.BuiltinPluginIDForTool(call.Name); pluginTool && e.plugins != nil {
+		if !tool.NameAllowedForMode(nextMode, call.Name) {
+			result = toolNotAllowedResult(call, nextMode)
+		} else if !tool.HasDefinition(allowedTools, call.Name) || !e.pluginToolCallable(ctx, sessionID, pluginID, nextMode) {
+			result = e.pluginToolUnavailableResult(ctx, sessionID, call, pluginID)
+		} else if rejected := e.checkPageAuthoringCall(ctx, sessionID, turnID, storedName, call); rejected != nil {
+			result = *rejected
+		} else {
+			result = e.executeAllowedTool(ctx, sessionID, turnID, nextMode, call)
+		}
+	} else if definition, ok := providerToolDefinition(allowedTools, call.Name); ok && definition.PluginID != "" && e.plugins != nil {
+		// The provider received this plugin tool in allowedTools after the plugin was
+		// loaded, enabled, and mode-checked. Treat that request as the authority
+		// for this model step instead of re-reading an ephemeral runtime plugin
+		// registry immediately before execution.
+		result = e.executeAllowedTool(ctx, sessionID, turnID, nextMode, call)
+	} else if tool.IsPluginAPITool(call.Name) && e.plugins != nil {
+		pluginID, resolved := e.pluginEndpointTarget(ctx, sessionID, call)
+		switch {
+		case resolved && !e.pluginToolCallable(ctx, sessionID, pluginID, nextMode):
+			result = e.pluginToolUnavailableResult(ctx, sessionID, call, pluginID)
+		case !tool.HasDefinition(allowedTools, call.Name):
+			result = pluginAPINotLoadedResult(call)
+		default:
+			result = e.executeAllowedTool(ctx, sessionID, turnID, nextMode, call)
+		}
+	} else if !tool.HasDefinition(allowedTools, call.Name) {
+		known, err := e.toolNameKnown(ctx, sessionID, call.Name)
+		if err != nil {
+			result = tool.Result{CallID: call.CallID, Name: call.Name, Ok: false, Content: fmt.Sprintf("list tools: %v", err)}
+		} else if known {
+			if tool.NameAllowedForMode(nextMode, call.Name) {
+				if pluginID, pluginTool := tool.BuiltinPluginIDForTool(call.Name); pluginTool && e.plugins != nil {
+					result = e.pluginToolUnavailableResult(ctx, sessionID, call, pluginID)
+				} else {
+					result = toolUnavailableResult(call)
+				}
+			} else {
+				result = toolNotAllowedResult(call, nextMode)
+			}
+		} else {
+			result = unknownToolResult(call)
+		}
+	} else {
+		result = e.executeAllowedTool(ctx, sessionID, turnID, nextMode, call)
+	}
+	// Rebuild the profile before the next model step in this same turn.
+	contextChanged = contextChanged || (tool.IsAssistantTool(call.Name) && result.Ok)
+	if storedName != call.Name || result.Name == "" {
+		result.Name = storedName
+	}
+	return result, nextMode, contextChanged
 }
 
 func (e *Engine) executeAllowedTool(ctx context.Context, sessionID, turnID string, mode store.AgentMode, call tool.Call) tool.Result {
