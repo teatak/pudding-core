@@ -37,15 +37,11 @@ def main():
         if (address.scheme != "http" or not local or not port or address.path not in ("", "/")
                 or address.query or address.fragment or address.username is not None):
             raise ValueError("--addr must be a loopback HTTP address, such as http://127.0.0.1:9679")
-        token = (Path(args.home).expanduser() / "daemon.token").read_text(encoding="utf-8").strip()
-        if not token:
-            raise ValueError("daemon.token is empty")
     except (OSError, ValueError) as error:
         print(f"pudding-mcp: {error}", file=sys.stderr)
         return 1
 
     headers = {
-        "Authorization": "Bearer " + token,
         "Content-Type": "application/json",
         "Accept": "application/json, text/event-stream",
     }
@@ -59,6 +55,11 @@ def main():
         connection = http.client.HTTPConnection(host, port, timeout=660)
         try:
             request = json.loads(line)
+            # The daemon may restart with a new token while Codex keeps this process.
+            token = (Path(args.home).expanduser() / "daemon.token").read_text(encoding="utf-8").strip()
+            if not token:
+                raise ValueError("daemon.token is empty")
+            headers["Authorization"] = "Bearer " + token
             connection.request("POST", "/mcp", body=line, headers=headers)
             response = connection.getresponse()
             body = response.read()
@@ -82,7 +83,8 @@ def main():
                     "jsonrpc": "2.0", "id": request["id"],
                     "error": {"code": -32000, "message": str(error)},
                 })
-            return 1
+            # Fail only this request; never replay a call that may have executed.
+            continue
         finally:
             connection.close()
     return 0
