@@ -294,7 +294,9 @@ func TestUndoRedoTurnFileChanges(t *testing.T) {
 	}
 	hub := event.NewHub()
 	eng := engine.New(ms, hub, registry.Static(mock.New()), ms, engine.WithAttachmentHome(homeDir))
-	handler := New(eng, ms, ms, hub).WithHome(homeDir).Handler(testToken, nil)
+	server := New(eng, ms, ms, hub).WithHome(homeDir)
+	server.workspaceWriteWait = 50 * time.Millisecond
+	handler := server.Handler(testToken, nil)
 
 	initial, err := ms.GetConversationTurn(ctx, "session", "turn")
 	if err != nil {
@@ -324,15 +326,17 @@ func TestUndoRedoTurnFileChanges(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		blockedCtx, cancel := context.WithTimeout(ctx, 50*time.Millisecond)
+		blockedCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 		blocked := httptest.NewRequest(http.MethodPost, "/sessions/session/turns/turn/file-changes/"+action.name, strings.NewReader(fmt.Sprintf(`{"expectedRevision":%d}`, turn.FileChangeRevision))).WithContext(blockedCtx)
 		blocked.Header.Set("Authorization", "Bearer "+testToken)
 		response := httptest.NewRecorder()
 		handler.ServeHTTP(response, blocked)
 		release()
-		if response.Code == http.StatusOK || blockedCtx.Err() == nil {
+		var rejected struct{ Error string }
+		if err := json.Unmarshal(response.Body.Bytes(), &rejected); err != nil ||
+			response.Code != http.StatusConflict || rejected.Error != "workspace_busy" || blockedCtx.Err() != nil {
 			cancel()
-			t.Fatalf("replay bypassed active writer: %d %s", response.Code, response.Body.String())
+			t.Fatalf("expected workspace_busy before the request deadline: %d %s", response.Code, response.Body.String())
 		}
 		cancel()
 		unchanged, err := ms.GetConversationTurn(ctx, "session", "turn")

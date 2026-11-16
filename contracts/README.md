@@ -441,6 +441,10 @@ An obsolete revision, incompatible state, running turn or changed file returns
 runs inside the replay lock before any filesystem changes and again in the
 state update's compare-and-swap. An old undo cannot undo a later redo cycle.
 
+Project file writes, Git writes and turn file replay return `409 workspace_busy`
+if they cannot acquire the workspace write lock within two seconds. This
+response guarantees the mutation did not start. The user can retry the action.
+
 Clients must reconcile uncertain responses by GETting that specific turn and
 updating its cached state/revision. If this read also fails, retain the attempt
 and offer a read-only status retry, including across component remounts. Do not

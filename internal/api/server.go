@@ -82,6 +82,8 @@ type Server struct {
 	// with reclamation. SQLite remains the authority for session existence.
 	attachmentMu sync.Mutex
 
+	workspaceWriteWait time.Duration
+
 	assistantMu        sync.Mutex
 	sessionLifecycleMu sync.Mutex
 	sessionLifecycles  map[string]chan struct{}
@@ -95,7 +97,7 @@ type voiceController interface {
 
 func New(eng *engine.Engine, s store.Store, cfg engine.ConfigSource, hub *event.Hub) *Server {
 	providers, _ := cfg.(providerWriter)
-	return &Server{pluginHTTP: pluginexec.New(nil), engine: eng, store: s, turnFiles: turnfiles.NewReplayer(s), config: cfg, providers: providers, hub: hub, oauth: map[string]oauthStartState{}, oauthBroker: oauthbroker.New("", nil), github: githubapp.New("", nil)}
+	return &Server{pluginHTTP: pluginexec.New(nil), engine: eng, store: s, turnFiles: turnfiles.NewReplayer(s), workspaceWriteWait: defaultWorkspaceWriteWait, config: cfg, providers: providers, hub: hub, oauth: map[string]oauthStartState{}, oauthBroker: oauthbroker.New("", nil), github: githubapp.New("", nil)}
 }
 
 func (s *Server) WithOAuthBroker(client *oauthbroker.Client) *Server {
@@ -1500,7 +1502,7 @@ func (s *Server) replayTurnFileChanges(c *cart.Context, direction turnfiles.Repl
 	if err := decode(c, &req); err != nil || req.ExpectedRevision <= 0 || req.ExpectedRevision > 9007199254740991 {
 		return badRequest(c, "turn_file_changes_invalid_revision")
 	}
-	release, err := s.engine.AcquireWorkspaceWrite(c.Request.Context(), paths)
+	release, err := s.acquireWorkspaceWrite(c.Request.Context(), paths)
 	if err != nil {
 		return s.fail(c, err)
 	}
@@ -1791,6 +1793,9 @@ func (s *Server) putUserPrompt(c *cart.Context) error {
 }
 
 func (s *Server) fail(c *cart.Context, err error) error {
+	if errors.Is(err, errWorkspaceBusy) {
+		return projectFileError(c, http.StatusConflict, "workspace_busy")
+	}
 	if errors.Is(err, credentialstore.ErrUnavailable) {
 		c.JSON(http.StatusServiceUnavailable, map[string]string{"error": credentialstore.ErrUnavailable.Error()})
 		return nil

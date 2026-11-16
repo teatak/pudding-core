@@ -36,7 +36,9 @@ func TestProjectMutationsWaitForWorkspaceWriter(t *testing.T) {
 	}
 	hub := event.NewHub()
 	eng := engine.New(st, hub, registry.Static(mock.New()), st, engine.WithAttachmentHome(homeDir))
-	handler := New(eng, st, st, hub).WithHome(homeDir).Handler(testToken, nil)
+	server := New(eng, st, st, hub).WithHome(homeDir)
+	server.workspaceWriteWait = 50 * time.Millisecond
+	handler := server.Handler(testToken, nil)
 	rootID := projectRootViews([]string{root})[0].ID
 	for _, tc := range []struct {
 		name, method, route string
@@ -70,14 +72,16 @@ func TestProjectMutationsWaitForWorkspaceWriter(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 			request := httptest.NewRequest(tc.method, "/sessions/session/project/"+tc.route, strings.NewReader(string(raw))).WithContext(ctx)
 			request.Header.Set("Authorization", "Bearer "+testToken)
 			response := httptest.NewRecorder()
 			handler.ServeHTTP(response, request)
-			if !errors.Is(ctx.Err(), context.DeadlineExceeded) || response.Code < 400 {
-				t.Fatalf("mutation bypassed active writer: %d %s", response.Code, response.Body.String())
+			var result struct{ Error string }
+			if err := json.Unmarshal(response.Body.Bytes(), &result); err != nil ||
+				response.Code != http.StatusConflict || result.Error != "workspace_busy" || ctx.Err() != nil {
+				t.Fatalf("expected workspace_busy before the request deadline: %d %s", response.Code, response.Body.String())
 			}
 			content, err := os.ReadFile(path)
 			if err != nil || string(content) != "original" {

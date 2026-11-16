@@ -64,7 +64,7 @@ func (s *Server) createProjectEntry(c *cart.Context) error {
 	if err != nil {
 		return projectFileError(c, http.StatusForbidden, "path_not_authorized")
 	}
-	release, err := s.engine.AcquireWorkspaceWrite(c.Request.Context(), []string{root.Path})
+	release, err := s.acquireWorkspaceWrite(c.Request.Context(), []string{root.Path})
 	if err != nil {
 		return s.fail(c, err)
 	}
@@ -99,7 +99,7 @@ func (s *Server) renameProjectEntry(c *cart.Context) error {
 	if err != nil {
 		return projectFileError(c, http.StatusForbidden, "path_not_authorized")
 	}
-	release, err := s.engine.AcquireWorkspaceWrite(c.Request.Context(), []string{root.Path})
+	release, err := s.acquireWorkspaceWrite(c.Request.Context(), []string{root.Path})
 	if err != nil {
 		return s.fail(c, err)
 	}
@@ -131,7 +131,7 @@ func (s *Server) copyProjectEntry(c *cart.Context) error {
 	if !ok {
 		return nil
 	}
-	release, err := s.engine.AcquireWorkspaceWrite(c.Request.Context(), []string{sourceRoot.Path, targetRoot.Path})
+	release, err := s.acquireWorkspaceWrite(c.Request.Context(), []string{sourceRoot.Path, targetRoot.Path})
 	if err != nil {
 		return s.fail(c, err)
 	}
@@ -157,7 +157,7 @@ func (s *Server) moveProjectEntry(c *cart.Context) error {
 	if !ok {
 		return nil
 	}
-	release, err := s.engine.AcquireWorkspaceWrite(c.Request.Context(), []string{sourceRoot.Path, targetRoot.Path})
+	release, err := s.acquireWorkspaceWrite(c.Request.Context(), []string{sourceRoot.Path, targetRoot.Path})
 	if err != nil {
 		return s.fail(c, err)
 	}
@@ -208,7 +208,7 @@ func (s *Server) deleteProjectEntry(c *cart.Context) error {
 	if err != nil {
 		return projectFileError(c, http.StatusForbidden, "path_not_authorized")
 	}
-	release, err := s.engine.AcquireWorkspaceWrite(c.Request.Context(), []string{root.Path})
+	release, err := s.acquireWorkspaceWrite(c.Request.Context(), []string{root.Path})
 	if err != nil {
 		return s.fail(c, err)
 	}
@@ -241,7 +241,7 @@ func (s *Server) putProjectFile(c *cart.Context) error {
 	if !utf8.Valid(content) || containsBinaryNUL(content) {
 		return projectFileError(c, http.StatusUnsupportedMediaType, "project_file_not_text")
 	}
-	release, err := s.engine.AcquireWorkspaceWrite(c.Request.Context(), []string{root.Path})
+	release, err := s.acquireWorkspaceWrite(c.Request.Context(), []string{root.Path})
 	if err != nil {
 		return s.fail(c, err)
 	}
