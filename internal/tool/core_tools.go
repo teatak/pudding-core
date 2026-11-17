@@ -10,6 +10,7 @@ import (
 )
 
 var chatCoreTools = map[string]bool{
+	AssistantProject:      true,
 	AssistantTaskDispatch: true,
 	AssistantTaskList:     true,
 	AssistantTaskSend:     true,

@@ -57,6 +57,9 @@ func (e *Engine) executeAssistantTask(ctx context.Context, sessionID, turnID str
 	if p.Assistant == nil || p.Assistant.SessionID != sessionID {
 		return fail(store.ErrAssistantToolUnavailable)
 	}
+	if call.Name == tool.AssistantProject {
+		return e.executeAssistantProject(ctx, sessionID, turnID, call)
+	}
 	var args struct {
 		Title     string `json:"title"`
 		Prompt    string `json:"prompt"`
