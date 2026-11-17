@@ -19,17 +19,7 @@ jobs:
         run: |
           bash scripts/prepare-abseil.sh
           echo "PKG_CONFIG_PATH=$PWD/dist/deps/abseil/lib/pkgconfig" >> "$GITHUB_ENV"
-      - name: Run make test
-        run: |
-          set +e
-          make test > "$RUNNER_TEMP/core-tests.log" 2>&1
-          status=$?
-          set -e
-          if [ "$status" -ne 0 ]; then
-            grep -B 20 -A 20 -E -- '--- FAIL:|^panic:|^fatal error:|^# github|^.*\.go:[0-9]+:[0-9]+:|^FAIL[[:space:]]' "$RUNNER_TEMP/core-tests.log" | head -400 || true
-          fi
-          tail -30 "$RUNNER_TEMP/core-tests.log"
-          exit "$status"
+      - run: make test
       - name: Verify file safety and verification regressions
         run: go test -count=1 -v -tags "sqlite_fts5 webrtcaec" ./internal/turnfiles ./internal/tool -run '^(TestTrackerUnreadableBaselineCannotDeleteOriginalOnUndo|TestReplayerRejectsIncompleteExistingSnapshots|TestFilePatchRejectsApprovalPermissionDrift|TestGitStageRetainsBuiltInNormalization|TestGitStageNormalizesWithoutExternalFilters|TestGitStagePreservesLiteralSymlinkTarget|TestCommandMakeIgnoredErrorsDoNotClaimPass)$'
       - name: Verify language-service cancellation and lifecycle races
