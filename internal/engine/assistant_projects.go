@@ -74,16 +74,17 @@ func (e *Engine) executeAssistantProject(ctx context.Context, sessionID, turnID 
 		if err != nil {
 			return fail(err)
 		}
+		approvalMode := store.NormalizeApprovalMode("")
 		risk := tool.ToolRisk{
 			Class: tool.RiskClassWrite, Operation: "assistant_project_create", Scope: "project", Paths: dirs,
-			Summary: fmt.Sprintf("Create project %q with these directory roots. Project conversations may use them after Code approval; this does not grant Code capability or host command execution.", input.Name),
+			Summary: fmt.Sprintf("Create project %q with these directory roots and Auto approval. New project conversations start in Code; tool actions still follow the project approval policy. This does not change the assistant's capability or grant Full Access.", input.Name),
 		}
-		details := map[string]any{"projectName": input.Name, "rootDirs": dirs, "approvalMode": store.ApprovalAsk}
+		details := map[string]any{"projectName": input.Name, "rootDirs": dirs, "approvalMode": approvalMode}
 		result, approved := e.requestToolCallApproval(ctx, sessionID, turnID, call, risk, nil, details, "", nil, nil)
 		if !approved {
 			return result
 		}
-		project := &store.Project{ID: store.NewID("proj"), Name: input.Name, RootDirs: dirs, ApprovalMode: store.ApprovalAsk}
+		project := &store.Project{ID: store.NewID("proj"), Name: input.Name, RootDirs: dirs, ApprovalMode: approvalMode}
 		if err := e.store.CreateProject(ctx, project); err != nil {
 			return fail(err)
 		}

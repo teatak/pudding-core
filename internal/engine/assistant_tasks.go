@@ -121,7 +121,11 @@ func (e *Engine) executeAssistantTask(ctx context.Context, sessionID, turnID str
 					ID: store.NewID("session"), Title: strings.TrimSpace(args.Title),
 					Provider: parent.Provider, Model: parent.Model,
 					ReasoningEffort: parent.ReasoningEffort, ReasoningModelKey: parent.ReasoningModelKey,
-					ProjectID: args.ProjectID, ActiveMode: store.ModeWork, ModeLease: store.ModeLeaseSession,
+					ProjectID: args.ProjectID, ModeLease: store.ModeLeaseSession,
+				}
+				// Project sessions use the Store's Code default, just like UI creation.
+				if target.ProjectID == "" {
+					target.ActiveMode = store.ModeWork
 				}
 				create = true
 			}

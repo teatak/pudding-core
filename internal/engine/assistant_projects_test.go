@@ -100,8 +100,8 @@ func TestAssistantProjectCreateLookupAndDispatch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if json.Unmarshal(approval.Payload, &details) != nil || details.ProjectName != "pudding-core" || len(details.RootDirs) != 1 || details.RootDirs[0] != resolvedRoot || details.ApprovalMode != store.ApprovalAsk {
-		t.Fatalf("approval does not describe project scope: %s", approval.Payload)
+	if json.Unmarshal(approval.Payload, &details) != nil || details.ProjectName != "pudding-core" || len(details.RootDirs) != 1 || details.RootDirs[0] != resolvedRoot || details.ApprovalMode != store.ApprovalAuto {
+		t.Fatalf("approval does not describe project scope and Auto default: %s", approval.Payload)
 	}
 	if projects, err := db.ListProjects(ctx); err != nil || len(projects) != 0 {
 		t.Fatalf("project created before approval: %v, %v", projects, err)
@@ -120,12 +120,12 @@ func TestAssistantProjectCreateLookupAndDispatch(t *testing.T) {
 	case <-ctx.Done():
 		t.Fatal(ctx.Err())
 	}
-	if created.Project.ApprovalMode != store.ApprovalAsk || len(created.Project.RootDirs) != 1 || created.Project.RootDirs[0] != resolvedRoot {
+	if created.Project.ApprovalMode != store.ApprovalAuto || len(created.Project.RootDirs) != 1 || created.Project.RootDirs[0] != resolvedRoot {
 		t.Fatalf("unexpected project permissions: %+v", created.Project)
 	}
 	listed := assistantProjectList(t, ctx, eng, sid, resolvedRoot)
-	if len(listed) != 1 || listed[0].ID != created.Project.ID {
-		t.Fatalf("directory lookup lost created project: %+v", listed)
+	if len(listed) != 1 || listed[0].ID != created.Project.ID || listed[0].ApprovalMode != store.ApprovalAuto {
+		t.Fatalf("directory lookup lost created project or Auto policy: %+v", listed)
 	}
 	parent, err := db.GetSession(ctx, sid)
 	if err != nil || parent.ProjectID != "" || parent.ActiveMode != store.ModeChat {
@@ -142,8 +142,12 @@ func TestAssistantProjectCreateLookupAndDispatch(t *testing.T) {
 		t.Fatalf("cannot dispatch using discovered project ID: %+v, %v", result, err)
 	}
 	worker, err := db.GetSession(ctx, task.SessionID)
-	if err != nil || worker.ProjectID != created.Project.ID || worker.ActiveMode != store.ModeWork {
-		t.Fatalf("dispatch lost project or silently granted Code: %+v, %v", worker, err)
+	if err != nil || worker.ProjectID != created.Project.ID || worker.ActiveMode != store.ModeCode || worker.ModeLease != store.ModeLeaseSession {
+		t.Fatalf("dispatch must use the ordinary project Code default: %+v, %v", worker, err)
+	}
+	project, err := db.GetProject(ctx, created.Project.ID)
+	if err != nil || project.ApprovalMode != store.ApprovalAuto {
+		t.Fatalf("dispatch changed project approval policy: %+v, %v", project, err)
 	}
 }
 

@@ -177,13 +177,19 @@ func TestAssistantTaskDispatchCapabilityScope(t *testing.T) {
 		name     string
 		existing store.AgentMode
 		project  bool
+		approval store.ApprovalMode
 		want     store.AgentMode
 	}{
 		{name: "new", want: store.ModeWork},
-		{name: "new-project", project: true, want: store.ModeWork},
+		{name: "new-project", project: true, want: store.ModeCode},
+		{name: "new-project-ask", project: true, approval: store.ApprovalAsk, want: store.ModeCode},
+		{name: "new-project-full", project: true, approval: store.ApprovalFull, want: store.ModeCode},
 		{name: "existing-chat", existing: store.ModeChat, want: store.ModeChat},
 		{name: "existing-work", existing: store.ModeWork, want: store.ModeWork},
 		{name: "existing-code", existing: store.ModeCode, want: store.ModeCode},
+		{name: "existing-project-chat", existing: store.ModeChat, project: true, want: store.ModeChat},
+		{name: "existing-project-work", existing: store.ModeWork, project: true, approval: store.ApprovalAsk, want: store.ModeWork},
+		{name: "existing-project-code", existing: store.ModeCode, project: true, approval: store.ApprovalFull, want: store.ModeCode},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := context.Background()
@@ -207,17 +213,20 @@ func TestAssistantTaskDispatchCapabilityScope(t *testing.T) {
 				t.Fatal(err)
 			}
 			args := map[string]string{"title": "Assigned work", "prompt": "Complete this work"}
+			projectID := ""
+			if tc.project {
+				projectID = "project"
+				if err := db.CreateProject(ctx, &store.Project{ID: projectID, Name: "Project", RootDirs: []string{t.TempDir()}, ApprovalMode: tc.approval}); err != nil {
+					t.Fatal(err)
+				}
+			}
 			if tc.existing != "" {
-				if err := db.CreateSession(ctx, &store.Session{ID: "existing", Provider: "capture", Model: "test", ActiveMode: tc.existing, ModeLease: lease}); err != nil {
+				if err := db.CreateSession(ctx, &store.Session{ID: "existing", Provider: "capture", Model: "test", ProjectID: projectID, ActiveMode: tc.existing, ModeLease: lease}); err != nil {
 					t.Fatal(err)
 				}
 				args["session_id"] = "existing"
-			}
-			if tc.project {
-				if err := db.CreateProject(ctx, &store.Project{ID: "project", Name: "Project", RootDirs: []string{t.TempDir()}}); err != nil {
-					t.Fatal(err)
-				}
-				args["project_id"] = "project"
+			} else if tc.project {
+				args["project_id"] = projectID
 			}
 			raw, _ := json.Marshal(args)
 			callCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
@@ -252,8 +261,14 @@ func TestAssistantTaskDispatchCapabilityScope(t *testing.T) {
 				t.Fatalf("worker execution must use %s: %+v", tc.want, executed)
 			}
 			session, err := db.GetSession(ctx, task.SessionID)
-			if err != nil || session.ActiveMode != tc.want || session.ModeLease != lease {
-				t.Fatal("assigned session capability changed", session, err)
+			if err != nil || session.ProjectID != projectID || session.ActiveMode != tc.want || session.ModeLease != lease {
+				t.Fatal("assigned session project or capability changed", session, err)
+			}
+			if tc.project {
+				project, err := db.GetProject(ctx, projectID)
+				if err != nil || project.ApprovalMode != store.NormalizeApprovalMode(tc.approval) {
+					t.Fatal("dispatch changed project approval policy", project, err)
+				}
 			}
 			requests := client.snapshot()
 			if len(requests) != 1 {
