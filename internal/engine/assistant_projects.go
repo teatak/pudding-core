@@ -21,10 +21,11 @@ func (e *Engine) executeAssistantProject(ctx context.Context, sessionID, turnID 
 		return approvalToolResult(call, false, map[string]any{"ok": false, "error": err.Error()})
 	}
 	var input struct {
-		Action   string   `json:"action"`
-		Query    string   `json:"query"`
-		Name     string   `json:"name"`
-		RootDirs []string `json:"root_dirs"`
+		Action    string   `json:"action"`
+		Query     string   `json:"query"`
+		ProjectID string   `json:"project_id"`
+		Name      string   `json:"name"`
+		RootDirs  []string `json:"root_dirs"`
 	}
 	decoder := json.NewDecoder(bytes.NewReader(call.Args))
 	decoder.DisallowUnknownFields()
@@ -36,7 +37,7 @@ func (e *Engine) executeAssistantProject(ctx context.Context, sessionID, turnID 
 	}
 	switch input.Action {
 	case "list":
-		if input.Name != "" || len(input.RootDirs) != 0 {
+		if input.ProjectID != "" || input.Name != "" || len(input.RootDirs) != 0 {
 			return fail(errors.New("list accepts only action and query"))
 		}
 		projects, err := e.store.ListProjects(ctx)
@@ -59,10 +60,36 @@ func (e *Engine) executeAssistantProject(ctx context.Context, sessionID, turnID 
 			}
 		}
 		return approvalToolResult(call, true, map[string]any{"ok": true, "projects": matches})
+	case "sessions":
+		input.ProjectID = strings.TrimSpace(input.ProjectID)
+		if input.ProjectID == "" || input.Name != "" || len(input.RootDirs) != 0 {
+			return fail(errors.New("sessions requires project_id and accepts only an optional query"))
+		}
+		if _, err := e.store.GetProject(ctx, input.ProjectID); err != nil {
+			return fail(err)
+		}
+		// The default scope excludes archived sessions, children and the assistant.
+		// Preserve its activity ordering; discovery does not read conversation bodies.
+		sessions, err := e.store.ListSessions(ctx)
+		if err != nil {
+			return fail(err)
+		}
+		query := strings.TrimSpace(input.Query)
+		matches := make([]map[string]any, 0)
+		for _, session := range sessions {
+			if session.ProjectID != input.ProjectID || (query != "" && session.ID != query && !strings.Contains(strings.ToLower(session.Title), strings.ToLower(query))) {
+				continue
+			}
+			matches = append(matches, map[string]any{
+				"id": session.ID, "title": session.Title, "projectID": session.ProjectID,
+				"activeMode": session.ActiveMode, "running": session.Running, "lastActivityAt": session.LastActivityAt,
+			})
+		}
+		return approvalToolResult(call, true, map[string]any{"ok": true, "projectID": input.ProjectID, "sessions": matches})
 	case "create":
 		input.Name = strings.TrimSpace(input.Name)
-		if input.Query != "" || input.Name == "" || len([]rune(input.Name)) > 100 || strings.ContainsAny(input.Name, "\r\n\x00") {
-			return fail(errors.New("create requires a one-line name of 1..100 characters and does not accept query"))
+		if input.ProjectID != "" || input.Query != "" || input.Name == "" || len([]rune(input.Name)) > 100 || strings.ContainsAny(input.Name, "\r\n\x00") {
+			return fail(errors.New("create requires a one-line name of 1..100 characters and does not accept project_id or query"))
 		}
 		// Validate before normalization, which intentionally drops relative paths.
 		for _, dir := range input.RootDirs {
@@ -90,6 +117,6 @@ func (e *Engine) executeAssistantProject(ctx context.Context, sessionID, turnID 
 		}
 		return approvalToolResult(call, true, map[string]any{"ok": true, "project": project})
 	default:
-		return fail(errors.New("action must be list or create"))
+		return fail(errors.New("action must be list, sessions or create"))
 	}
 }
