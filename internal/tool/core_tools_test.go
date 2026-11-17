@@ -89,7 +89,7 @@ func TestCoreDefinitionsUseSmallStableCodeSurface(t *testing.T) {
 		t.Fatal("core tool definitions are not stable")
 	}
 	expected := []string{
-		AssistantTaskDispatch, AssistantTaskList, AssistantTaskSend, AssistantRename, AssistantMemory, AssistantUserName,
+		AssistantProject, AssistantTaskDispatch, AssistantTaskList, AssistantTaskSend, AssistantRename, AssistantMemory, AssistantUserName,
 		ScheduledTask, TimeGetCurrent, HistorySearch, HistoryGetMessage, SkillRead, WeatherGet, SetTurnTopic,
 		RequestCapability, SetNextPrompt, CommandRun, CommandSession, MediaRead,
 		FileList, FileRead, AttachmentExport, TempWorkspace, FileStat, FileSearch, FileSlice,
@@ -107,8 +107,8 @@ func TestCoreDefinitionsUseSmallStableCodeSurface(t *testing.T) {
 			t.Fatalf("App tool %s leaked into Code Core", name)
 		}
 	}
-	// Three assignment tools are available only in the fixed assistant; the
-	// engine removes them from ordinary and child sessions.
+	// Assistant-only tools, including project preparation, are removed by the
+	// engine from ordinary and child sessions.
 	if len(first) != len(expected) {
 		t.Fatalf("Code Core tool count = %d, want exactly %d approved tools", len(first), len(expected))
 	}
