@@ -228,7 +228,7 @@ func TestMediaReadSchemaExposesFileSourceOnlyInCode(t *testing.T) {
 	}
 	def := definitionByName(t, CoreDefinitionsForMode(store.ModeCode, defs), MediaRead)
 	if !strings.Contains(string(def.InputSchema), `"file"`) || !strings.Contains(string(def.InputSchema), `"scope"`) {
-		t.Fatal("Code media schema is missing file access: %s", def.InputSchema)
+		t.Fatalf("Code media schema is missing file access: %s", def.InputSchema)
 	}
 }
 
