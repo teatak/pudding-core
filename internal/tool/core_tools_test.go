@@ -123,10 +123,15 @@ func TestFilePatchSchemaAllowsContentLocationByDefault(t *testing.T) {
 	properties := schema["properties"].(map[string]any)
 	file := properties["files"].(map[string]any)["items"].(map[string]any)
 	hunk := file["properties"].(map[string]any)["hunks"].(map[string]any)["items"].(map[string]any)
-	if !reflect.DeepEqual(hunk["required"], []any{"old_lines", "new_lines"}) {
-		t.Fatalf("content-only hunks must not require a position: %v", hunk["required"])
+	if required, ok := hunk["required"]; ok {
+		t.Fatalf("content-only hunks must not require a position or a single content format: %v", required)
 	}
 	hunkProperties := hunk["properties"].(map[string]any)
+	for _, field := range []string{"old_text", "new_text", "old_lines", "new_lines"} {
+		if _, ok := hunkProperties[field]; !ok {
+			t.Fatalf("hunk schema missing %s", field)
+		}
+	}
 	for name, option := range map[string]any{"diff": properties["relocate"], "hunk": hunkProperties["relocate"]} {
 		if option.(map[string]any)["default"] != true {
 			t.Fatalf("%s must advertise relocation enabled by default: %v", name, option)
