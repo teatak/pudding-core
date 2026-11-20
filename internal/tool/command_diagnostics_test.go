@@ -29,6 +29,9 @@ func TestCommandTestExecutionEvidence(t *testing.T) {
 	tapSummary := func(tests, passed, skipped int) string {
 		return fmt.Sprintf("# tests %d\n# pass %d\n# fail 0\n# cancelled 0\n# skipped %d\n# todo 0\n", tests, passed, skipped)
 	}
+	specSummary := func(tests, passed, skipped int) string {
+		return fmt.Sprintf("ℹ tests %d\nℹ suites 0\nℹ pass %d\nℹ fail 0\nℹ cancelled 0\nℹ skipped %d\nℹ todo 0\nℹ duration_ms 12.3\n", tests, passed, skipped)
+	}
 	wrapper := "1..0\n# Subtest: " + filepath.Join(root, "empty.test.js") + "\nok 1 - " + filepath.Join(root, "empty.test.js") + "\n"
 	for _, tc := range []struct{ name, command, output, want string }{
 		{"go empty", "go test -json ./...", empty, "no_tests"},
@@ -65,6 +68,10 @@ func TestCommandTestExecutionEvidence(t *testing.T) {
 		{"jest empty without evidence", "jest --passWithNoTests", "No tests found, exiting with code 0\n", "unknown"},
 		{"vitest TAP", "npx vitest run --reporter=tap", "TAP version 13\nok 1 - real test\n" + tapSummary(1, 1, 0), "ran"},
 		{"package exec TAP", "pnpm exec vitest run", "TAP version 13\nok 1 - skipped # SKIP\n" + tapSummary(1, 0, 1), "all_skipped"},
+		{"node spec ran", "node --test", "✔ ok (1ms)\n" + specSummary(2, 2, 0), "ran"},
+		{"node spec empty", "node --test", specSummary(0, 0, 0), "no_tests"},
+		{"node spec skips", "node --test", specSummary(1, 0, 1), "all_skipped"},
+		{"node spec incomplete", "node --test", "ℹ tests 1\nℹ pass 1\n", "unknown"},
 	} {
 		for _, stream := range []string{"stdout", "stderr"} {
 			t.Run(tc.name+"/"+stream, func(t *testing.T) {

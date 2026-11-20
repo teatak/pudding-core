@@ -15,7 +15,7 @@ import (
 const (
 	defaultInitializeTimeout = 15 * time.Second
 	defaultRequestTimeout    = 20 * time.Second
-	defaultDiagnosticTimeout = 30 * time.Second
+	defaultDiagnosticTimeout = 60 * time.Second
 	defaultShutdownTimeout   = 2 * time.Second
 	defaultIdleTimeout       = 10 * time.Minute
 	defaultReapInterval      = time.Minute

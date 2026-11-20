@@ -137,6 +137,25 @@ const projectSelectColumns = `id,name,root_dirs,approval_mode,created_at,updated
 
 const sessionSelectColumnsAliasS = `s.id,s.title,s.provider,s.model,s.reasoning_effort,s.reasoning_model_key,s.active_mode,s.mode_lease,s.project_id,s.loaded_plugin_ids,s.pinned,s.pinned_order,s.created_at,s.updated_at,s.last_activity_at,s.archived_at,EXISTS(SELECT 1 FROM turns t WHERE t.session_id=s.id AND t.status='running')`
 
+const sqlInBatchSize = 500
+
+// forEachSQLInBatch 按固定上限分批构造 IN (...) 占位符与参数，避免触发 SQLite 参数上限。
+func forEachSQLInBatch(ids []string, prefixArgs []any, fn func(placeholders string, args []any) error) error {
+	for start := 0; start < len(ids); start += sqlInBatchSize {
+		batch := ids[start:min(start+sqlInBatchSize, len(ids))]
+		args := make([]any, 0, len(prefixArgs)+len(batch))
+		args = append(args, prefixArgs...)
+		for _, id := range batch {
+			args = append(args, id)
+		}
+		placeholders := strings.TrimSuffix(strings.Repeat("?,", len(batch)), ",")
+		if err := fn(placeholders, args); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (s *Store) Close() error {
 	var readErr error
 	if s.readDB != nil && s.readDB != s.db {
@@ -2850,29 +2869,32 @@ func messagesForTurnsTx(ctx context.Context, tx *sql.Tx, sessionID string, turnI
 	if len(turnIDs) == 0 {
 		return out, nil
 	}
-	args := make([]any, 0, 1+len(turnIDs))
-	args = append(args, sessionID)
-	for _, id := range turnIDs {
-		args = append(args, id)
-	}
-	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(turnIDs)), ",")
-	rows, err := tx.QueryContext(ctx,
-		`SELECT `+messageSelectColumns+`
-		FROM messages WHERE session_id=? AND turn_id IN (`+placeholders+`) ORDER BY created_at ASC, turn_index ASC, rowid ASC`,
-		args...,
-	)
+	err := forEachSQLInBatch(turnIDs, []any{sessionID}, func(placeholders string, args []any) error {
+		rows, err := tx.QueryContext(ctx,
+			`SELECT `+messageSelectColumns+`
+			FROM messages WHERE session_id=? AND turn_id IN (`+placeholders+`) ORDER BY created_at ASC, turn_index ASC, rowid ASC`,
+			args...,
+		)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			msg, err := scanMessage(rows)
+			if err != nil {
+				return err
+			}
+			out[msg.TurnID] = append(out[msg.TurnID], msg)
+		}
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		return rows.Close()
+	})
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	for rows.Next() {
-		msg, err := scanMessage(rows)
-		if err != nil {
-			return nil, err
-		}
-		out[msg.TurnID] = append(out[msg.TurnID], msg)
-	}
-	return out, rows.Err()
+	return out, nil
 }
 
 func messagesForTurnTx(ctx context.Context, tx *sql.Tx, sessionID, turnID string) ([]*store.Message, error) {

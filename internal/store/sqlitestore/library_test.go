@@ -177,8 +177,14 @@ func TestListLibrarySourcesBatchesSessionsAndProjects(t *testing.T) {
 	if err := st.DeleteSession(ctx, "sess_deleted"); err != nil {
 		t.Fatal(err)
 	}
+	if err := st.CreateSession(ctx, &store.Session{ID: "sess_archived", Title: "已归档", Provider: "mock", Model: "mock"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.ArchiveSession(ctx, "sess_archived"); err != nil {
+		t.Fatal(err)
+	}
 
-	sources, err := st.ListLibrarySources(ctx, []string{"", "sess_proj", "sess_plain", "sess_proj", "missing", "sess_deleted"})
+	sources, err := st.ListLibrarySources(ctx, []string{"", "sess_proj", "sess_plain", "sess_proj", "missing", "sess_deleted", "sess_archived"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -193,5 +199,8 @@ func TestListLibrarySourcesBatchesSessionsAndProjects(t *testing.T) {
 	}
 	if _, ok := sources["sess_deleted"]; ok {
 		t.Fatal("deleted session should not be returned")
+	}
+	if _, ok := sources["sess_archived"]; ok {
+		t.Fatal("archived session should not be returned")
 	}
 }

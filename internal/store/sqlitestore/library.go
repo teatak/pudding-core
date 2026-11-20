@@ -3,7 +3,6 @@ package sqlitestore
 import (
 	"context"
 	"database/sql"
-	"strings"
 	"time"
 
 	"github.com/teatak/pudding-core/internal/store"
@@ -29,36 +28,29 @@ func (s *Store) ListLibrarySources(ctx context.Context, sessionIDs []string) (ma
 
 	defer s.readLock()()
 	// 分批 IN 联表查询，消除 /library 接口按来源会话逐个加锁查库导致的 N+1 开销。
-	for start := 0; start < len(ids); start += 500 {
-		end := min(start+500, len(ids))
-		batch := ids[start:end]
-		args := make([]any, 0, len(batch))
-		for _, id := range batch {
-			args = append(args, id)
-		}
-		placeholders := strings.TrimSuffix(strings.Repeat("?,", len(batch)), ",")
+	err := forEachSQLInBatch(ids, nil, func(placeholders string, args []any) error {
 		rows, err := s.readDB.QueryContext(ctx,
-			`SELECT s.id,s.title,COALESCE(p.name,'') FROM sessions s LEFT JOIN projects p ON p.id=s.project_id WHERE s.id IN (`+placeholders+`)`,
+			`SELECT s.id,s.title,COALESCE(p.name,'') FROM sessions s LEFT JOIN projects p ON p.id=s.project_id WHERE s.archived_at=0 AND s.id IN (`+placeholders+`)`,
 			args...,
 		)
 		if err != nil {
-			return nil, err
+			return err
 		}
+		defer rows.Close()
 		for rows.Next() {
 			var id, title, projectName string
-			if scanErr := rows.Scan(&id, &title, &projectName); scanErr != nil {
-				_ = rows.Close()
-				return nil, scanErr
+			if err := rows.Scan(&id, &title, &projectName); err != nil {
+				return err
 			}
 			out[id] = store.LibrarySourceInfo{SessionTitle: title, ProjectName: projectName}
 		}
-		if rowErr := rows.Err(); rowErr != nil {
-			_ = rows.Close()
-			return nil, rowErr
+		if err := rows.Err(); err != nil {
+			return err
 		}
-		if closeErr := rows.Close(); closeErr != nil {
-			return nil, closeErr
-		}
+		return rows.Close()
+	})
+	if err != nil {
+		return nil, err
 	}
 	return out, nil
 }

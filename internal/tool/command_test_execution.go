@@ -15,6 +15,7 @@ type commandTestExecution struct {
 	goPackages                               map[string]*goTestExecution
 	goPlainRan, goPlainSkipped, goPlainEmpty bool
 	tap                                      *tapTestExecution
+	specCounts                               map[string]int
 	ran, skipped, empty, unknown, incomplete bool
 }
 
@@ -29,6 +30,7 @@ type tapTestExecution struct {
 var goTestSummaryPattern = regexp.MustCompile(`^(ok|\?)\s+\S+\s+(.+)$`)
 var tapTestCountPattern = regexp.MustCompile(`^# (tests|pass|fail|cancelled|skipped|todo) (\d+)\s*$`)
 var tapTestResultPattern = regexp.MustCompile(`^(?:not )?ok\s+\d+\s*-?\s*(.*)$`)
+var nodeSpecCountPattern = regexp.MustCompile(`^ℹ (tests|pass|fail|cancelled|skipped|todo) (\d+)\s*$`)
 
 func newCommandTestExecution(argv []string) *commandTestExecution {
 	e := &commandTestExecution{goPackages: make(map[string]*goTestExecution)}
@@ -116,6 +118,8 @@ func goTestOutputOptions(args []string) (jsonOutput, collected bool) {
 func (e *commandTestExecution) merge(other *commandTestExecution) {
 	e.finishTAP()
 	other.finishTAP()
+	e.finishNodeSpec()
+	other.finishNodeSpec()
 	e.ran = e.ran || other.ran
 	e.skipped = e.skipped || other.skipped
 	e.empty = e.empty || other.empty
@@ -199,33 +203,47 @@ func (e *commandTestExecution) line(line string) {
 		e.tap = &tapTestExecution{counts: make(map[string]int)}
 		return
 	}
-	if e.tap == nil {
+	if e.tap != nil {
+		if match := tapTestCountPattern.FindStringSubmatch(line); match != nil {
+			count, err := strconv.Atoi(match[2])
+			if err != nil {
+				e.unknown = true
+				return
+			}
+			e.tap.counts[match[1]] = count
+		}
+		// Node can report an unmatched file as a successful wrapper test after
+		// emitting 1..0. Exclude only that paired absolute file wrapper, never a
+		// normal successful case in another file or a nested suite's empty plan.
+		if line == "1..0" {
+			e.tap.emptyPlan = true
+			e.tap.subtest = ""
+		}
+		if strings.HasPrefix(line, "# Subtest: ") {
+			e.tap.subtest = strings.TrimPrefix(line, "# Subtest: ")
+		}
+		if match := tapTestResultPattern.FindStringSubmatch(line); match != nil {
+			if e.tap.emptyPlan && match[1] == e.tap.subtest && filepath.IsAbs(e.tap.subtest) && strings.HasPrefix(line, "ok ") {
+				e.tap.wrappers++
+			}
+			e.tap.emptyPlan = false
+			e.tap.subtest = ""
+		}
 		return
 	}
-	if match := tapTestCountPattern.FindStringSubmatch(line); match != nil {
+	if match := nodeSpecCountPattern.FindStringSubmatch(strings.TrimSpace(line)); match != nil {
+		if match[1] == "tests" && e.specCounts != nil {
+			e.finishNodeSpec()
+		}
+		if e.specCounts == nil {
+			e.specCounts = make(map[string]int)
+		}
 		count, err := strconv.Atoi(match[2])
 		if err != nil {
 			e.unknown = true
 			return
 		}
-		e.tap.counts[match[1]] = count
-	}
-	// Node can report an unmatched file as a successful wrapper test after
-	// emitting 1..0. Exclude only that paired absolute file wrapper, never a
-	// normal successful case in another file or a nested suite's empty plan.
-	if line == "1..0" {
-		e.tap.emptyPlan = true
-		e.tap.subtest = ""
-	}
-	if strings.HasPrefix(line, "# Subtest: ") {
-		e.tap.subtest = strings.TrimPrefix(line, "# Subtest: ")
-	}
-	if match := tapTestResultPattern.FindStringSubmatch(line); match != nil {
-		if e.tap.emptyPlan && match[1] == e.tap.subtest && filepath.IsAbs(e.tap.subtest) && strings.HasPrefix(line, "ok ") {
-			e.tap.wrappers++
-		}
-		e.tap.emptyPlan = false
-		e.tap.subtest = ""
+		e.specCounts[match[1]] = count
 	}
 }
 
@@ -235,17 +253,30 @@ func (e *commandTestExecution) finishTAP() {
 	}
 	tap := e.tap
 	e.tap = nil
-	tests, hasTests := tap.counts["tests"]
-	passed, hasPassed := tap.counts["pass"]
-	failed, hasFailed := tap.counts["fail"]
-	skipped, hasSkipped := tap.counts["skipped"]
-	todo, hasTodo := tap.counts["todo"]
-	cancelled, hasCancelled := tap.counts["cancelled"]
-	if !hasTests || !hasPassed || !hasFailed || !hasSkipped || !hasTodo || !hasCancelled || tap.wrappers > passed || tests != passed+failed+skipped+todo+cancelled {
+	e.applySummaryCounts(tap.counts, tap.wrappers)
+}
+
+func (e *commandTestExecution) finishNodeSpec() {
+	if e.specCounts == nil {
+		return
+	}
+	counts := e.specCounts
+	e.specCounts = nil
+	e.applySummaryCounts(counts, 0)
+}
+
+func (e *commandTestExecution) applySummaryCounts(counts map[string]int, wrappers int) {
+	tests, hasTests := counts["tests"]
+	passed, hasPassed := counts["pass"]
+	failed, hasFailed := counts["fail"]
+	skipped, hasSkipped := counts["skipped"]
+	todo, hasTodo := counts["todo"]
+	cancelled, hasCancelled := counts["cancelled"]
+	if !hasTests || !hasPassed || !hasFailed || !hasSkipped || !hasTodo || !hasCancelled || wrappers > passed || tests != passed+failed+skipped+todo+cancelled {
 		e.unknown = true
 		return
 	}
-	if passed > tap.wrappers || failed > 0 || cancelled > 0 {
+	if passed > wrappers || failed > 0 || cancelled > 0 {
 		e.ran = true
 	} else if skipped+todo > 0 {
 		e.skipped = true
@@ -256,6 +287,7 @@ func (e *commandTestExecution) finishTAP() {
 
 func (e *commandTestExecution) status() string {
 	e.finishTAP()
+	e.finishNodeSpec()
 	if e.collected {
 		return "collected"
 	}

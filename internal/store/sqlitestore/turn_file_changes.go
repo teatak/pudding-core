@@ -173,25 +173,25 @@ func turnFileChangesForTurnsTx(ctx context.Context, tx *sql.Tx, sessionID string
 	if len(turnIDs) == 0 {
 		return out, nil
 	}
-	args := make([]any, 0, 1+len(turnIDs))
-	args = append(args, sessionID)
-	for _, id := range turnIDs {
-		args = append(args, id)
-	}
-	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(turnIDs)), ",")
-	rows, err := tx.QueryContext(ctx, `SELECT `+turnFileChangeSummaryColumns+` FROM turn_file_changes WHERE session_id=? AND turn_id IN (`+placeholders+`) ORDER BY root_path ASC, path ASC, id ASC`, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	for rows.Next() {
-		change, err := scanTurnFileChangeSummary(rows)
+	err := forEachSQLInBatch(turnIDs, []any{sessionID}, func(placeholders string, args []any) error {
+		rows, err := tx.QueryContext(ctx, `SELECT `+turnFileChangeSummaryColumns+` FROM turn_file_changes WHERE session_id=? AND turn_id IN (`+placeholders+`) ORDER BY root_path ASC, path ASC, id ASC`, args...)
 		if err != nil {
-			return nil, err
+			return err
 		}
-		out[change.TurnID] = append(out[change.TurnID], change)
-	}
-	if err := rows.Err(); err != nil {
+		defer rows.Close()
+		for rows.Next() {
+			change, err := scanTurnFileChangeSummary(rows)
+			if err != nil {
+				return err
+			}
+			out[change.TurnID] = append(out[change.TurnID], change)
+		}
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		return rows.Close()
+	})
+	if err != nil {
 		return nil, err
 	}
 	for turnID, changes := range out {
@@ -207,26 +207,29 @@ func turnFileChangeStatesForTurnsTx(ctx context.Context, tx *sql.Tx, sessionID s
 	if len(turnIDs) == 0 {
 		return out, nil
 	}
-	args := make([]any, 0, 1+len(turnIDs))
-	args = append(args, sessionID)
-	for _, id := range turnIDs {
-		args = append(args, id)
-	}
-	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(turnIDs)), ",")
-	rows, err := tx.QueryContext(ctx, `SELECT turn_id,state,updated_at FROM turn_file_change_states WHERE session_id=? AND turn_id IN (`+placeholders+`)`, args...)
+	err := forEachSQLInBatch(turnIDs, []any{sessionID}, func(placeholders string, args []any) error {
+		rows, err := tx.QueryContext(ctx, `SELECT turn_id,state,updated_at FROM turn_file_change_states WHERE session_id=? AND turn_id IN (`+placeholders+`)`, args...)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var turnID, state string
+			var revision int64
+			if err := rows.Scan(&turnID, &state, &revision); err != nil {
+				return err
+			}
+			out[turnID] = turnFileChangeStateSnapshot{state: store.TurnFileChangeState(state), revision: revision}
+		}
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		return rows.Close()
+	})
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	for rows.Next() {
-		var turnID, state string
-		var revision int64
-		if err := rows.Scan(&turnID, &state, &revision); err != nil {
-			return nil, err
-		}
-		out[turnID] = turnFileChangeStateSnapshot{state: store.TurnFileChangeState(state), revision: revision}
-	}
-	return out, rows.Err()
+	return out, nil
 }
 
 func (s *Store) UpdateTurnFileChangeState(ctx context.Context, sessionID, turnID string, expected, next store.TurnFileChangeState, expectedRevision int64) (int64, error) {

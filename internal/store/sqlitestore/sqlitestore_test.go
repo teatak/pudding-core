@@ -3,6 +3,7 @@ package sqlitestore
 import (
 	"context"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -2596,6 +2597,50 @@ func TestListTurnsPageBatchesMessagesAndFileChanges(t *testing.T) {
 	}
 	if older.Turns[0].ID != "turn_1" || len(older.Turns[0].FileChanges) != 1 || older.Turns[0].FileChangeState != store.TurnFileChangesApplied {
 		t.Fatalf("turn_1 = %+v", older.Turns[0])
+	}
+
+	beginTestTurn(t, st, "sess_page_batch", "turn_tail", "msg_tail", "cm_tail")
+	if _, err := st.FinishTurn(ctx, store.FinishTurnInput{
+		TurnID: "turn_tail",
+		Status: store.TurnCompleted,
+		FileChanges: []store.TurnFileChangeInput{{
+			RootPath: "/tmp/p", Path: "tail.go", Kind: store.FileChangeAdded,
+			NewContent: "package tail\n",
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	chunkedIDs := make([]string, sqlInBatchSize+5)
+	for i := range chunkedIDs {
+		chunkedIDs[i] = fmt.Sprintf("missing_turn_%d", i)
+	}
+	chunkedIDs[0] = "turn_1"
+	chunkedIDs[len(chunkedIDs)-1] = "turn_tail"
+	if err := st.readTx(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		msgs, err := messagesForTurnsTx(ctx, tx, "sess_page_batch", chunkedIDs)
+		if err != nil {
+			return err
+		}
+		if len(msgs["turn_1"]) != 2 || len(msgs["turn_tail"]) != 2 {
+			t.Fatalf("chunked messages = turn_1:%d turn_tail:%d", len(msgs["turn_1"]), len(msgs["turn_tail"]))
+		}
+		changes, err := turnFileChangesForTurnsTx(ctx, tx, "sess_page_batch", chunkedIDs)
+		if err != nil {
+			return err
+		}
+		if len(changes["turn_1"]) != 1 || len(changes["turn_tail"]) != 1 || changes["turn_tail"][0].Path != "tail.go" {
+			t.Fatalf("chunked changes = %+v", changes)
+		}
+		states, err := turnFileChangeStatesForTurnsTx(ctx, tx, "sess_page_batch", chunkedIDs)
+		if err != nil {
+			return err
+		}
+		if states["turn_1"].state != store.TurnFileChangesApplied || states["turn_tail"].state != store.TurnFileChangesApplied {
+			t.Fatalf("chunked states = %+v", states)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
 	}
 }
 
