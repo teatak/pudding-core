@@ -69,7 +69,6 @@ func (s *Store) PurgeDeletedStudioItem(ctx context.Context, id string) error {
 }
 
 func (s *Store) ListStudioItemsForCleanup(ctx context.Context, cutoff time.Time) ([]*store.StudioItem, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	defer s.readLock()()
 	return s.listStudioItems(ctx, `deleted=1 OR (archived_at>0 AND archived_at<=?) ORDER BY archived_at,id`, unixMS(cutoff))
 }

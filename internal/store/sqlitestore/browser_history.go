@@ -13,8 +13,7 @@ import (
 const browserHistoryColumns = `id,url,title,favicon_url,visited_at,created_at,updated_at`
 
 func (s *Store) ListBrowserHistory(ctx context.Context, query string, limit int) ([]*store.BrowserHistoryEntry, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	defer s.readLock()()
 	query = strings.TrimSpace(query)
 	limit = store.NormalizeBrowserHistoryLimit(limit)
 	statement := `SELECT ` + browserHistoryColumns + ` FROM browser_history ORDER BY visited_at DESC, id DESC`
@@ -23,7 +22,7 @@ func (s *Store) ListBrowserHistory(ctx context.Context, query string, limit int)
 		statement += ` LIMIT ?`
 		args = append(args, limit)
 	}
-	rows, err := s.db.QueryContext(ctx, statement, args...)
+	rows, err := s.readDB.QueryContext(ctx, statement, args...)
 	if err != nil {
 		return nil, err
 	}

@@ -2,7 +2,6 @@ package api
 
 import (
 	"context"
-	"errors"
 	"github.com/teatak/pudding-core/contracts"
 	"net/http"
 	"net/url"
@@ -155,40 +154,17 @@ type librarySource struct {
 }
 
 func (s *Server) librarySources(ctx context.Context, ids []string) (map[string]librarySource, error) {
-	out := map[string]librarySource{}
-	projects := map[string]*store.Project{}
-	for _, id := range ids {
-		if _, known := out[id]; known {
-			continue
+	sources, err := s.store.ListLibrarySources(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]librarySource, len(sources))
+	for id, info := range sources {
+		out[id] = librarySource{
+			SourceSessionAvailable: true,
+			SourceSessionTitle:     info.SessionTitle,
+			SourceProjectName:      info.ProjectName,
 		}
-		info := librarySource{}
-		if id == "" {
-			continue
-		}
-		out[id] = info
-		source, err := s.store.GetSession(ctx, id)
-		if err != nil && !errors.Is(err, store.ErrNotFound) {
-			return nil, err
-		}
-		if source == nil {
-			continue
-		}
-		info.SourceSessionAvailable = true
-		info.SourceSessionTitle = source.Title
-		if source.ProjectID != "" {
-			p, known := projects[source.ProjectID]
-			if !known {
-				p, err = s.store.GetProject(ctx, source.ProjectID)
-				if err != nil && !errors.Is(err, store.ErrNotFound) {
-					return nil, err
-				}
-				projects[source.ProjectID] = p
-			}
-			if p != nil {
-				info.SourceProjectName = p.Name
-			}
-		}
-		out[id] = info
 	}
 	return out, nil
 }

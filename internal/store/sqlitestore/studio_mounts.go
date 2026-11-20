@@ -38,25 +38,29 @@ func scanStudioMount(row messageScanner) (*store.StudioMount, error) {
 }
 
 func (s *Store) ListStudioMounts(ctx context.Context, session string) ([]*store.StudioMount, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if _, err := s.getSessionDB(ctx, session); err != nil {
-		return nil, err
-	}
-	rows, err := s.db.QueryContext(ctx, studioMountSelect+` WHERE m.session_id=? ORDER BY m.created_at,m.id`, session)
+	out := []*store.StudioMount{}
+	err := s.readTx(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		if _, err := getSessionTx(ctx, tx, session); err != nil {
+			return err
+		}
+		rows, err := tx.QueryContext(ctx, studioMountSelect+` WHERE m.session_id=? ORDER BY m.created_at,m.id`, session)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			v, err := scanStudioMount(rows)
+			if err != nil {
+				return err
+			}
+			out = append(out, v)
+		}
+		return rows.Err()
+	})
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	out := []*store.StudioMount{}
-	for rows.Next() {
-		v, err := scanStudioMount(rows)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, v)
-	}
-	return out, rows.Err()
+	return out, nil
 }
 
 // Removing a session mount closes that view; the independent resource survives.

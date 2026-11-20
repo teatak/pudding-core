@@ -19,7 +19,7 @@ import (
 const (
 	baselineSchemaVersion      = 1
 	currentSchemaLayoutVersion = 8
-	currentSchemaVersion       = 61
+	currentSchemaVersion       = 63
 )
 
 var (
@@ -36,6 +36,8 @@ type schemaMigration func(*sql.Tx) error
 // Unpublished Studio migrations 33–46 are consolidated into destination 47.
 var schemaMigrations = map[int]schemaMigration{
 	61: migrateSessionDirectoriesV61,
+	62: migrateTurnTopicV62,
+	63: migrateTurnOutlinePreviewV63,
 	60: func(tx *sql.Tx) error {
 		return addTableColumnIfMissing(tx, "session_context_cooling", "image_through_id", `TEXT NOT NULL DEFAULT ''`)
 	},
@@ -1030,6 +1032,8 @@ var currentSchemaContract = func() schemaContract {
 	out.tables["studio_document_edit_requests"] = []string{"item_id", "client_request_id", "request_hash", "result"}
 	out.indexes = append(out.indexes, "studio_items_archived_at", "studio_items_package")
 	out.indexes = append(out.indexes, "studio_document_edits_item")
+	out.tables["turns"] = append(out.tables["turns"], "topic_title", "prompt_preview", "answer_preview")
+	out.indexes = append(out.indexes, "turns_session_created")
 	out.indexes = append(out.indexes, "library_recent_studio", "library_recent_file", "library_recent_opened")
 	out.indexes = append(out.indexes, "session_children_parent")
 	out.indexes = append(out.indexes, "scheduled_tasks_due", "scheduled_task_runs_task", "scheduled_task_runs_pending")

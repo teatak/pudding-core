@@ -36,8 +36,7 @@ func scanStudioItem(row messageScanner) (*store.StudioItem, error) {
 	return w, nil
 }
 func (s *Store) ListStudioItems(ctx context.Context, scope store.StudioItemListScope) ([]*store.StudioItem, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	defer s.readLock()()
 	where, order := "archived_at=0", "updated_at DESC,id"
 	if scope == store.StudioItemsArchived {
 		where, order = "archived_at>0", "archived_at DESC,id"
@@ -48,7 +47,7 @@ func (s *Store) ListStudioItems(ctx context.Context, scope store.StudioItemListS
 }
 
 func (s *Store) listStudioItems(ctx context.Context, predicate string, args ...any) ([]*store.StudioItem, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT `+studioItemColumns+` FROM studio_items WHERE `+predicate, args...)
+	rows, err := s.readDB.QueryContext(ctx, `SELECT `+studioItemColumns+` FROM studio_items WHERE `+predicate, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -64,9 +63,8 @@ func (s *Store) listStudioItems(ctx context.Context, predicate string, args ...a
 	return out, rows.Err()
 }
 func (s *Store) GetStudioItem(ctx context.Context, id string) (*store.StudioItem, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return scanStudioItem(s.db.QueryRowContext(ctx, `SELECT `+studioItemColumns+` FROM studio_items WHERE id=? AND deleted=0 AND archived_at=0`, id))
+	defer s.readLock()()
+	return scanStudioItem(s.readDB.QueryRowContext(ctx, `SELECT `+studioItemColumns+` FROM studio_items WHERE id=? AND deleted=0 AND archived_at=0`, id))
 }
 func (s *Store) CreateStudioItem(ctx context.Context, w *store.StudioItem, creation ...store.StudioItemCreation) (*store.StudioItem, error) {
 	var fingerprint string
@@ -234,9 +232,8 @@ func scanStudioItemRevision(row messageScanner) (*store.StudioItemRevision, erro
 	return r, nil
 }
 func (s *Store) ListStudioItemRevisions(ctx context.Context, id string) ([]*store.StudioItemRevision, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	rows, err := s.db.QueryContext(ctx, `SELECT item_id,hash,parent_revision,client_request_id,created_at,build_receipt,NULL,content_hash,author_kind,author_session_id,author_turn_id,content_format FROM studio_item_revisions WHERE item_id=? ORDER BY created_at DESC,rowid DESC`, id)
+	defer s.readLock()()
+	rows, err := s.readDB.QueryContext(ctx, `SELECT item_id,hash,parent_revision,client_request_id,created_at,build_receipt,NULL,content_hash,author_kind,author_session_id,author_turn_id,content_format FROM studio_item_revisions WHERE item_id=? ORDER BY created_at DESC,rowid DESC`, id)
 	if err != nil {
 		return nil, err
 	}
@@ -253,9 +250,8 @@ func (s *Store) ListStudioItemRevisions(ctx context.Context, id string) ([]*stor
 	return out, rows.Err()
 }
 func (s *Store) GetStudioItemRevision(ctx context.Context, id, hash string) (*store.StudioItemRevision, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return scanStudioItemRevision(s.db.QueryRowContext(ctx, `SELECT item_id,hash,parent_revision,client_request_id,created_at,build_receipt,content,content_hash,author_kind,author_session_id,author_turn_id,content_format FROM studio_item_revisions WHERE item_id=? AND hash=?`, id, hash))
+	defer s.readLock()()
+	return scanStudioItemRevision(s.readDB.QueryRowContext(ctx, `SELECT item_id,hash,parent_revision,client_request_id,created_at,build_receipt,content,content_hash,author_kind,author_session_id,author_turn_id,content_format FROM studio_item_revisions WHERE item_id=? AND hash=?`, id, hash))
 }
 func (s *Store) PutWidgetBuildReceipt(ctx context.Context, id, hash string, receipt json.RawMessage) error {
 	return s.tx(ctx, func(ctx context.Context, tx *sql.Tx) error {

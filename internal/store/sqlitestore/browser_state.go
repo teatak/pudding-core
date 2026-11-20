@@ -12,60 +12,76 @@ import (
 const browserStateColumns = `session_id,tab_id,url,title,favicon_url,mode,created_at,updated_at`
 
 func (s *Store) GetBrowserState(ctx context.Context, sessionID string) (*store.BrowserState, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if _, err := s.getSessionDB(ctx, sessionID); err != nil {
-		return nil, err
-	}
-	state, err := scanBrowserState(s.db.QueryRowContext(ctx,
-		`SELECT `+browserStateColumns+` FROM session_browser_tabs WHERE session_id=? ORDER BY updated_at DESC, rowid DESC LIMIT 1`,
-		sessionID,
-	))
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, store.ErrNotFound
-	}
-	return state, err
-}
-
-func (s *Store) GetBrowserTabState(ctx context.Context, sessionID, tabID string) (*store.BrowserState, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if _, err := s.getSessionDB(ctx, sessionID); err != nil {
-		return nil, err
-	}
-	state, err := scanBrowserState(s.db.QueryRowContext(ctx,
-		`SELECT `+browserStateColumns+` FROM session_browser_tabs WHERE session_id=? AND tab_id=?`,
-		sessionID, tabID,
-	))
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, store.ErrNotFound
-	}
-	return state, err
-}
-
-func (s *Store) ListBrowserStates(ctx context.Context, sessionID string) ([]*store.BrowserState, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if _, err := s.getSessionDB(ctx, sessionID); err != nil {
-		return nil, err
-	}
-	rows, err := s.db.QueryContext(ctx,
-		`SELECT `+browserStateColumns+` FROM session_browser_tabs WHERE session_id=? ORDER BY updated_at DESC, rowid DESC`,
-		sessionID,
-	)
+	var state *store.BrowserState
+	err := s.readTx(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		if _, err := getSessionTx(ctx, tx, sessionID); err != nil {
+			return err
+		}
+		var err error
+		state, err = scanBrowserState(tx.QueryRowContext(ctx,
+			`SELECT `+browserStateColumns+` FROM session_browser_tabs WHERE session_id=? ORDER BY updated_at DESC, rowid DESC LIMIT 1`,
+			sessionID,
+		))
+		if errors.Is(err, sql.ErrNoRows) {
+			return store.ErrNotFound
+		}
+		return err
+	})
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	out := make([]*store.BrowserState, 0)
-	for rows.Next() {
-		state, err := scanBrowserState(rows)
-		if err != nil {
-			return nil, err
+	return state, nil
+}
+
+func (s *Store) GetBrowserTabState(ctx context.Context, sessionID, tabID string) (*store.BrowserState, error) {
+	var state *store.BrowserState
+	err := s.readTx(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		if _, err := getSessionTx(ctx, tx, sessionID); err != nil {
+			return err
 		}
-		out = append(out, state)
+		var err error
+		state, err = scanBrowserState(tx.QueryRowContext(ctx,
+			`SELECT `+browserStateColumns+` FROM session_browser_tabs WHERE session_id=? AND tab_id=?`,
+			sessionID, tabID,
+		))
+		if errors.Is(err, sql.ErrNoRows) {
+			return store.ErrNotFound
+		}
+		return err
+	})
+	if err != nil {
+		return nil, err
 	}
-	return out, rows.Err()
+	return state, nil
+}
+
+func (s *Store) ListBrowserStates(ctx context.Context, sessionID string) ([]*store.BrowserState, error) {
+	out := make([]*store.BrowserState, 0)
+	err := s.readTx(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		if _, err := getSessionTx(ctx, tx, sessionID); err != nil {
+			return err
+		}
+		rows, err := tx.QueryContext(ctx,
+			`SELECT `+browserStateColumns+` FROM session_browser_tabs WHERE session_id=? ORDER BY updated_at DESC, rowid DESC`,
+			sessionID,
+		)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			state, err := scanBrowserState(rows)
+			if err != nil {
+				return err
+			}
+			out = append(out, state)
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func (s *Store) PutBrowserState(ctx context.Context, in store.BrowserStateInput) (*store.BrowserState, error) {

@@ -54,29 +54,33 @@ func parentSessionIDTx(ctx context.Context, tx *sql.Tx, sessionID string) (strin
 
 // ListChildSessions includes archived children for group lifecycle operations.
 func (s *Store) ListChildSessions(ctx context.Context, parentSessionID string) ([]*store.Session, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	var exists bool
-	if err := s.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM sessions WHERE id=?)`, parentSessionID).Scan(&exists); err != nil {
-		return nil, err
-	}
-	if !exists {
-		return nil, store.ErrNotFound
-	}
-	rows, err := s.db.QueryContext(ctx, `SELECT `+sessionSelectColumnsAliasS+` FROM sessions s
-		JOIN session_children c ON c.child_session_id=s.id WHERE c.parent_session_id=?
-		ORDER BY s.created_at,s.id`, parentSessionID)
+	out := make([]*store.Session, 0)
+	err := s.readTx(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		var exists bool
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM sessions WHERE id=?)`, parentSessionID).Scan(&exists); err != nil {
+			return err
+		}
+		if !exists {
+			return store.ErrNotFound
+		}
+		rows, err := tx.QueryContext(ctx, `SELECT `+sessionSelectColumnsAliasS+` FROM sessions s
+			JOIN session_children c ON c.child_session_id=s.id WHERE c.parent_session_id=?
+			ORDER BY s.created_at,s.id`, parentSessionID)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			child, err := scanSession(rows)
+			if err != nil {
+				return err
+			}
+			out = append(out, child)
+		}
+		return rows.Err()
+	})
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	out := make([]*store.Session, 0)
-	for rows.Next() {
-		child, err := scanSession(rows)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, child)
-	}
-	return out, rows.Err()
+	return out, nil
 }

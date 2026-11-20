@@ -148,3 +148,50 @@ func seedStudioMount(st store.Store, session, id, name string) (*store.StudioMou
 	}
 	return st.OpenStudioItem(ctx, session, w.ID, id)
 }
+
+func TestListLibrarySourcesBatchesSessionsAndProjects(t *testing.T) {
+	ctx := context.Background()
+	st, _ := openTestStore(t)
+
+	empty, err := st.ListLibrarySources(ctx, nil)
+	if err != nil || len(empty) != 0 {
+		t.Fatalf("empty input = %+v err=%v", empty, err)
+	}
+	blankOnly, err := st.ListLibrarySources(ctx, []string{"", ""})
+	if err != nil || len(blankOnly) != 0 {
+		t.Fatalf("blank-only input = %+v err=%v", blankOnly, err)
+	}
+
+	if err := st.CreateProject(ctx, &store.Project{ID: "proj_lib", Name: "工作空间"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.CreateSession(ctx, &store.Session{ID: "sess_proj", Title: "项目对话", ProjectID: "proj_lib", Provider: "mock", Model: "mock"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.CreateSession(ctx, &store.Session{ID: "sess_plain", Title: "普通对话", Provider: "mock", Model: "mock"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.CreateSession(ctx, &store.Session{ID: "sess_deleted", Title: "将删除", Provider: "mock", Model: "mock"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.DeleteSession(ctx, "sess_deleted"); err != nil {
+		t.Fatal(err)
+	}
+
+	sources, err := st.ListLibrarySources(ctx, []string{"", "sess_proj", "sess_plain", "sess_proj", "missing", "sess_deleted"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sources) != 2 {
+		t.Fatalf("sources len = %d (%+v), want 2", len(sources), sources)
+	}
+	if got := sources["sess_proj"]; got.SessionTitle != "项目对话" || got.ProjectName != "工作空间" {
+		t.Fatalf("sess_proj = %+v", got)
+	}
+	if got := sources["sess_plain"]; got.SessionTitle != "普通对话" || got.ProjectName != "" {
+		t.Fatalf("sess_plain = %+v", got)
+	}
+	if _, ok := sources["sess_deleted"]; ok {
+		t.Fatal("deleted session should not be returned")
+	}
+}

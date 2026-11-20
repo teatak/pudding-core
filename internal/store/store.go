@@ -2246,6 +2246,12 @@ type LibraryFavorite struct {
 	CreatedAt       time.Time `json:"createdAt"`
 }
 
+// LibrarySourceInfo 表示资料条目关联的来源会话与项目名称摘要。
+type LibrarySourceInfo struct {
+	SessionTitle string
+	ProjectName  string
+}
+
 type BrowserState struct {
 	SessionID  string    `json:"sessionID"`
 	TabID      string    `json:"tabID,omitempty"`
@@ -2507,6 +2513,7 @@ type Store interface {
 	ListStudioMounts(ctx context.Context, actorSessionID string) ([]*StudioMount, error)
 	DeleteStudioMount(ctx context.Context, actorSessionID, mountID string) error
 	ListLibraryFavorites(ctx context.Context, actorSessionID string) ([]*LibraryFavorite, error)
+	ListLibrarySources(ctx context.Context, sessionIDs []string) (map[string]LibrarySourceInfo, error)
 	PutLibraryFavorite(ctx context.Context, actorSessionID string, favorite LibraryFavorite) error
 	DeleteLibraryFavorite(ctx context.Context, actorSessionID, id string) error
 	OpenStudioItem(ctx context.Context, actorSessionID, itemID, mountID string) (*StudioMount, error)

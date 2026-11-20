@@ -55,8 +55,9 @@ func migrateAssistantTaskOriginV59(tx *sql.Tx) error {
 }
 
 func (s *Store) IsAssistantCreatedSession(ctx context.Context, assistantID, sessionID string) (bool, error) {
+	defer s.readLock()()
 	var created bool
-	err := s.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM assistant_tasks WHERE assistant_session_id=? AND session_id=? AND created_session=1)`, assistantID, sessionID).Scan(&created)
+	err := s.readDB.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM assistant_tasks WHERE assistant_session_id=? AND session_id=? AND created_session=1)`, assistantID, sessionID).Scan(&created)
 	return created, err
 }
 
@@ -123,16 +124,16 @@ func assistantTaskRunsTx(ctx context.Context, tx *sql.Tx, sessionID string) ([]s
 }
 
 func (s *Store) ListAssistantTaskRuns(ctx context.Context, sessionID string) ([]store.AssistantTaskRun, error) {
-	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	var runs []store.AssistantTaskRun
+	err := s.readTx(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		var readErr error
+		runs, readErr = assistantTaskRunsTx(ctx, tx, sessionID)
+		return readErr
+	})
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback()
-	runs, err := assistantTaskRunsTx(ctx, tx, sessionID)
-	if err != nil {
-		return nil, err
-	}
-	return runs, tx.Commit()
+	return runs, nil
 }
 
 func (s *Store) AssignAssistantTask(ctx context.Context, in store.AssignAssistantTaskInput) (*store.AssistantTaskRun, error) {

@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -22,6 +23,7 @@ import (
 
 type Store struct {
 	db           *sql.DB
+	readDB       *sql.DB
 	mu           sync.Mutex
 	publishEvent func(event.Event)
 }
@@ -75,6 +77,25 @@ func OpenWithHome(path, sourceHome string) (*Store, error) {
 		_ = db.Close()
 		return nil, err
 	}
+	if path == ":memory:" {
+		s.readDB = db
+		return s, nil
+	}
+	// WAL 模式下拆出只读连接池，使切会话时的并发只读请求不再与写事务共用单一互斥锁。
+	readDB, err := sql.Open("sqlite3", path+"?_query_only=on&_busy_timeout=5000")
+	if err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	readConns := min(max(runtime.NumCPU(), 2), 8)
+	readDB.SetMaxOpenConns(readConns)
+	readDB.SetMaxIdleConns(readConns)
+	if err := readDB.Ping(); err != nil {
+		_ = readDB.Close()
+		_ = db.Close()
+		return nil, err
+	}
+	s.readDB = readDB
 	return s, nil
 }
 
@@ -116,7 +137,33 @@ const projectSelectColumns = `id,name,root_dirs,approval_mode,created_at,updated
 
 const sessionSelectColumnsAliasS = `s.id,s.title,s.provider,s.model,s.reasoning_effort,s.reasoning_model_key,s.active_mode,s.mode_lease,s.project_id,s.loaded_plugin_ids,s.pinned,s.pinned_order,s.created_at,s.updated_at,s.last_activity_at,s.archived_at,EXISTS(SELECT 1 FROM turns t WHERE t.session_id=s.id AND t.status='running')`
 
-func (s *Store) Close() error { return s.db.Close() }
+func (s *Store) Close() error {
+	var readErr error
+	if s.readDB != nil && s.readDB != s.db {
+		readErr = s.readDB.Close()
+	}
+	return errors.Join(readErr, s.db.Close())
+}
+
+// readLock 仅在 :memory: 复用写连接时回退写锁；磁盘 WAL 模式无锁并发读。
+func (s *Store) readLock() func() {
+	if s.readDB == s.db {
+		s.mu.Lock()
+		return s.mu.Unlock
+	}
+	return func() {}
+}
+
+// readTx 在只读连接池开启一致性快照事务，避免与写事务争用互斥锁。
+func (s *Store) readTx(ctx context.Context, fn func(context.Context, *sql.Tx) error) error {
+	defer s.readLock()()
+	tx, err := s.readDB.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	return fn(ctx, tx)
+}
 
 func (s *Store) CreateProject(ctx context.Context, project *store.Project, requestIDs ...string) error {
 	if err := store.NormalizeProject(project); err != nil {
@@ -151,15 +198,13 @@ func (s *Store) CreateProject(ctx context.Context, project *store.Project, reque
 }
 
 func (s *Store) GetProject(ctx context.Context, id string) (*store.Project, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	defer s.readLock()()
 	return s.getProjectDB(ctx, id)
 }
 
 func (s *Store) ListProjects(ctx context.Context) ([]*store.Project, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	rows, err := s.db.QueryContext(ctx, `SELECT `+projectSelectColumns+` FROM projects
+	defer s.readLock()()
+	rows, err := s.readDB.QueryContext(ctx, `SELECT `+projectSelectColumns+` FROM projects
 		ORDER BY last_activity_at DESC, created_at DESC, id`)
 	if err != nil {
 		return nil, err
@@ -465,14 +510,12 @@ func (s *Store) CloneSession(ctx context.Context, in store.CloneSessionInput) (*
 }
 
 func (s *Store) GetSession(ctx context.Context, id string) (*store.Session, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	defer s.readLock()()
 	return s.getSessionDB(ctx, id)
 }
 
 func (s *Store) ListSessions(ctx context.Context, options ...store.SessionListOptions) ([]*store.Session, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	defer s.readLock()()
 
 	resolved := store.ResolveSessionListOptions(options)
 	where := "s.archived_at=0"
@@ -496,7 +539,7 @@ func (s *Store) ListSessions(ctx context.Context, options ...store.SessionListOp
 		where += " AND (instr(lower(s.title),lower(?))>0 OR instr(lower(coalesce(p.name,'')),lower(?))>0)"
 		args = append(args, resolved.Query, resolved.Query)
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT `+sessionSelectColumnsAliasS+`
+	rows, err := s.readDB.QueryContext(ctx, `SELECT `+sessionSelectColumnsAliasS+`
 		FROM sessions s LEFT JOIN projects p ON p.id=s.project_id
 		WHERE `+where+` ORDER BY `+order, args...)
 	if err != nil {
@@ -1062,43 +1105,41 @@ func queueInputTx(ctx context.Context, tx *sql.Tx, in store.QueueInputInput) (*s
 }
 
 func (s *Store) ListQueuedInputs(ctx context.Context, sessionID string) ([]*store.QueuedInput, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback()
-	if _, err := getSessionTx(ctx, tx, sessionID); err != nil {
-		return nil, err
-	}
-	rows, err := tx.QueryContext(ctx,
-		`SELECT session_id,client_message_id,text,parts,status,provider,model,mode,model_config,turn_id,created_at,updated_at
-		FROM queued_inputs
-		WHERE session_id=? AND status IN (?,?)
-		ORDER BY sort_order ASC, rowid ASC`,
-		sessionID, store.QueuedInputQueued, store.QueuedInputEditing,
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
 	out := make([]*store.QueuedInput, 0)
-	for rows.Next() {
-		input, err := scanQueuedInput(rows)
-		if err != nil {
-			return nil, err
+	err := s.readTx(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		if _, err := getSessionTx(ctx, tx, sessionID); err != nil {
+			return err
 		}
-		out = append(out, input)
+		rows, err := tx.QueryContext(ctx,
+			`SELECT session_id,client_message_id,text,parts,status,provider,model,mode,model_config,turn_id,created_at,updated_at
+			FROM queued_inputs
+			WHERE session_id=? AND status IN (?,?)
+			ORDER BY sort_order ASC, rowid ASC`,
+			sessionID, store.QueuedInputQueued, store.QueuedInputEditing,
+		)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			input, err := scanQueuedInput(rows)
+			if err != nil {
+				return err
+			}
+			out = append(out, input)
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		return nil, err
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 func (s *Store) HasQueuedInputs(ctx context.Context, sessionID string) (bool, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	defer s.readLock()()
 	var exists bool
-	err := s.db.QueryRowContext(ctx,
+	err := s.readDB.QueryRowContext(ctx,
 		`SELECT EXISTS(SELECT 1 FROM queued_inputs WHERE session_id=? AND status IN (?,?))`,
 		sessionID, store.QueuedInputQueued, store.QueuedInputEditing,
 	).Scan(&exists)
@@ -1350,9 +1391,8 @@ func (s *Store) PromoteNextQueuedInput(ctx context.Context, in store.PromoteQueu
 }
 
 func (s *Store) QueuedSessions(ctx context.Context) ([]string, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	rows, err := s.db.QueryContext(ctx,
+	defer s.readLock()()
+	rows, err := s.readDB.QueryContext(ctx,
 		`SELECT DISTINCT q.session_id
 		 FROM queued_inputs q
 		 JOIN sessions s ON s.id=q.session_id
@@ -1644,6 +1684,9 @@ func (s *Store) ApplyTurnSteers(ctx context.Context, in store.ApplyTurnSteersInp
 				return store.ErrNotFound
 			}
 		}
+		if err := refreshTurnPromptPreviewTx(ctx, tx, turn.SessionID, turn.ID); err != nil {
+			return err
+		}
 		for _, ev := range in.Events {
 			if err := insertEventTx(ctx, tx, ev); err != nil {
 				return err
@@ -1919,20 +1962,19 @@ func (s *Store) RecordSessionUsage(ctx context.Context, sessionID string, in sto
 }
 
 func (s *Store) SessionUsage(ctx context.Context, sessionID string) (*store.SessionUsageStat, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback()
-	if _, err := getSessionTx(ctx, tx, sessionID); err != nil {
-		return nil, err
-	}
-	stat, err := sessionUsageTx(ctx, tx, sessionID)
-	if errors.Is(err, sql.ErrNoRows) {
-		return &store.SessionUsageStat{SessionID: sessionID}, nil
-	}
+	var stat *store.SessionUsageStat
+	err := s.readTx(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		if _, err := getSessionTx(ctx, tx, sessionID); err != nil {
+			return err
+		}
+		var err error
+		stat, err = sessionUsageTx(ctx, tx, sessionID)
+		if errors.Is(err, sql.ErrNoRows) {
+			stat = &store.SessionUsageStat{SessionID: sessionID}
+			return nil
+		}
+		return err
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -1940,20 +1982,21 @@ func (s *Store) SessionUsage(ctx context.Context, sessionID string) (*store.Sess
 }
 
 func (s *Store) RunningTurn(ctx context.Context, sessionID string) (*store.Turn, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	tx, err := s.db.BeginTx(ctx, nil)
+	var turn *store.Turn
+	err := s.readTx(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		turn, err = runningTurnTx(ctx, tx, sessionID)
+		return err
+	})
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback()
-	return runningTurnTx(ctx, tx, sessionID)
+	return turn, nil
 }
 
 func (s *Store) RunningTurns(ctx context.Context) ([]*store.Turn, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	rows, err := s.db.QueryContext(ctx,
+	defer s.readLock()()
+	rows, err := s.readDB.QueryContext(ctx,
 		`SELECT id,session_id,client_message_id,status,provider,model,mode,model_config,error,created_at,updated_at,retry_of_turn_id
 		FROM turns WHERE status=?`, store.TurnRunning)
 	if err != nil {
@@ -1981,80 +2024,81 @@ func (s *Store) ListMessages(ctx context.Context, sessionID string, limit int) (
 }
 
 func (s *Store) ListMessagesPage(ctx context.Context, sessionID string, beforeMessageID string, limit int) (*store.MessagePage, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback()
-	if _, err := getSessionTx(ctx, tx, sessionID); err != nil {
-		return nil, err
-	}
+	var page *store.MessagePage
+	err := s.readTx(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		if _, err := getSessionTx(ctx, tx, sessionID); err != nil {
+			return err
+		}
 
-	// rowid 作次级排序键:同毫秒落库的跨 turn 消息顺序必须按写入顺序确定。
-	// turn_index 只在同一 turn 内排序(messagesForTurnTx)使用。
-	query := `SELECT ` + messageSelectColumns + ` FROM messages WHERE session_id=? ORDER BY created_at ASC, rowid ASC`
-	args := []any{sessionID}
-	if beforeMessageID != "" {
-		var beforeCreated int64
-		var beforeRowID int64
-		err := tx.QueryRowContext(ctx,
-			`SELECT created_at,rowid FROM messages WHERE session_id=? AND id=?`,
-			sessionID, beforeMessageID,
-		).Scan(&beforeCreated, &beforeRowID)
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, store.ErrNotFound
-		}
-		if err != nil {
-			return nil, err
-		}
-		query = `SELECT ` + messageSelectColumns + `
-			FROM messages
-			WHERE session_id=? AND (created_at < ? OR (created_at=? AND rowid < ?))
-			ORDER BY created_at ASC, rowid ASC`
-		args = []any{sessionID, beforeCreated, beforeCreated, beforeRowID}
-	}
-	fetchLimit := limit
-	if fetchLimit > 0 {
-		fetchLimit++
-		if beforeMessageID == "" {
-			query = `SELECT ` + messageSelectColumns + ` FROM (
-				SELECT rowid AS rid, * FROM messages WHERE session_id=? ORDER BY created_at DESC, rowid DESC LIMIT ?
-			) ORDER BY created_at ASC, rid ASC`
-			args = []any{sessionID, fetchLimit}
-		} else {
-			query = `SELECT ` + messageSelectColumns + ` FROM (
-				SELECT rowid AS rid, * FROM messages
+		// rowid 作次级排序键:同毫秒落库的跨 turn 消息顺序必须按写入顺序确定。
+		// turn_index 只在同一 turn 内排序(messagesForTurnTx)使用。
+		query := `SELECT ` + messageSelectColumns + ` FROM messages WHERE session_id=? ORDER BY created_at ASC, rowid ASC`
+		args := []any{sessionID}
+		if beforeMessageID != "" {
+			var beforeCreated int64
+			var beforeRowID int64
+			err := tx.QueryRowContext(ctx,
+				`SELECT created_at,rowid FROM messages WHERE session_id=? AND id=?`,
+				sessionID, beforeMessageID,
+			).Scan(&beforeCreated, &beforeRowID)
+			if errors.Is(err, sql.ErrNoRows) {
+				return store.ErrNotFound
+			}
+			if err != nil {
+				return err
+			}
+			query = `SELECT ` + messageSelectColumns + `
+				FROM messages
 				WHERE session_id=? AND (created_at < ? OR (created_at=? AND rowid < ?))
-				ORDER BY created_at DESC, rowid DESC LIMIT ?
-			) ORDER BY created_at ASC, rid ASC`
-			args = append(args, fetchLimit)
+				ORDER BY created_at ASC, rowid ASC`
+			args = []any{sessionID, beforeCreated, beforeCreated, beforeRowID}
 		}
-	}
-	rows, err := tx.QueryContext(ctx, query, args...)
+		fetchLimit := limit
+		if fetchLimit > 0 {
+			fetchLimit++
+			if beforeMessageID == "" {
+				query = `SELECT ` + messageSelectColumns + ` FROM (
+					SELECT rowid AS rid, * FROM messages WHERE session_id=? ORDER BY created_at DESC, rowid DESC LIMIT ?
+				) ORDER BY created_at ASC, rid ASC`
+				args = []any{sessionID, fetchLimit}
+			} else {
+				query = `SELECT ` + messageSelectColumns + ` FROM (
+					SELECT rowid AS rid, * FROM messages
+					WHERE session_id=? AND (created_at < ? OR (created_at=? AND rowid < ?))
+					ORDER BY created_at DESC, rowid DESC LIMIT ?
+				) ORDER BY created_at ASC, rid ASC`
+				args = append(args, fetchLimit)
+			}
+		}
+		rows, err := tx.QueryContext(ctx, query, args...)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+
+		out := make([]*store.Message, 0)
+		for rows.Next() {
+			msg, err := scanMessage(rows)
+			if err != nil {
+				return err
+			}
+			out = append(out, msg)
+		}
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		hasMore := false
+		if limit > 0 && len(out) > limit {
+			hasMore = true
+			out = out[1:]
+		}
+		page = &store.MessagePage{Messages: out, HasMore: hasMore}
+		return nil
+	})
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-
-	out := make([]*store.Message, 0)
-	for rows.Next() {
-		msg, err := scanMessage(rows)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, msg)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	hasMore := false
-	if limit > 0 && len(out) > limit {
-		hasMore = true
-		out = out[1:]
-	}
-	return &store.MessagePage{Messages: out, HasMore: hasMore}, nil
+	return page, nil
 }
 
 func (s *Store) GetMessage(ctx context.Context, sessionID string, messageID string) (*store.Message, error) {
@@ -2063,25 +2107,26 @@ func (s *Store) GetMessage(ctx context.Context, sessionID string, messageID stri
 	if sessionID == "" || messageID == "" {
 		return nil, store.ErrNotFound
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	tx, err := s.db.BeginTx(ctx, nil)
+	var msg *store.Message
+	err := s.readTx(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		if _, err := getSessionTx(ctx, tx, sessionID); err != nil {
+			return err
+		}
+		var err error
+		msg, err = scanMessage(tx.QueryRowContext(ctx,
+			`SELECT `+messageSelectColumns+`
+			FROM messages WHERE session_id=? AND id=?`,
+			sessionID, messageID,
+		))
+		if errors.Is(err, sql.ErrNoRows) {
+			return store.ErrNotFound
+		}
+		return err
+	})
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback()
-	if _, err := getSessionTx(ctx, tx, sessionID); err != nil {
-		return nil, err
-	}
-	msg, err := scanMessage(tx.QueryRowContext(ctx,
-		`SELECT `+messageSelectColumns+`
-		FROM messages WHERE session_id=? AND id=?`,
-		sessionID, messageID,
-	))
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, store.ErrNotFound
-	}
-	return msg, err
+	return msg, nil
 }
 
 func (s *Store) SearchMessages(ctx context.Context, in store.MessageSearchInput) ([]*store.Message, error) {
@@ -2391,198 +2436,215 @@ func cleanupQueuedAttachmentParts(ctx context.Context, tx *sql.Tx, sessionID, or
 }
 
 func (s *Store) ListTurnsPage(ctx context.Context, sessionID string, beforeTurnID string, limit int) (*store.TurnPage, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback()
-	if _, err := getSessionTx(ctx, tx, sessionID); err != nil {
-		return nil, err
-	}
+	var page *store.TurnPage
+	err := s.readTx(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		if _, err := getSessionTx(ctx, tx, sessionID); err != nil {
+			return err
+		}
 
-	query := `SELECT id,session_id,client_message_id,status,provider,model,mode,model_config,error,created_at,updated_at,retry_of_turn_id FROM turns WHERE session_id=? ORDER BY created_at ASC, rowid ASC`
-	args := []any{sessionID}
-	if beforeTurnID != "" {
-		var beforeCreated int64
-		var beforeRowID int64
-		err := tx.QueryRowContext(ctx,
-			`SELECT created_at,rowid FROM turns WHERE session_id=? AND id=?`,
-			sessionID, beforeTurnID,
-		).Scan(&beforeCreated, &beforeRowID)
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, store.ErrNotFound
-		}
-		if err != nil {
-			return nil, err
-		}
-		query = `SELECT id,session_id,client_message_id,status,provider,model,mode,model_config,error,created_at,updated_at,retry_of_turn_id
-			FROM turns
-			WHERE session_id=? AND (created_at < ? OR (created_at=? AND rowid < ?))
-			ORDER BY created_at ASC, rowid ASC`
-		args = []any{sessionID, beforeCreated, beforeCreated, beforeRowID}
-	}
-	fetchLimit := limit
-	if fetchLimit > 0 {
-		fetchLimit++
-		if beforeTurnID == "" {
-			query = `SELECT id,session_id,client_message_id,status,provider,model,mode,model_config,error,created_at,updated_at,retry_of_turn_id FROM (
-				SELECT rowid AS rid, * FROM turns WHERE session_id=? ORDER BY created_at DESC, rowid DESC LIMIT ?
-			) ORDER BY created_at ASC, rid ASC`
-			args = []any{sessionID, fetchLimit}
-		} else {
-			query = `SELECT id,session_id,client_message_id,status,provider,model,mode,model_config,error,created_at,updated_at,retry_of_turn_id FROM (
-				SELECT rowid AS rid, * FROM turns
+		query := `SELECT id,session_id,client_message_id,status,provider,model,mode,model_config,error,created_at,updated_at,retry_of_turn_id FROM turns WHERE session_id=? ORDER BY created_at ASC, rowid ASC`
+		args := []any{sessionID}
+		if beforeTurnID != "" {
+			var beforeCreated int64
+			var beforeRowID int64
+			err := tx.QueryRowContext(ctx,
+				`SELECT created_at,rowid FROM turns WHERE session_id=? AND id=?`,
+				sessionID, beforeTurnID,
+			).Scan(&beforeCreated, &beforeRowID)
+			if errors.Is(err, sql.ErrNoRows) {
+				return store.ErrNotFound
+			}
+			if err != nil {
+				return err
+			}
+			query = `SELECT id,session_id,client_message_id,status,provider,model,mode,model_config,error,created_at,updated_at,retry_of_turn_id
+				FROM turns
 				WHERE session_id=? AND (created_at < ? OR (created_at=? AND rowid < ?))
-				ORDER BY created_at DESC, rowid DESC LIMIT ?
-			) ORDER BY created_at ASC, rid ASC`
-			args = append(args, fetchLimit)
+				ORDER BY created_at ASC, rowid ASC`
+			args = []any{sessionID, beforeCreated, beforeCreated, beforeRowID}
 		}
-	}
-	rows, err := tx.QueryContext(ctx, query, args...)
+		fetchLimit := limit
+		if fetchLimit > 0 {
+			fetchLimit++
+			if beforeTurnID == "" {
+				query = `SELECT id,session_id,client_message_id,status,provider,model,mode,model_config,error,created_at,updated_at,retry_of_turn_id FROM (
+					SELECT rowid AS rid, * FROM turns WHERE session_id=? ORDER BY created_at DESC, rowid DESC LIMIT ?
+				) ORDER BY created_at ASC, rid ASC`
+				args = []any{sessionID, fetchLimit}
+			} else {
+				query = `SELECT id,session_id,client_message_id,status,provider,model,mode,model_config,error,created_at,updated_at,retry_of_turn_id FROM (
+					SELECT rowid AS rid, * FROM turns
+					WHERE session_id=? AND (created_at < ? OR (created_at=? AND rowid < ?))
+					ORDER BY created_at DESC, rowid DESC LIMIT ?
+				) ORDER BY created_at ASC, rid ASC`
+				args = append(args, fetchLimit)
+			}
+		}
+		rows, err := tx.QueryContext(ctx, query, args...)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+
+		turns := make([]*store.Turn, 0)
+		for rows.Next() {
+			turn, err := scanTurn(rows)
+			if err != nil {
+				return err
+			}
+			turns = append(turns, turn)
+		}
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		hasMore := false
+		if limit > 0 && len(turns) > limit {
+			hasMore = true
+			turns = turns[1:]
+		}
+		// Never split a retry chain across pages: its original user message owns
+		// the stable transcript row, including after reconnect/restart.
+		for len(turns) > 0 && turns[0].RetryOfTurnID != "" {
+			parent, err := getTurnTx(ctx, tx, turns[0].RetryOfTurnID)
+			if err != nil {
+				return err
+			}
+			turns = append([]*store.Turn{parent}, turns...)
+		}
+		if len(turns) > 0 {
+			if err := tx.QueryRowContext(ctx, `SELECT EXISTS(
+				SELECT 1 FROM turns t, turns first
+				WHERE first.id=? AND t.session_id=?
+				AND (t.created_at < first.created_at OR (t.created_at=first.created_at AND t.rowid < first.rowid))
+			)`, turns[0].ID, sessionID).Scan(&hasMore); err != nil {
+				return err
+			}
+		}
+		out := make([]*store.ConversationTurn, 0, len(turns))
+		if len(turns) == 0 {
+			page = &store.TurnPage{Turns: out, HasMore: hasMore}
+			return nil
+		}
+		turnIDs := make([]string, 0, len(turns))
+		for _, turn := range turns {
+			turnIDs = append(turnIDs, turn.ID)
+		}
+		messagesByTurn, err := messagesForTurnsTx(ctx, tx, turns[0].SessionID, turnIDs)
+		if err != nil {
+			return err
+		}
+		fileChangesByTurn, err := turnFileChangesForTurnsTx(ctx, tx, turns[0].SessionID, turnIDs)
+		if err != nil {
+			return err
+		}
+		fileChangeStatesByTurn, err := turnFileChangeStatesForTurnsTx(ctx, tx, turns[0].SessionID, turnIDs)
+		if err != nil {
+			return err
+		}
+		for _, turn := range turns {
+			messages := messagesByTurn[turn.ID]
+			if messages == nil {
+				messages = []*store.Message{}
+			}
+			fileChanges := fileChangesByTurn[turn.ID]
+			if fileChanges == nil {
+				fileChanges = []*store.TurnFileChange{}
+			}
+			stateSnapshot := fileChangeStatesByTurn[turn.ID]
+			out = append(out, conversationTurnFromSQL(turn, messages, fileChanges, stateSnapshot.state, stateSnapshot.revision))
+		}
+		page = &store.TurnPage{Turns: out, HasMore: hasMore}
+		return nil
+	})
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-
-	turns := make([]*store.Turn, 0)
-	for rows.Next() {
-		turn, err := scanTurn(rows)
-		if err != nil {
-			return nil, err
-		}
-		turns = append(turns, turn)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	hasMore := false
-	if limit > 0 && len(turns) > limit {
-		hasMore = true
-		turns = turns[1:]
-	}
-	// Never split a retry chain across pages: its original user message owns
-	// the stable transcript row, including after reconnect/restart.
-	for len(turns) > 0 && turns[0].RetryOfTurnID != "" {
-		parent, err := getTurnTx(ctx, tx, turns[0].RetryOfTurnID)
-		if err != nil {
-			return nil, err
-		}
-		turns = append([]*store.Turn{parent}, turns...)
-	}
-	if len(turns) > 0 {
-		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(
-			SELECT 1 FROM turns t, turns first
-			WHERE first.id=? AND t.session_id=?
-			AND (t.created_at < first.created_at OR (t.created_at=first.created_at AND t.rowid < first.rowid))
-		)`, turns[0].ID, sessionID).Scan(&hasMore); err != nil {
-			return nil, err
-		}
-	}
-	out := make([]*store.ConversationTurn, 0, len(turns))
-	for _, turn := range turns {
-		messages, err := messagesForTurnTx(ctx, tx, turn.SessionID, turn.ID)
-		if err != nil {
-			return nil, err
-		}
-		fileChanges, err := turnFileChangesForTurnTx(ctx, tx, turn.SessionID, turn.ID)
-		if err != nil {
-			return nil, err
-		}
-		fileChangeState, fileChangeRevision, err := turnFileChangeStateForTurnTx(ctx, tx, turn.SessionID, turn.ID)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, conversationTurnFromSQL(turn, messages, fileChanges, fileChangeState, fileChangeRevision))
-	}
-	return &store.TurnPage{Turns: out, HasMore: hasMore}, nil
+	return page, nil
 }
 
 func (s *Store) GetConversationTurn(ctx context.Context, sessionID string, turnID string) (*store.ConversationTurn, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	tx, err := s.db.BeginTx(ctx, nil)
+	var out *store.ConversationTurn
+	err := s.readTx(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		if _, err := getSessionTx(ctx, tx, sessionID); err != nil {
+			return err
+		}
+		row := tx.QueryRowContext(ctx,
+			`SELECT id,session_id,client_message_id,status,provider,model,mode,model_config,error,created_at,updated_at,retry_of_turn_id FROM turns WHERE session_id=? AND id=?`,
+			sessionID, turnID,
+		)
+		turn, err := scanTurn(row)
+		if errors.Is(err, sql.ErrNoRows) {
+			return store.ErrNotFound
+		}
+		if err != nil {
+			return err
+		}
+		messages, err := messagesForTurnTx(ctx, tx, turn.SessionID, turn.ID)
+		if err != nil {
+			return err
+		}
+		fileChanges, err := turnFileChangesForTurnTx(ctx, tx, turn.SessionID, turn.ID)
+		if err != nil {
+			return err
+		}
+		fileChangeState, fileChangeRevision, err := turnFileChangeStateForTurnTx(ctx, tx, turn.SessionID, turn.ID)
+		if err != nil {
+			return err
+		}
+		out = conversationTurnFromSQL(turn, messages, fileChanges, fileChangeState, fileChangeRevision)
+		return nil
+	})
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback()
-	if _, err := getSessionTx(ctx, tx, sessionID); err != nil {
-		return nil, err
-	}
-	row := tx.QueryRowContext(ctx,
-		`SELECT id,session_id,client_message_id,status,provider,model,mode,model_config,error,created_at,updated_at,retry_of_turn_id FROM turns WHERE session_id=? AND id=?`,
-		sessionID, turnID,
-	)
-	turn, err := scanTurn(row)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, store.ErrNotFound
-	}
-	if err != nil {
-		return nil, err
-	}
-	messages, err := messagesForTurnTx(ctx, tx, turn.SessionID, turn.ID)
-	if err != nil {
-		return nil, err
-	}
-	fileChanges, err := turnFileChangesForTurnTx(ctx, tx, turn.SessionID, turn.ID)
-	if err != nil {
-		return nil, err
-	}
-	fileChangeState, fileChangeRevision, err := turnFileChangeStateForTurnTx(ctx, tx, turn.SessionID, turn.ID)
-	if err != nil {
-		return nil, err
-	}
-	return conversationTurnFromSQL(turn, messages, fileChanges, fileChangeState, fileChangeRevision), nil
+	return out, nil
 }
 
 func (s *Store) EventsAfter(ctx context.Context, sessionID string, afterSeq int64, limit int) ([]event.Event, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback()
-	if _, err := getSessionTx(ctx, tx, sessionID); err != nil {
-		return nil, err
-	}
-
-	query := `SELECT payload FROM events WHERE session_id=? AND seq>? ORDER BY seq ASC`
-	args := []any{sessionID, afterSeq}
-	if limit > 0 {
-		query += ` LIMIT ?`
-		args = append(args, limit)
-	}
-	rows, err := tx.QueryContext(ctx, query, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
 	out := make([]event.Event, 0)
-	for rows.Next() {
-		var payload string
-		if err := rows.Scan(&payload); err != nil {
-			return nil, err
+	err := s.readTx(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		if _, err := getSessionTx(ctx, tx, sessionID); err != nil {
+			return err
 		}
-		var ev event.Event
-		if err := json.Unmarshal([]byte(payload), &ev); err != nil {
-			return nil, err
+
+		query := `SELECT payload FROM events WHERE session_id=? AND seq>? ORDER BY seq ASC`
+		args := []any{sessionID, afterSeq}
+		if limit > 0 {
+			query += ` LIMIT ?`
+			args = append(args, limit)
 		}
-		out = append(out, ev)
+		rows, err := tx.QueryContext(ctx, query, args...)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+
+		for rows.Next() {
+			var payload string
+			if err := rows.Scan(&payload); err != nil {
+				return err
+			}
+			var ev event.Event
+			if err := json.Unmarshal([]byte(payload), &ev); err != nil {
+				return err
+			}
+			out = append(out, ev)
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		return nil, err
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 func (s *Store) LatestSeq(ctx context.Context, sessionID string) (int64, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	defer s.readLock()()
 	if _, err := s.getSessionDB(ctx, sessionID); err != nil {
 		return 0, err
 	}
 	var seq int64
-	if err := s.db.QueryRowContext(ctx,
+	if err := s.readDB.QueryRowContext(ctx,
 		`SELECT COALESCE(MAX(seq),0) FROM events WHERE session_id=?`, sessionID,
 	).Scan(&seq); err != nil {
 		return 0, err
@@ -2592,7 +2654,7 @@ func (s *Store) LatestSeq(ctx context.Context, sessionID string) (int64, error) 
 
 // getSessionDB 是 getSessionTx 的免事务版本,服务只读单查。
 func (s *Store) getSessionDB(ctx context.Context, id string) (*store.Session, error) {
-	sess, err := scanSession(s.db.QueryRowContext(ctx,
+	sess, err := scanSession(s.readDB.QueryRowContext(ctx,
 		`SELECT `+sessionSelectColumnsAliasS+` FROM sessions s WHERE s.id=? AND s.archived_at=0`, id,
 	))
 	if errors.Is(err, sql.ErrNoRows) {
@@ -2602,7 +2664,7 @@ func (s *Store) getSessionDB(ctx context.Context, id string) (*store.Session, er
 }
 
 func (s *Store) getProjectDB(ctx context.Context, id string) (*store.Project, error) {
-	row := s.db.QueryRowContext(ctx, `SELECT `+projectSelectColumns+` FROM projects WHERE id=?`, id)
+	row := s.readDB.QueryRowContext(ctx, `SELECT `+projectSelectColumns+` FROM projects WHERE id=?`, id)
 	project, err := scanProject(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, store.ErrNotFound
@@ -2780,6 +2842,37 @@ func firstQueuedInputTx(ctx context.Context, tx *sql.Tx, sessionID string) (*sto
 		return nil, store.ErrNotFound
 	}
 	return input, err
+}
+
+// messagesForTurnsTx 按 turn_id 批量读取消息，减少分页查询往返次数。
+func messagesForTurnsTx(ctx context.Context, tx *sql.Tx, sessionID string, turnIDs []string) (map[string][]*store.Message, error) {
+	out := make(map[string][]*store.Message, len(turnIDs))
+	if len(turnIDs) == 0 {
+		return out, nil
+	}
+	args := make([]any, 0, 1+len(turnIDs))
+	args = append(args, sessionID)
+	for _, id := range turnIDs {
+		args = append(args, id)
+	}
+	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(turnIDs)), ",")
+	rows, err := tx.QueryContext(ctx,
+		`SELECT `+messageSelectColumns+`
+		FROM messages WHERE session_id=? AND turn_id IN (`+placeholders+`) ORDER BY created_at ASC, turn_index ASC, rowid ASC`,
+		args...,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		msg, err := scanMessage(rows)
+		if err != nil {
+			return nil, err
+		}
+		out[msg.TurnID] = append(out[msg.TurnID], msg)
+	}
+	return out, rows.Err()
 }
 
 func messagesForTurnTx(ctx context.Context, tx *sql.Tx, sessionID, turnID string) ([]*store.Message, error) {
@@ -3206,7 +3299,58 @@ func insertMessageTx(ctx context.Context, tx *sql.Tx, msg *store.Message) error 
 		boolInt(msg.Interrupted),
 		unixMS(msg.CreatedAt),
 	)
-	return err
+	if err != nil {
+		return err
+	}
+	if msg.Role == store.RoleUser && msg.TurnID != "" {
+		if _, err := tx.ExecContext(ctx,
+			`UPDATE turns SET prompt_preview=? WHERE session_id=? AND id=?
+			 AND NOT EXISTS (
+				SELECT 1 FROM messages m
+				WHERE m.session_id=turns.session_id AND m.turn_id=turns.id
+					AND m.role='user' AND m.id<>? AND m.turn_index<=?
+			 )`,
+			truncateOutlinePreview(msg.Text), msg.SessionID, msg.TurnID, msg.ID, msg.TurnIndex,
+		); err != nil {
+			return err
+		}
+	} else if msg.Role == store.RoleAssistant && msg.Kind == store.MessageKindText && msg.Text != "" && msg.TurnID != "" {
+		if _, err := tx.ExecContext(ctx,
+			`UPDATE turns SET answer_preview=? WHERE session_id=? AND id=?
+			 AND NOT EXISTS (
+				SELECT 1 FROM messages m
+				WHERE m.session_id=turns.session_id AND m.turn_id=turns.id
+					AND m.role='assistant' AND m.kind='text' AND m.text<>'' AND m.turn_index>?
+			 )`,
+			truncateOutlinePreview(msg.Text), msg.SessionID, msg.TurnID, msg.TurnIndex,
+		); err != nil {
+			return err
+		}
+	} else if msg.Role == store.RoleTool && msg.TurnID != "" {
+		if title := turnTopicTitleFromParts(msg.Parts); title != "" {
+			if _, err := tx.ExecContext(ctx, `UPDATE turns SET topic_title=? WHERE session_id=? AND id=?`, title, msg.SessionID, msg.TurnID); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// turnTopicTitleFromParts 提取工具消息中最后一次成功的主题标记。
+func turnTopicTitleFromParts(parts []store.ContentPart) string {
+	for i := len(parts) - 1; i >= 0; i-- {
+		part := parts[i]
+		if part.Type != store.ContentPartToolResult || part.Name != "builtin_set_turn_topic" || !part.Ok {
+			continue
+		}
+		var payload struct {
+			Title string `json:"title"`
+		}
+		if json.Unmarshal([]byte(part.Content), &payload) == nil && payload.Title != "" {
+			return payload.Title
+		}
+	}
+	return ""
 }
 
 func decodeParts(raw string) []store.ContentPart {

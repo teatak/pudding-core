@@ -3,6 +3,7 @@ package sqlitestore
 import (
 	"database/sql"
 	"fmt"
+	"slices"
 )
 
 // These are data transformations inside one v47 transaction, not independently
@@ -52,6 +53,11 @@ func migrateStudioV47(tx *sql.Tx) error {
 	delete(contract.tables, "session_plugin_connections")
 	delete(contract.tables, "project_requests")
 	delete(contract.tables, "session_directory_grants")
+	// v62 才增加 turns.topic_title、prompt_preview、answer_preview 与 turns_session_created，v47 校验需排除该后续列与索引。
+	contract.tables["turns"] = slices.DeleteFunc(contract.tables["turns"], func(column string) bool {
+		return column == "topic_title" || column == "prompt_preview" || column == "answer_preview"
+	})
+	contract.indexes = slices.DeleteFunc(contract.indexes, func(index string) bool { return index == "turns_session_created" })
 	return validateSchemaWithRetiredColumns(tx, contract)
 }
 

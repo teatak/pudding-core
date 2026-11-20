@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -1263,7 +1264,23 @@ func TestTurnOutlineIsBoundedOrderedAndSessionScoped(t *testing.T) {
 	ctx := context.Background()
 	createTestSession(t, st, "sess_1")
 	createTestSession(t, st, "sess_empty")
-	for i := 1; i <= 4; i++ {
+	if _, err := st.BeginTurn(ctx, store.BeginTurnInput{
+		SessionID:       "sess_1",
+		TurnID:          "turn_1",
+		UserMessageID:   "msg_1",
+		ClientMessageID: "client_1",
+		UserText:        strings.Repeat("中", 600),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.FinishTurn(ctx, store.FinishTurnInput{
+		TurnID:         "turn_1",
+		Status:         store.TurnCompleted,
+		AssistantParts: store.TextPart("assistant 1"),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for i := 2; i <= 4; i++ {
 		appendCompletedTestTurn(t, st, "sess_1", i)
 	}
 	// Equal timestamps still follow insertion order, including a retry chain.
@@ -1271,9 +1288,6 @@ func TestTurnOutlineIsBoundedOrderedAndSessionScoped(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := st.db.Exec(`UPDATE turns SET retry_of_turn_id='turn_3' WHERE id='turn_4'`); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := st.db.Exec(`UPDATE messages SET text=? WHERE turn_id='turn_1' AND role='user'`, strings.Repeat("中", 600)); err != nil {
 		t.Fatal(err)
 	}
 	entries, err := st.ListTurnOutline(ctx, "sess_1")
@@ -2415,4 +2429,255 @@ func sameStrings(a, b []string) bool {
 		}
 	}
 	return true
+}
+
+func TestMigrateTurnTopicV62BackfillsLatestOkTopic(t *testing.T) {
+	ctx := context.Background()
+	st, path := openTestStore(t)
+	createTestSession(t, st, "sess_v62")
+
+	// 插入结构化历史消息与工具结果后回退到 v61 架构，验证 v62 迁移回填 topic_title、prompt_preview、answer_preview。
+	longPrompt := strings.Repeat("甲", 600)
+	if _, err := st.db.ExecContext(ctx, `
+		INSERT INTO turns(id,session_id,client_message_id,status,created_at,updated_at) VALUES
+			('turn_1','sess_v62','cm_1','completed',1000,1000),
+			('turn_2','sess_v62','cm_2','completed',2000,2000),
+			('turn_3','sess_v62','cm_3','completed',3000,3000);
+		INSERT INTO messages(id,session_id,turn_id,role,kind,text,search_tokens,parts,turn_index,metadata,client_message_id,interrupted,created_at) VALUES
+			('m1','sess_v62','turn_1','user','text',?,'','[]',0,'{}','',0,1000),
+			('m1b','sess_v62','turn_1','assistant','thinking','内部思考','','[]',1,'{}','',0,1001),
+			('m1c','sess_v62','turn_1','assistant','text','早回复','','[]',2,'{}','',0,1002),
+			('m2','sess_v62','turn_1','tool','tool_result','','','[{"type":"tool_result","id":"c1","name":"builtin_set_turn_topic","ok":true,"content":"{\"title\":\"初期主题\"}"}]',3,'{}','',0,1003),
+			('m3','sess_v62','turn_1','tool','tool_result','','','[{"type":"tool_result","id":"c2","name":"builtin_set_turn_topic","ok":false,"content":"{\"title\":\"失败主题\"}"}]',4,'{}','',0,1004),
+			('m3b','sess_v62','turn_1','assistant','text','末回复','','[]',5,'{}','',0,1005),
+			('m4','sess_v62','turn_2','user','text','q2','','[]',0,'{}','',0,2000),
+			('m5','sess_v62','turn_2','tool','tool_result','','','[{"type":"tool_result","id":"c3","name":"builtin_set_turn_topic","ok":true,"content":"{\"title\":\"一\"}"},{"type":"tool_result","id":"c4","name":"builtin_set_turn_topic","ok":true,"content":"{\"title\":\"最终主题\"}"}]',1,'{}','',0,2001),
+			('m5b','sess_v62','turn_2','user','text','q2-steer','','[]',2,'{}','',0,2002),
+			('m6','sess_v62','turn_3','user','text','q3','','[]',0,'{}','',0,3000);
+		DROP INDEX IF EXISTS turns_session_created;
+		ALTER TABLE turns DROP COLUMN topic_title;
+		ALTER TABLE turns DROP COLUMN prompt_preview;
+		ALTER TABLE turns DROP COLUMN answer_preview;
+		PRAGMA user_version=61;
+	`, longPrompt); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	migrated, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = migrated.Close() }()
+
+	outline, err := migrated.ListTurnOutline(ctx, "sess_v62")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(outline) != 3 {
+		t.Fatalf("outline len = %d, want 3", len(outline))
+	}
+	if outline[0].Prompt != strings.Repeat("甲", 512) || outline[0].Answer != "末回复" || outline[0].TopicTitle != "初期主题" {
+		t.Fatalf("turn_1 outline = %+v", outline[0])
+	}
+	if outline[1].Prompt != "q2" || outline[1].Answer != "" || outline[1].TopicTitle != "最终主题" {
+		t.Fatalf("turn_2 outline = %+v", outline[1])
+	}
+	if outline[2].Prompt != "q3" || outline[2].Answer != "" || outline[2].TopicTitle != "" {
+		t.Fatalf("turn_3 outline = %+v", outline[2])
+	}
+	topic, err := migrated.GetCurrentTurnTopic(ctx, "sess_v62")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if topic == nil || topic.TurnID != "turn_2" || topic.Title != "最终主题" {
+		t.Fatalf("current topic = %+v", topic)
+	}
+}
+
+func TestMigrateTurnOutlinePreviewV63FromV62(t *testing.T) {
+	ctx := context.Background()
+	st, path := openTestStore(t)
+	createTestSession(t, st, "sess_from_v62")
+
+	// 模拟已升级到 v62（仅含 topic_title）的存量数据库，验证打开时平滑升级到 v63 并回填预览列。
+	if _, err := st.db.ExecContext(ctx, `
+		INSERT INTO turns(id,session_id,client_message_id,status,topic_title,created_at,updated_at) VALUES
+			('turn_v62','sess_from_v62','cm_v62','completed','存量主题',1000,1000);
+		INSERT INTO messages(id,session_id,turn_id,role,kind,text,search_tokens,parts,turn_index,metadata,client_message_id,interrupted,created_at) VALUES
+			('m_u','sess_from_v62','turn_v62','user','text','存量提问','','[]',0,'{}','',0,1000),
+			('m_a','sess_from_v62','turn_v62','assistant','text','存量回答','','[]',1,'{}','',0,1001);
+		ALTER TABLE turns DROP COLUMN prompt_preview;
+		ALTER TABLE turns DROP COLUMN answer_preview;
+		PRAGMA user_version=62;
+	`); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	migrated, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = migrated.Close() }()
+
+	outline, err := migrated.ListTurnOutline(ctx, "sess_from_v62")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(outline) != 1 || outline[0].Prompt != "存量提问" || outline[0].Answer != "存量回答" || outline[0].TopicTitle != "存量主题" {
+		t.Fatalf("v62->v63 outline = %+v", outline)
+	}
+}
+
+func TestListTurnsPageBatchesMessagesAndFileChanges(t *testing.T) {
+	ctx := context.Background()
+	st, _ := openTestStore(t)
+	createTestSession(t, st, "sess_page_batch")
+
+	beginTestTurn(t, st, "sess_page_batch", "turn_1", "msg_1", "cm_1")
+	if _, err := st.FinishTurn(ctx, store.FinishTurnInput{
+		TurnID: "turn_1",
+		Status: store.TurnCompleted,
+		FileChanges: []store.TurnFileChangeInput{{
+			RootPath: "/tmp/p", Path: "a.go", Kind: store.FileChangeAdded,
+			NewContent: "package a\n",
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	beginTestTurn(t, st, "sess_page_batch", "turn_2", "msg_2", "cm_2")
+	if _, err := st.AppendTurnOutput(ctx, store.AppendTurnOutputInput{
+		TurnID: "turn_2",
+		Parts:  []store.ContentPart{{Type: store.ContentPartText, Text: "reply 2"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.FinishTurn(ctx, store.FinishTurnInput{
+		TurnID: "turn_2",
+		Status: store.TurnCompleted,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	beginTestTurn(t, st, "sess_page_batch", "turn_3", "msg_3", "cm_3")
+	if _, err := st.FinishTurn(ctx, store.FinishTurnInput{
+		TurnID: "turn_3",
+		Status: store.TurnCompleted,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	page, err := st.ListTurnsPage(ctx, "sess_page_batch", "", 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !page.HasMore || len(page.Turns) != 2 {
+		t.Fatalf("page = %+v", page)
+	}
+	if page.Turns[0].ID != "turn_2" || len(page.Turns[0].Messages) != 2 || page.Turns[0].FileChanges == nil || len(page.Turns[0].FileChanges) != 0 {
+		t.Fatalf("turn_2 = %+v", page.Turns[0])
+	}
+	if page.Turns[1].ID != "turn_3" || len(page.Turns[1].Messages) != 2 || page.Turns[1].FileChanges == nil || len(page.Turns[1].FileChanges) != 0 {
+		t.Fatalf("turn_3 = %+v", page.Turns[1])
+	}
+
+	older, err := st.ListTurnsPage(ctx, "sess_page_batch", page.Turns[0].ID, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if older.HasMore || len(older.Turns) != 1 {
+		t.Fatalf("older page = %+v", older)
+	}
+	if older.Turns[0].ID != "turn_1" || len(older.Turns[0].FileChanges) != 1 || older.Turns[0].FileChangeState != store.TurnFileChangesApplied {
+		t.Fatalf("turn_1 = %+v", older.Turns[0])
+	}
+}
+
+func TestReadDBEnforcesQueryOnlyAndReadsCommittedWrites(t *testing.T) {
+	ctx := context.Background()
+	st, _ := openTestStore(t)
+	if st.readDB == nil || st.readDB == st.db {
+		t.Fatalf("disk store should maintain dedicated readDB")
+	}
+	var queryOnly int
+	if err := st.readDB.QueryRow(`PRAGMA query_only`).Scan(&queryOnly); err != nil || queryOnly != 1 {
+		t.Fatalf("readDB query_only = %d err=%v", queryOnly, err)
+	}
+	if _, err := st.readDB.Exec(`INSERT INTO projects(id,name,created_at,updated_at,last_activity_at) VALUES('ro','ro',1,1,1)`); err == nil {
+		t.Fatal("readDB accepted write statement")
+	}
+
+	if err := st.CreateProject(ctx, &store.Project{ID: "proj_rw", Name: "并发项目"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.CreateSession(ctx, &store.Session{ID: "sess_rw", Title: "并发会话", ProjectID: "proj_rw", Provider: "mock", Model: "mock"}); err != nil {
+		t.Fatal(err)
+	}
+	beginTestTurn(t, st, "sess_rw", "turn_rw", "msg_rw", "cm_rw")
+	if _, err := st.FinishTurn(ctx, store.FinishTurnInput{
+		TurnID:         "turn_rw",
+		Status:         store.TurnCompleted,
+		AssistantParts: store.TextPart("ok"),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := seedStudioMount(st, "sess_rw", "mount_rw", "Widget"); err != nil {
+		t.Fatal(err)
+	}
+
+	var wg sync.WaitGroup
+	errs := make(chan error, 8)
+	for range 8 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			sess, err := st.GetSession(ctx, "sess_rw")
+			if err != nil || sess.Title != "并发会话" {
+				errs <- fmt.Errorf("GetSession = %+v err=%v", sess, err)
+				return
+			}
+			page, err := st.ListTurnsPage(ctx, "sess_rw", "", 10)
+			if err != nil || len(page.Turns) != 1 || page.Turns[0].ID != "turn_rw" {
+				errs <- fmt.Errorf("ListTurnsPage = %+v err=%v", page, err)
+				return
+			}
+			outline, err := st.ListTurnOutline(ctx, "sess_rw")
+			if err != nil || len(outline) != 1 || outline[0].Prompt != "hello" || outline[0].Answer != "ok" {
+				errs <- fmt.Errorf("ListTurnOutline = %+v err=%v", outline, err)
+				return
+			}
+			sources, err := st.ListLibrarySources(ctx, []string{"sess_rw"})
+			if err != nil || sources["sess_rw"].ProjectName != "并发项目" {
+				errs <- fmt.Errorf("ListLibrarySources = %+v err=%v", sources, err)
+				return
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Fatal(err)
+	}
+
+	mem, err := Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = mem.Close() }()
+	if mem.readDB != mem.db {
+		t.Fatal(":memory: store should share write connection for reads")
+	}
+	if err := mem.CreateProject(ctx, &store.Project{ID: "mem_p", Name: "Mem"}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := mem.GetProject(ctx, "mem_p")
+	if err != nil || got.Name != "Mem" {
+		t.Fatalf(":memory: GetProject = %+v err=%v", got, err)
+	}
 }

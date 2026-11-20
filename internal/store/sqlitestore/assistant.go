@@ -142,16 +142,16 @@ func readAssistant(ctx context.Context, tx *sql.Tx) (*store.AssistantSnapshot, e
 }
 
 func (s *Store) GetAssistant(ctx context.Context) (*store.AssistantSnapshot, error) {
-	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	var out *store.AssistantSnapshot
+	err := s.readTx(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		var readErr error
+		out, readErr = readAssistant(ctx, tx)
+		return readErr
+	})
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback()
-	out, err := readAssistant(ctx, tx)
-	if err != nil {
-		return nil, err
-	}
-	return out, tx.Commit()
+	return out, nil
 }
 
 // Opening supplies defaults only once. Concurrent opens and lost responses

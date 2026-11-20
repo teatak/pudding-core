@@ -155,10 +155,9 @@ const uncollectedChildTurnsSQL = `SELECT t.id FROM session_children c JOIN turns
  ORDER BY t.created_at,t.rowid`
 
 func (s *Store) HasUncollectedChildResults(ctx context.Context, parentID string) (bool, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	defer s.readLock()()
 	var id string
-	err := s.db.QueryRowContext(ctx, uncollectedChildTurnsSQL, parentID).Scan(&id)
+	err := s.readDB.QueryRowContext(ctx, uncollectedChildTurnsSQL, parentID).Scan(&id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}

@@ -86,6 +86,9 @@ CREATE TABLE IF NOT EXISTS turns (
     model_config      TEXT    NOT NULL DEFAULT '{}',
     error             TEXT    NOT NULL DEFAULT '',
     retry_of_turn_id  TEXT    NOT NULL DEFAULT '',
+    topic_title       TEXT    NOT NULL DEFAULT '',
+    prompt_preview    TEXT    NOT NULL DEFAULT '',
+    answer_preview    TEXT    NOT NULL DEFAULT '',
     created_at        INTEGER NOT NULL,
     updated_at        INTEGER NOT NULL,
     -- submit 幂等键:同 session 内 clientMessageID 唯一
@@ -98,6 +101,9 @@ CREATE UNIQUE INDEX IF NOT EXISTS turns_one_running
 
 CREATE UNIQUE INDEX IF NOT EXISTS turns_one_retry
     ON turns(session_id,retry_of_turn_id) WHERE retry_of_turn_id <> '';
+
+CREATE INDEX IF NOT EXISTS turns_session_created
+    ON turns(session_id, created_at);
 
 CREATE TABLE IF NOT EXISTS turn_file_changes (
     id            TEXT PRIMARY KEY,

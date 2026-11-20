@@ -75,9 +75,8 @@ func turnFileChangesForTurnTx(ctx context.Context, tx *sql.Tx, sessionID, turnID
 }
 
 func (s *Store) GetTurnFileChange(ctx context.Context, sessionID, turnID, changeID string) (*store.TurnFileChange, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	row := s.db.QueryRowContext(ctx, `SELECT `+turnFileChangeSummaryColumns+`,old_content,new_content,old_data,new_data FROM turn_file_changes WHERE session_id=? AND turn_id=? AND id=?`, sessionID, turnID, changeID)
+	defer s.readLock()()
+	row := s.readDB.QueryRowContext(ctx, `SELECT `+turnFileChangeSummaryColumns+`,old_content,new_content,old_data,new_data FROM turn_file_changes WHERE session_id=? AND turn_id=? AND id=?`, sessionID, turnID, changeID)
 	change, err := scanTurnFileChangeDetail(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, store.ErrNotFound
@@ -161,6 +160,73 @@ func turnFileChangeStateForTurnTx(ctx context.Context, tx *sql.Tx, sessionID, tu
 		return "", 0, err
 	}
 	return store.TurnFileChangeState(state), revision, nil
+}
+
+type turnFileChangeStateSnapshot struct {
+	state    store.TurnFileChangeState
+	revision int64
+}
+
+// turnFileChangesForTurnsTx 按 turn_id 批量读取文件变更摘要，避免分页逐条查询。
+func turnFileChangesForTurnsTx(ctx context.Context, tx *sql.Tx, sessionID string, turnIDs []string) (map[string][]*store.TurnFileChange, error) {
+	out := make(map[string][]*store.TurnFileChange, len(turnIDs))
+	if len(turnIDs) == 0 {
+		return out, nil
+	}
+	args := make([]any, 0, 1+len(turnIDs))
+	args = append(args, sessionID)
+	for _, id := range turnIDs {
+		args = append(args, id)
+	}
+	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(turnIDs)), ",")
+	rows, err := tx.QueryContext(ctx, `SELECT `+turnFileChangeSummaryColumns+` FROM turn_file_changes WHERE session_id=? AND turn_id IN (`+placeholders+`) ORDER BY root_path ASC, path ASC, id ASC`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		change, err := scanTurnFileChangeSummary(rows)
+		if err != nil {
+			return nil, err
+		}
+		out[change.TurnID] = append(out[change.TurnID], change)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	for turnID, changes := range out {
+		store.MarkUnsafeTurnFileChangeLayouts(changes)
+		out[turnID] = changes
+	}
+	return out, nil
+}
+
+// turnFileChangeStatesForTurnsTx 按 turn_id 批量读取文件变更状态与版本号。
+func turnFileChangeStatesForTurnsTx(ctx context.Context, tx *sql.Tx, sessionID string, turnIDs []string) (map[string]turnFileChangeStateSnapshot, error) {
+	out := make(map[string]turnFileChangeStateSnapshot, len(turnIDs))
+	if len(turnIDs) == 0 {
+		return out, nil
+	}
+	args := make([]any, 0, 1+len(turnIDs))
+	args = append(args, sessionID)
+	for _, id := range turnIDs {
+		args = append(args, id)
+	}
+	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(turnIDs)), ",")
+	rows, err := tx.QueryContext(ctx, `SELECT turn_id,state,updated_at FROM turn_file_change_states WHERE session_id=? AND turn_id IN (`+placeholders+`)`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var turnID, state string
+		var revision int64
+		if err := rows.Scan(&turnID, &state, &revision); err != nil {
+			return nil, err
+		}
+		out[turnID] = turnFileChangeStateSnapshot{state: store.TurnFileChangeState(state), revision: revision}
+	}
+	return out, rows.Err()
 }
 
 func (s *Store) UpdateTurnFileChangeState(ctx context.Context, sessionID, turnID string, expected, next store.TurnFileChangeState, expectedRevision int64) (int64, error) {

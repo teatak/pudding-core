@@ -100,14 +100,12 @@ func (s *Store) CreateScheduledTask(ctx context.Context, t *store.ScheduledTask,
 	return out, err
 }
 func (s *Store) GetScheduledTask(ctx context.Context, id string) (*store.ScheduledTask, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return scanScheduledTask(s.db.QueryRowContext(ctx, `SELECT `+scheduledTaskColumns+` FROM scheduled_tasks WHERE id=?`, id))
+	defer s.readLock()()
+	return scanScheduledTask(s.readDB.QueryRowContext(ctx, `SELECT `+scheduledTaskColumns+` FROM scheduled_tasks WHERE id=?`, id))
 }
 func (s *Store) ListScheduledTasks(ctx context.Context, sessionID string, includeDeleted bool) ([]*store.ScheduledTask, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	rows, err := s.db.QueryContext(ctx, `SELECT `+scheduledTaskColumns+` FROM scheduled_tasks WHERE (?='' OR session_id=?) AND (? OR deleted=0) ORDER BY created_at DESC,id`, sessionID, sessionID, includeDeleted)
+	defer s.readLock()()
+	rows, err := s.readDB.QueryContext(ctx, `SELECT `+scheduledTaskColumns+` FROM scheduled_tasks WHERE (?='' OR session_id=?) AND (? OR deleted=0) ORDER BY created_at DESC,id`, sessionID, sessionID, includeDeleted)
 	if err != nil {
 		return nil, err
 	}
@@ -208,9 +206,8 @@ func (s *Store) AcceptScheduledTask(ctx context.Context, id string, in store.Sch
 	return out, err
 }
 func (s *Store) ListScheduledTaskRuns(ctx context.Context, taskID string, limit, offset int) ([]*store.ScheduledTaskRun, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	rows, err := s.db.QueryContext(ctx, `SELECT `+scheduledRunColumns+` FROM scheduled_task_runs WHERE (?='' OR task_id=?) ORDER BY accepted_at DESC,rowid DESC LIMIT ? OFFSET ?`, taskID, taskID, limit, offset)
+	defer s.readLock()()
+	rows, err := s.readDB.QueryContext(ctx, `SELECT `+scheduledRunColumns+` FROM scheduled_task_runs WHERE (?='' OR task_id=?) ORDER BY accepted_at DESC,rowid DESC LIMIT ? OFFSET ?`, taskID, taskID, limit, offset)
 	if err != nil {
 		return nil, err
 	}
@@ -226,9 +223,8 @@ func (s *Store) ListScheduledTaskRuns(ctx context.Context, taskID string, limit,
 	return out, rows.Err()
 }
 func (s *Store) PendingScheduledTaskRuns(ctx context.Context) ([]*store.ScheduledTaskRun, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	rows, err := s.db.QueryContext(ctx, `SELECT `+scheduledRunColumns+` FROM scheduled_task_runs WHERE handoff='pending' ORDER BY accepted_at,rowid`)
+	defer s.readLock()()
+	rows, err := s.readDB.QueryContext(ctx, `SELECT `+scheduledRunColumns+` FROM scheduled_task_runs WHERE handoff='pending' ORDER BY accepted_at,rowid`)
 	if err != nil {
 		return nil, err
 	}
@@ -253,18 +249,16 @@ func (s *Store) SetScheduledTaskHandoff(ctx context.Context, id, state, reason s
 	})
 }
 func (s *Store) FindInputTurn(ctx context.Context, sessionID, clientID string) (*store.Turn, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	t, err := scanTurn(s.db.QueryRowContext(ctx, `SELECT `+scheduledTurnColumns+` FROM turns WHERE session_id=? AND id IN (SELECT turn_id FROM messages WHERE session_id=? AND client_message_id=? AND role='user')`, sessionID, sessionID, clientID))
+	defer s.readLock()()
+	t, err := scanTurn(s.readDB.QueryRowContext(ctx, `SELECT `+scheduledTurnColumns+` FROM turns WHERE session_id=? AND id IN (SELECT turn_id FROM messages WHERE session_id=? AND client_message_id=? AND role='user')`, sessionID, sessionID, clientID))
 	if errors.Is(err, sql.ErrNoRows) {
 		err = store.ErrNotFound
 	}
 	return t, err
 }
 func (s *Store) FindRetryTurn(ctx context.Context, sessionID, turnID string) (*store.Turn, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	t, err := scanTurn(s.db.QueryRowContext(ctx, `SELECT `+scheduledTurnColumns+` FROM turns WHERE session_id=? AND retry_of_turn_id=?`, sessionID, turnID))
+	defer s.readLock()()
+	t, err := scanTurn(s.readDB.QueryRowContext(ctx, `SELECT `+scheduledTurnColumns+` FROM turns WHERE session_id=? AND retry_of_turn_id=?`, sessionID, turnID))
 	if errors.Is(err, sql.ErrNoRows) {
 		err = store.ErrNotFound
 	}
@@ -272,9 +266,8 @@ func (s *Store) FindRetryTurn(ctx context.Context, sessionID, turnID string) (*s
 }
 
 func (s *Store) FindQueuedInput(ctx context.Context, sessionID, clientID string) (*store.QueuedInput, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	q, err := scanQueuedInput(s.db.QueryRowContext(ctx, `SELECT session_id,client_message_id,text,parts,status,provider,model,mode,model_config,turn_id,created_at,updated_at FROM queued_inputs WHERE session_id=? AND client_message_id=?`, sessionID, clientID))
+	defer s.readLock()()
+	q, err := scanQueuedInput(s.readDB.QueryRowContext(ctx, `SELECT session_id,client_message_id,text,parts,status,provider,model,mode,model_config,turn_id,created_at,updated_at FROM queued_inputs WHERE session_id=? AND client_message_id=?`, sessionID, clientID))
 	if errors.Is(err, sql.ErrNoRows) {
 		err = store.ErrNotFound
 	}
@@ -282,28 +275,28 @@ func (s *Store) FindQueuedInput(ctx context.Context, sessionID, clientID string)
 }
 
 func (s *Store) GetScheduledTaskRun(ctx context.Context, sessionID, id string) (*store.ScheduledTaskRun, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return scanScheduledRun(s.db.QueryRowContext(ctx, `SELECT `+scheduledRunColumns+` FROM scheduled_task_runs WHERE session_id=? AND id=?`, sessionID, id))
+	defer s.readLock()()
+	return scanScheduledRun(s.readDB.QueryRowContext(ctx, `SELECT `+scheduledRunColumns+` FROM scheduled_task_runs WHERE session_id=? AND id=?`, sessionID, id))
 }
 func (s *Store) GetScheduledTaskTurn(ctx context.Context, sessionID, id string) (*store.ConversationTurn, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	tx, err := s.db.BeginTx(ctx, nil)
+	var out *store.ConversationTurn
+	err := s.readTx(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		t, err := scanTurn(tx.QueryRowContext(ctx, `SELECT id,session_id,client_message_id,status,provider,model,mode,model_config,error,created_at,updated_at,retry_of_turn_id FROM turns WHERE session_id=? AND id=?`, sessionID, id))
+		if errors.Is(err, sql.ErrNoRows) {
+			return store.ErrNotFound
+		}
+		if err != nil {
+			return err
+		}
+		messages, err := messagesForTurnTx(ctx, tx, sessionID, id)
+		if err != nil {
+			return err
+		}
+		out = &store.ConversationTurn{ID: t.ID, SessionID: t.SessionID, Status: t.Status, Error: t.Error, CreatedAt: t.CreatedAt, UpdatedAt: t.UpdatedAt, Messages: messages}
+		return nil
+	})
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback()
-	t, err := scanTurn(tx.QueryRowContext(ctx, `SELECT id,session_id,client_message_id,status,provider,model,mode,model_config,error,created_at,updated_at,retry_of_turn_id FROM turns WHERE session_id=? AND id=?`, sessionID, id))
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, store.ErrNotFound
-	}
-	if err != nil {
-		return nil, err
-	}
-	messages, err := messagesForTurnTx(ctx, tx, sessionID, id)
-	if err != nil {
-		return nil, err
-	}
-	return &store.ConversationTurn{ID: t.ID, SessionID: t.SessionID, Status: t.Status, Error: t.Error, CreatedAt: t.CreatedAt, UpdatedAt: t.UpdatedAt, Messages: messages}, nil
+	return out, nil
 }

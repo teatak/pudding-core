@@ -15,10 +15,9 @@ const sessionDirectoriesSchema = `CREATE TABLE IF NOT EXISTS session_directory_g
 );`
 
 func (s *Store) GetSessionDirectories(ctx context.Context, id string) ([]string, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	defer s.readLock()()
 	var raw string
-	err := s.db.QueryRowContext(ctx, `SELECT coalesce(g.root_dirs,'[]') FROM sessions s LEFT JOIN session_directory_grants g ON g.session_id=s.id WHERE s.id=?`, id).Scan(&raw)
+	err := s.readDB.QueryRowContext(ctx, `SELECT coalesce(g.root_dirs,'[]') FROM sessions s LEFT JOIN session_directory_grants g ON g.session_id=s.id WHERE s.id=?`, id).Scan(&raw)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, store.ErrNotFound
 	}

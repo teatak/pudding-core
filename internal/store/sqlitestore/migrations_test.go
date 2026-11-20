@@ -20,6 +20,8 @@ func TestSchemaReleaseContract(t *testing.T) {
 	// layouts 33–46 remain recognized sources, with v47 the only destination.
 	releasedFingerprints := map[int]string{
 		61: "2f00655dd94ca5c1ad84a0545295750c5f71f0052e8323f83ef4d2ee67b367fd",
+		62: "e4c48b36c823a1b719adb65f6315675c0231aeb5db0ca32c5574ea6488237481",
+		63: "b5a09a5cd98c63b74e6d431acc786bbc137dff99de1485f029d379e2a24b1cc7",
 		60: "cfa764cd19f0b2d115cb5db7cfdd71b2f53f6d28fe410c36f5a0f6ce431127aa",
 		59: "dea06d6c25d997893bd609f95872c481a49aa66592b093ba035f944b612a3b5c",
 		58: "6499bdbe39b71ce4e59d25286a9f94dfc9f8428df966e54d9548fdcbed58c737",

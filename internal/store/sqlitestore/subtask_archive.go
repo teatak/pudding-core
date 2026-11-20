@@ -11,9 +11,8 @@ import (
 )
 
 func (s *Store) ListSubtaskArchives(ctx context.Context, parentID string) (map[string]time.Time, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	rows, err := s.db.QueryContext(ctx, `SELECT a.child_session_id,a.archived_at FROM subtask_archives a
+	defer s.readLock()()
+	rows, err := s.readDB.QueryContext(ctx, `SELECT a.child_session_id,a.archived_at FROM subtask_archives a
 		JOIN session_children c ON c.child_session_id=a.child_session_id WHERE c.parent_session_id=?`, parentID)
 	if err != nil {
 		return nil, err
