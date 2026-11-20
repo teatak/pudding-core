@@ -52,8 +52,10 @@ type patchFileArg struct {
 type patchHunkArg struct {
 	StartLine  *int      `json:"start_line,omitempty"`
 	Relocate   *bool     `json:"relocate,omitempty"`
-	OldLines   *[]string `json:"old_lines"`
-	NewLines   *[]string `json:"new_lines"`
+	OldLines   *[]string `json:"old_lines,omitempty"`
+	NewLines   *[]string `json:"new_lines,omitempty"`
+	OldText    *string   `json:"old_text,omitempty"`
+	NewText    *string   `json:"new_text,omitempty"`
 	oldEndings []string  // Non-nil only for unified diff; JSON hunks preserve existing endings.
 	newEndings []string
 }
@@ -159,6 +161,42 @@ func newPatchLimitError(reason, detail, metric, unit string, actual, limit int64
 	return &patchLimitError{reason: reason, detail: detail, metric: metric, unit: unit, actual: actual, limit: limit}
 }
 
+func splitPatchHunkText(text string) []string {
+	if text == "" {
+		return []string{}
+	}
+	normalized := strings.ReplaceAll(text, "\r\n", "\n")
+	normalized = strings.TrimSuffix(normalized, "\n")
+	return strings.Split(normalized, "\n")
+}
+
+func normalizeFilePatchHunks(args *filePatchArgs) *toolArgumentError {
+	for fileIndex := range args.Files {
+		file := &args.Files[fileIndex]
+		for hunkIndex := range file.Hunks {
+			hunk := &file.Hunks[hunkIndex]
+			hunkField := "files[" + strconv.Itoa(fileIndex) + "].hunks[" + strconv.Itoa(hunkIndex) + "]"
+			if hunk.OldText != nil && hunk.OldLines != nil {
+				return &toolArgumentError{kind: "conflicting_fields", field: hunkField + ".old_text", detail: "old_text and old_lines are mutually exclusive", hint: "Provide either old_text or old_lines, not both."}
+			}
+			if hunk.NewText != nil && hunk.NewLines != nil {
+				return &toolArgumentError{kind: "conflicting_fields", field: hunkField + ".new_text", detail: "new_text and new_lines are mutually exclusive", hint: "Provide either new_text or new_lines, not both."}
+			}
+			if hunk.OldText != nil {
+				lines := splitPatchHunkText(*hunk.OldText)
+				hunk.OldLines = &lines
+				hunk.OldText = nil
+			}
+			if hunk.NewText != nil {
+				lines := splitPatchHunkText(*hunk.NewText)
+				hunk.NewLines = &lines
+				hunk.NewText = nil
+			}
+		}
+	}
+	return nil
+}
+
 func decodeFilePatchArgs(raw json.RawMessage) (filePatchArgs, *toolArgumentError) {
 	var args filePatchArgs
 	if err := decodeToolArgumentObject(raw, &args, toolArgumentField{"scope", "string"}); err != nil {
@@ -174,6 +212,8 @@ func decodeFilePatchArgs(raw json.RawMessage) (filePatchArgs, *toolArgumentError
 		err = &toolArgumentError{kind: "invalid_value", field: "relocate", detail: "top-level relocate applies only to diff input", hint: "For files input, set relocate on individual hunks."}
 	case args.Files == nil:
 		err = &toolArgumentError{kind: "missing_field", field: "files", expected: "array", detail: "files or diff is required", hint: "Provide a files array or a unified diff string."}
+	default:
+		err = normalizeFilePatchHunks(&args)
 	}
 	if err != nil {
 		err.receivedBytes = len(raw)
@@ -227,16 +267,16 @@ func validateFilePatchArgs(args filePatchArgs) *toolArgumentError {
 					return &toolArgumentError{kind: "hunk_line_invalid", detail: "hunk start_line must be at least 1", hint: "Use a one-based line number from the original file.", field: hunkField + ".start_line", expected: "integer >= 1"}
 				}
 				if hunk.NewLines == nil {
-					return &toolArgumentError{kind: "hunk_new_lines_required", detail: "hunk new_lines is required", hint: "Provide replacement lines, or an empty array to delete old_lines.", field: hunkField + ".new_lines", expected: "array"}
+					return &toolArgumentError{kind: "hunk_new_lines_required", detail: "hunk new_lines or new_text is required", hint: "Provide replacement new_text or new_lines, or empty text/array to delete old content.", field: hunkField + ".new_lines", expected: "array"}
 				}
 				if hunk.OldLines == nil {
-					return &toolArgumentError{kind: "hunk_old_lines_required", detail: "hunk old_lines is required", hint: "Provide exact original lines, or an empty array to insert new_lines.", field: hunkField + ".old_lines", expected: "array"}
+					return &toolArgumentError{kind: "hunk_old_lines_required", detail: "hunk old_lines or old_text is required", hint: "Provide exact original old_text or old_lines, or empty text/array to insert new content.", field: hunkField + ".old_lines", expected: "array"}
 				}
 				if hunk.StartLine == nil && (len(*hunk.OldLines) == 0 || !hunk.allowsRelocation()) {
-					return &toolArgumentError{kind: "hunk_line_required", detail: "start_line is required for an insertion without source context or when relocate=false", hint: "Provide a one-based start_line, or supply non-empty old_lines with relocation enabled.", field: hunkField + ".start_line", expected: "integer >= 1"}
+					return &toolArgumentError{kind: "hunk_line_required", detail: "start_line is required for an insertion without source context or when relocate=false", hint: "Provide a one-based start_line, or supply non-empty old_text/old_lines with relocation enabled.", field: hunkField + ".start_line", expected: "integer >= 1"}
 				}
 				if len(*hunk.OldLines) == 0 && len(*hunk.NewLines) == 0 {
-					return &toolArgumentError{kind: "empty_hunk", detail: "hunk old_lines and new_lines cannot both be empty", hint: "Provide old lines to remove or new lines to insert.", field: hunkField, expected: "a non-empty old_lines or new_lines array"}
+					return &toolArgumentError{kind: "empty_hunk", detail: "hunk old_text/old_lines and new_text/new_lines cannot both be empty", hint: "Provide old content to remove or new content to insert.", field: hunkField, expected: "a non-empty old_lines or new_lines array"}
 				}
 				for _, line := range append(append([]string(nil), (*hunk.OldLines)...), (*hunk.NewLines)...) {
 					if strings.Contains(line, "\n") || (hunk.newEndings == nil && strings.Contains(line, "\r")) {

@@ -15,10 +15,30 @@ import (
 	"github.com/teatak/pudding-core/internal/plugin"
 	"github.com/teatak/pudding-core/internal/provider"
 	"github.com/teatak/pudding-core/internal/store"
+	"github.com/teatak/pudding-core/internal/tool"
 )
 
 const debugMCPProtocolVersion = "2025-06-18"
 const debugMCPSessionTool = "pudding_mcp_session"
+const debugMCPToolSearchTool = "pudding_tool_search"
+const debugMCPToolCallTool = "pudding_tool_call"
+
+var debugMCPCompactCoreTools = map[string]bool{
+	tool.FileList:        true,
+	tool.FileRead:        true,
+	tool.FileSlice:       true,
+	tool.FileSearch:      true,
+	tool.FilePatch:       true,
+	tool.FileWrite:       true,
+	tool.GitStatus:       true,
+	tool.GitDiff:         true,
+	tool.GitLog:          true,
+	tool.CodeDiagnostics: true,
+	tool.CommandRun:      true,
+	tool.TimeGetCurrent:  true,
+	tool.PluginLoad:      true,
+	tool.PluginUnload:    true,
+}
 
 // One local developer binding per daemon. The transport is stateless; switching
 // this binding also affects other clients attached to this debug endpoint.
@@ -64,6 +84,14 @@ func (s *Server) serveDebugMCP(w http.ResponseWriter, r *http.Request) {
 	}
 	if version := r.Header.Get("MCP-Protocol-Version"); version != "" && version != debugMCPProtocolVersion {
 		http.Error(w, "unsupported MCP protocol version", http.StatusBadRequest)
+		return
+	}
+	toolsMode := strings.TrimSpace(r.URL.Query().Get("tools"))
+	if toolsMode == "" {
+		toolsMode = "compact"
+	}
+	if toolsMode != "compact" && toolsMode != "all" {
+		http.Error(w, "tools query parameter must be compact or all", http.StatusBadRequest)
 		return
 	}
 	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<20))
@@ -114,7 +142,7 @@ func (s *Server) serveDebugMCP(w http.ResponseWriter, r *http.Request) {
 			"protocolVersion": debugMCPProtocolVersion,
 			"serverInfo":      map[string]string{"name": "pudding-core-debug", "version": "1.0"},
 			"capabilities":    map[string]any{"tools": map[string]bool{"listChanged": false}},
-			"instructions":    "Local development access to Pudding tools. The daemon shares one session binding across these clients. Use pudding_mcp_session to inspect it or bind debug, personal, or an existing session ID. Tools follow that session's mode, approvals and plugin loading. Refresh tools/list after changing the binding or plugins; automatic list-change notifications are unavailable.",
+			"instructions":    "Local development access to Pudding tools. The daemon shares one session binding across these clients. Use pudding_mcp_session to inspect it or bind debug, personal, or an existing session ID. By default tools/list returns core tools plus pudding_tool_search and pudding_tool_call so schemas stay compact; use pudding_tool_search to discover additional tools (browser, computer, widget, subsession, etc.) and inspect their full inputSchema, then call them via pudding_tool_call (or connect with ?tools=all for the full list).",
 		}
 	case "ping":
 		result = map[string]any{}
@@ -126,7 +154,7 @@ func (s *Server) serveDebugMCP(w http.ResponseWriter, r *http.Request) {
 			debugMCPError(w, http.StatusOK, request.ID, -32602, "tools/list returns the complete list and does not accept a cursor")
 			return
 		}
-		result, err = s.debugMCPList(ctx)
+		result, err = s.debugMCPList(ctx, toolsMode == "all")
 	case "tools/call":
 		var params struct {
 			Name      string          `json:"name"`
@@ -230,7 +258,44 @@ func (s *Server) debugMCPSession(ctx context.Context, prepare bool) (*store.Sess
 	return session, nil
 }
 
-func (s *Server) debugMCPList(ctx context.Context) (any, error) {
+func isDebugMCPCompactDirectTool(name string) bool {
+	return debugMCPCompactCoreTools[name] || tool.IsAssistantTool(name)
+}
+
+func debugMCPToolGroup(name string) string {
+	switch {
+	case strings.HasPrefix(name, "builtin_file_"):
+		return "file"
+	case strings.HasPrefix(name, "builtin_git_"):
+		return "git"
+	case strings.HasPrefix(name, "builtin_code_"):
+		return "code"
+	case strings.HasPrefix(name, "builtin_command_"):
+		return "command"
+	case strings.HasPrefix(name, "builtin_browser_"):
+		return "browser"
+	case strings.HasPrefix(name, "builtin_computer_") || strings.HasPrefix(name, "builtin_desktop_"):
+		return "computer"
+	case strings.HasPrefix(name, "widget_"):
+		return "widget"
+	case strings.HasPrefix(name, "builtin_subsession_"):
+		return "subsession"
+	case strings.HasPrefix(name, "builtin_plugin_"):
+		return "plugin"
+	case strings.HasPrefix(name, "builtin_web_") || strings.HasPrefix(name, "builtin_rest_") || strings.HasPrefix(name, "builtin_graphql_"):
+		return "web"
+	case strings.HasPrefix(name, "builtin_page_") || strings.HasPrefix(name, "builtin_sheet_"):
+		return "document"
+	case strings.HasPrefix(name, "builtin_history_"):
+		return "history"
+	case tool.IsAssistantTool(name):
+		return "assistant"
+	default:
+		return "other"
+	}
+}
+
+func (s *Server) debugMCPList(ctx context.Context, includeAll bool) (any, error) {
 	session, err := s.debugMCPSession(ctx, true)
 	if err != nil {
 		return nil, err
@@ -239,22 +304,37 @@ func (s *Server) debugMCPList(ctx context.Context) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	definitions = append(definitions, debugMCPSessionDefinition())
-	tools := make([]debugMCPTool, 0, len(definitions))
+	tools := make([]debugMCPTool, 0, len(definitions)+3)
 	for _, definition := range definitions {
+		if !includeAll && !isDebugMCPCompactDirectTool(definition.Name) {
+			continue
+		}
 		tools = append(tools, debugMCPTool{Name: definition.Name, Description: definition.Description, InputSchema: definition.InputSchema})
+	}
+	for _, meta := range []provider.ToolDef{debugMCPSessionDefinition(), debugMCPToolSearchDefinition(), debugMCPToolCallDefinition()} {
+		tools = append(tools, debugMCPTool{Name: meta.Name, Description: meta.Description, InputSchema: meta.InputSchema})
 	}
 	return map[string]any{"tools": tools}, nil
 }
 
 func (s *Server) debugMCPCall(ctx context.Context, name string, args json.RawMessage) debugMCPResult {
-	if name == debugMCPSessionTool {
+	switch name {
+	case debugMCPSessionTool:
 		value, err := s.setDebugMCPSession(ctx, args)
 		if err != nil {
 			return debugMCPFailure(err)
 		}
 		data, _ := json.Marshal(value)
 		return debugMCPText(string(data))
+	case debugMCPToolSearchTool:
+		value, err := s.debugMCPToolSearch(ctx, args)
+		if err != nil {
+			return debugMCPFailure(err)
+		}
+		data, _ := json.Marshal(value)
+		return debugMCPText(string(data))
+	case debugMCPToolCallTool:
+		return s.debugMCPToolCallProxy(ctx, args)
 	}
 	session, err := s.debugMCPSession(ctx, true)
 	if err != nil {
@@ -269,6 +349,133 @@ func (s *Server) debugMCPCall(ctx context.Context, name string, args json.RawMes
 		return debugMCPFailure(err)
 	}
 	return out
+}
+
+func debugMCPToolSearchDefinition() provider.ToolDef {
+	return provider.ToolDef{
+		Name:        debugMCPToolSearchTool,
+		Description: "Discover additional Pudding tools available in the bound session and inspect their full inputSchema. Omit all filters to list available tool names grouped by category; pass query, group, or names to inspect full descriptions and JSON schemas before invoking via pudding_tool_call.",
+		InputSchema: json.RawMessage(`{"type":"object","properties":{"query":{"type":"string","description":"Case-insensitive keyword matched against tool name, group, and description."},"group":{"type":"string","description":"Filter by tool group (file, git, code, command, browser, computer, widget, subsession, plugin, web, document, history, assistant, other)."},"names":{"type":"array","items":{"type":"string","minLength":1},"description":"Exact tool names to inspect."},"limit":{"type":"integer","minimum":1,"maximum":50,"description":"Maximum number of tool definitions to return (default 20)."}},"additionalProperties":false}`),
+	}
+}
+
+func debugMCPToolCallDefinition() provider.ToolDef {
+	return provider.ToolDef{
+		Name:        debugMCPToolCallTool,
+		Description: "Invoke any tool available in the bound Pudding session by exact name and JSON object arguments. Use pudding_tool_search first to inspect the tool's inputSchema when it is not listed directly.",
+		InputSchema: json.RawMessage(`{"type":"object","properties":{"name":{"type":"string","minLength":1,"description":"Exact tool name to invoke."},"arguments":{"type":"object","description":"JSON object arguments matching the target tool's inputSchema."}},"required":["name"],"additionalProperties":false}`),
+	}
+}
+
+func (s *Server) debugMCPToolSearch(ctx context.Context, args json.RawMessage) (any, error) {
+	var input struct {
+		Query string   `json:"query"`
+		Group string   `json:"group"`
+		Names []string `json:"names"`
+		Limit *int     `json:"limit"`
+	}
+	decoder := json.NewDecoder(bytes.NewReader(args))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&input); err != nil {
+		return nil, fmt.Errorf("invalid tool search arguments: %w", err)
+	}
+	limit := 20
+	if input.Limit != nil {
+		if *input.Limit < 1 || *input.Limit > 50 {
+			return nil, errors.New("limit must be between 1 and 50")
+		}
+		limit = *input.Limit
+	}
+	session, err := s.debugMCPSession(ctx, true)
+	if err != nil {
+		return nil, err
+	}
+	definitions, err := s.engine.ToolDefinitions(ctx, session.ID, session.ActiveMode)
+	if err != nil {
+		return nil, err
+	}
+	query := strings.ToLower(strings.TrimSpace(input.Query))
+	group := strings.ToLower(strings.TrimSpace(input.Group))
+	wantedNames := make(map[string]bool, len(input.Names))
+	for _, name := range input.Names {
+		if trimmed := strings.TrimSpace(name); trimmed != "" {
+			wantedNames[trimmed] = true
+		}
+	}
+	if query == "" && group == "" && len(wantedNames) == 0 {
+		groups := make(map[string][]string)
+		for _, def := range definitions {
+			g := debugMCPToolGroup(def.Name)
+			groups[g] = append(groups[g], def.Name)
+		}
+		return map[string]any{
+			"totalCount": len(definitions),
+			"groups":     groups,
+		}, nil
+	}
+	type searchToolItem struct {
+		Name        string          `json:"name"`
+		Group       string          `json:"group"`
+		Description string          `json:"description,omitempty"`
+		InputSchema json.RawMessage `json:"inputSchema"`
+	}
+	matched := make([]searchToolItem, 0, min(limit, len(definitions)))
+	totalMatches := 0
+	for _, def := range definitions {
+		defGroup := debugMCPToolGroup(def.Name)
+		if len(wantedNames) > 0 && !wantedNames[def.Name] {
+			continue
+		}
+		if group != "" && defGroup != group {
+			continue
+		}
+		if query != "" &&
+			!strings.Contains(strings.ToLower(def.Name), query) &&
+			!strings.Contains(strings.ToLower(def.Description), query) &&
+			!strings.Contains(defGroup, query) {
+			continue
+		}
+		totalMatches++
+		if len(matched) < limit {
+			matched = append(matched, searchToolItem{
+				Name:        def.Name,
+				Group:       defGroup,
+				Description: def.Description,
+				InputSchema: def.InputSchema,
+			})
+		}
+	}
+	return map[string]any{
+		"totalMatches": totalMatches,
+		"truncated":    totalMatches > len(matched),
+		"tools":        matched,
+	}, nil
+}
+
+func (s *Server) debugMCPToolCallProxy(ctx context.Context, args json.RawMessage) debugMCPResult {
+	var input struct {
+		Name      string          `json:"name"`
+		Arguments json.RawMessage `json:"arguments"`
+	}
+	decoder := json.NewDecoder(bytes.NewReader(args))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&input); err != nil {
+		return debugMCPFailure(fmt.Errorf("invalid tool call arguments: %w", err))
+	}
+	name := strings.TrimSpace(input.Name)
+	if name == "" {
+		return debugMCPFailure(errors.New("name is required"))
+	}
+	if name == debugMCPToolCallTool {
+		return debugMCPFailure(errors.New("cannot recursively call pudding_tool_call"))
+	}
+	callArgs := input.Arguments
+	if len(callArgs) == 0 {
+		callArgs = json.RawMessage(`{}`)
+	} else if !debugMCPObject(callArgs) {
+		return debugMCPFailure(errors.New("arguments must be a JSON object"))
+	}
+	return s.debugMCPCall(ctx, name, callArgs)
 }
 
 func debugMCPSessionDefinition() provider.ToolDef {

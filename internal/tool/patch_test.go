@@ -382,6 +382,45 @@ func TestFilePatchHunkDeletesLinesWithExplicitEmptyNewLines(t *testing.T) {
 	}
 }
 
+func TestFilePatchSupportsOldTextAndNewText(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "notes.txt")
+	writePatchTestFile(t, path, "alpha\r\nbeta\r\ngamma\r\ndelta\r\n")
+	runner := NewBuiltinRunner()
+
+	applied := patchTestCall(runner, "session_text", root, FilePatch, map[string]any{
+		"scope": "project",
+		"files": []map[string]any{{
+			"path":   "notes.txt",
+			"action": "edit",
+			"hunks": []map[string]any{
+				{"old_text": "beta\ngamma\n", "new_text": "BETA\nMID\nGAMMA\n"},
+				{"old_text": "delta", "new_text": ""},
+			},
+		}},
+	})
+	if !applied.Ok {
+		t.Fatalf("old_text/new_text patch failed: %s", applied.Content)
+	}
+	if got := readPatchTestFile(t, path); got != "alpha\r\nBETA\r\nMID\r\nGAMMA\r\n" {
+		t.Fatalf("old_text/new_text result = %q", got)
+	}
+
+	conflict := patchTestCall(runner, "session_text", root, FilePatch, map[string]any{
+		"scope": "project",
+		"files": []map[string]any{{
+			"path":   "notes.txt",
+			"action": "edit",
+			"hunks": []map[string]any{
+				{"old_text": "alpha", "old_lines": []string{"alpha"}, "new_text": "ALPHA"},
+			},
+		}},
+	})
+	if conflict.Ok || !strings.Contains(conflict.Content, `"errorKind":"conflicting_fields"`) {
+		t.Fatalf("conflicting old_text and old_lines should fail: %s", conflict.Content)
+	}
+}
+
 func TestFilePatchHunkInsertsAndAppendsLines(t *testing.T) {
 	tests := []struct {
 		name      string

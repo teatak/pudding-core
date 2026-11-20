@@ -96,11 +96,47 @@ func debugMCPRequestForTest(t *testing.T, srvURL, method string, params any, not
 
 func debugMCPListForTest(t *testing.T, url string) map[string]debugMCPTool {
 	t.Helper()
-	data, _ := debugMCPRequestForTest(t, url, "tools/list", map[string]any{}, false)
+	return debugMCPListQueryForTest(t, url, "")
+}
+
+func debugMCPListQueryForTest(t *testing.T, url, query string) map[string]debugMCPTool {
+	t.Helper()
+	endpoint := url + "/mcp"
+	if query != "" {
+		endpoint += "?" + query
+	}
+	payload, err := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": "test-request", "method": "tools/list", "params": map[string]any{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, err := http.NewRequest(http.MethodPost, endpoint, bytes.NewReader(payload))
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Header.Set("Authorization", "Bearer "+testToken)
+	r.Header.Set("Content-Type", "application/json")
+	r.Header.Set("Accept", "application/json, text/event-stream")
+	r.Header.Set("MCP-Protocol-Version", debugMCPProtocolVersion)
+	resp, err := http.DefaultClient.Do(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var body struct {
+		ID     string          `json:"id"`
+		Result json.RawMessage `json:"result"`
+		Error  json.RawMessage `json:"error"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusOK || len(body.Error) > 0 || body.ID != "test-request" {
+		t.Fatalf("tools/list: HTTP %d, response %+v", resp.StatusCode, body)
+	}
 	var result struct {
 		Tools []debugMCPTool `json:"tools"`
 	}
-	if err := json.Unmarshal(data, &result); err != nil {
+	if err := json.Unmarshal(body.Result, &result); err != nil {
 		t.Fatal(err)
 	}
 	tools := make(map[string]debugMCPTool, len(result.Tools))
@@ -163,10 +199,17 @@ func TestDebugMCPListsTools(t *testing.T) {
 	debugMCPRequestForTest(t, fixture.server.URL, "notifications/initialized", map[string]any{}, true)
 	debugMCPRequestForTest(t, fixture.server.URL, "ping", map[string]any{}, false)
 	listed := debugMCPListForTest(t, fixture.server.URL)
-	for _, name := range []string{tool.TimeGetCurrent, tool.FileList, tool.PluginLoad, debugMCPSessionTool} {
+	for _, name := range []string{tool.TimeGetCurrent, tool.FileList, tool.PluginLoad, debugMCPSessionTool, debugMCPToolSearchTool, debugMCPToolCallTool} {
 		if _, ok := listed[name]; !ok {
 			t.Fatalf("missing tool %s", name)
 		}
+	}
+	if _, ok := listed[tool.MediaRead]; ok {
+		t.Fatal("non-core tool should not appear in default compact tools/list")
+	}
+	allListed := debugMCPListQueryForTest(t, fixture.server.URL, "tools=all")
+	if _, ok := allListed[tool.MediaRead]; !ok {
+		t.Fatal("non-core tool missing from tools=all list")
 	}
 	first := debugMCPBindingForTest(t, fixture.server.URL, map[string]any{})
 	second := debugMCPBindingForTest(t, fixture.server.URL, map[string]any{})
@@ -216,7 +259,7 @@ func TestDebugMCPCallsBuiltinTools(t *testing.T) {
 
 func TestDebugMCPCallsDesktopTool(t *testing.T) {
 	fixture := newDebugMCPTestServer(t)
-	if _, ok := debugMCPListForTest(t, fixture.server.URL)["widget_inspect"]; ok {
+	if _, ok := debugMCPListQueryForTest(t, fixture.server.URL, "tools=all")["widget_inspect"]; ok {
 		t.Fatal("widget tool appeared before Desktop connected")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -245,14 +288,31 @@ func TestDebugMCPCallsDesktopTool(t *testing.T) {
 		case <-ticker.C:
 		}
 	}
-	if _, ok := debugMCPListForTest(t, fixture.server.URL)["widget_inspect"]; !ok {
+	if _, ok := debugMCPListQueryForTest(t, fixture.server.URL, "tools=all")["widget_inspect"]; !ok {
 		t.Fatal("Desktop tool missing after registration")
+	}
+	if _, ok := debugMCPListForTest(t, fixture.server.URL)["widget_inspect"]; ok {
+		t.Fatal("Desktop widget tool should be discovered via pudding_tool_search in compact mode")
+	}
+	searchRes := debugMCPCallForTest(t, fixture.server.URL, debugMCPToolSearchTool, map[string]any{"group": "widget"})
+	var searched struct {
+		TotalMatches int `json:"totalMatches"`
+		Tools        []struct {
+			Name        string          `json:"name"`
+			InputSchema json.RawMessage `json:"inputSchema"`
+		} `json:"tools"`
+	}
+	if err := json.Unmarshal([]byte(searchRes.Content[0]["text"].(string)), &searched); err != nil {
+		t.Fatal(err)
+	}
+	if searched.TotalMatches != 1 || len(searched.Tools) != 1 || searched.Tools[0].Name != "widget_inspect" || !debugMCPObject(searched.Tools[0].InputSchema) {
+		t.Fatalf("unexpected widget search result: %+v", searched)
 	}
 	binding := debugMCPBindingForTest(t, fixture.server.URL, map[string]any{})
 	if binding["runtimeID"] != "desktop-test" {
 		t.Fatalf("runtime was not selected: %v", binding)
 	}
-	result := debugMCPCallForTest(t, fixture.server.URL, "widget_inspect", map[string]string{"id": "fixture-widget"})
+	result := debugMCPCallForTest(t, fixture.server.URL, debugMCPToolCallTool, map[string]any{"name": "widget_inspect", "arguments": map[string]string{"id": "fixture-widget"}})
 	images := 0
 	for _, content := range result.Content {
 		if content["type"] == "image" {
@@ -275,11 +335,11 @@ func TestDebugMCPCallsDesktopTool(t *testing.T) {
 		t.Fatal("Desktop did not receive tools/call")
 	}
 	debugMCPCallForTest(t, fixture.server.URL, tool.PluginUnload, map[string]string{"plugin_id": "widget-authoring"})
-	if _, ok := debugMCPListForTest(t, fixture.server.URL)["widget_inspect"]; ok {
+	if _, ok := debugMCPListQueryForTest(t, fixture.server.URL, "tools=all")["widget_inspect"]; ok {
 		t.Fatal("tools/list reloaded an explicitly unloaded plugin")
 	}
 	debugMCPCallForTest(t, fixture.server.URL, tool.PluginLoad, map[string]string{"plugin_id": "widget-authoring"})
-	if _, ok := debugMCPListForTest(t, fixture.server.URL)["widget_inspect"]; !ok {
+	if _, ok := debugMCPListQueryForTest(t, fixture.server.URL, "tools=all")["widget_inspect"]; !ok {
 		t.Fatal("explicitly reloaded Desktop tool missing")
 	}
 }
