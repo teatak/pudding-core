@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/teatak/pudding-core/internal/attachment"
@@ -69,6 +70,33 @@ func (s *Server) debugMCPToolResult(sessionID string, result tool.Result) (debug
 	}
 	if out.Content == nil {
 		out.Content = []map[string]any{}
+	}
+	return out, nil
+}
+
+// The media tool has already checked the session, file type and upload size and
+// stored a session attachment. Send audio bytes on the external-agent transport.
+func (s *Server) externalMCPToolResult(sessionID string, result tool.Result) (debugMCPResult, error) {
+	out, err := s.debugMCPToolResult(sessionID, result)
+	if err != nil || !result.Ok || result.Name != tool.MediaRead {
+		return out, err
+	}
+	for _, item := range result.Attachments {
+		if !strings.HasPrefix(item.MIME, "audio/") {
+			continue
+		}
+		file, found, err := attachment.NewService(s.home).Path(sessionID, item.AttachmentKey)
+		if err != nil {
+			return out, err
+		}
+		if !found {
+			return out, fmt.Errorf("audio attachment %s is unavailable", item.Name)
+		}
+		data, err := os.ReadFile(file)
+		if err != nil {
+			return out, err
+		}
+		out.Content = append(out.Content, map[string]any{"type": "audio", "mimeType": item.MIME, "data": base64.StdEncoding.EncodeToString(data)})
 	}
 	return out, nil
 }

@@ -133,9 +133,10 @@ type Engine struct {
 }
 
 type activeTurn struct {
-	turnID string
-	cancel context.CancelFunc
-	done   chan struct{}
+	external *externalTurn
+	turnID   string
+	cancel   context.CancelFunc
+	done     chan struct{}
 
 	mu              sync.Mutex
 	acceptingSteers bool

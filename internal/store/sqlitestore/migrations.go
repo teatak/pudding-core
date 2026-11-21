@@ -19,7 +19,7 @@ import (
 const (
 	baselineSchemaVersion      = 1
 	currentSchemaLayoutVersion = 8
-	currentSchemaVersion       = 63
+	currentSchemaVersion       = 64
 )
 
 var (
@@ -35,6 +35,10 @@ type schemaMigration func(*sql.Tx) error
 // Unpublished Studio migrations 27–29 are consolidated into destination 30.
 // Unpublished Studio migrations 33–46 are consolidated into destination 47.
 var schemaMigrations = map[int]schemaMigration{
+	64: func(tx *sql.Tx) error {
+		_, err := tx.Exec(store.ExternalAgentSchema)
+		return err
+	},
 	61: migrateSessionDirectoriesV61,
 	62: migrateTurnTopicV62,
 	63: migrateTurnOutlinePreviewV63,
@@ -641,6 +645,11 @@ func prepareSchemaWithHome(db *sql.DB, path, sourceHome string) error {
 					return err
 				}
 				version = currentSchemaVersion
+			} else if err := validateSchemaWithRetiredColumns(db, schemaV63Contract); err == nil {
+				if err := setSchemaVersion(db, 63); err != nil {
+					return err
+				}
+				version = 63
 			} else if err := validateSchema(db, schemaV24Contract); err == nil {
 				// Unversioned layouts still need the data-only v9 cleanup.
 				if err := setSchemaVersion(db, currentSchemaLayoutVersion); err != nil {
@@ -979,7 +988,7 @@ var schemaV24Contract = schemaContract{tables: map[string][]string{
 	"library_favorites":   {"id", "kind", "saved_item_id"},
 }}
 
-var currentSchemaContract = func() schemaContract {
+var schemaV63Contract = func() schemaContract {
 	out := extendSchemaContract(schemaV5Contract, map[string][]string{
 		"assistants":                 {"id", "name", "user_name", "appearance", "revision", "created_at", "updated_at"},
 		"assistant_memories":         {"id", "assistant_id", "content", "scope", "source", "created_at", "updated_at", "project_id", "revision", "source_session_id", "source_turn_id"},
@@ -1039,6 +1048,14 @@ var currentSchemaContract = func() schemaContract {
 	out.indexes = append(out.indexes, "scheduled_tasks_due", "scheduled_task_runs_task", "scheduled_task_runs_pending")
 	out.forbiddenTables = []string{"studio_table_ids", "project_app_bindings", "usage_calibrations", "canvas_closed_items", "canvas_items", "canvas_saved_items", "workbenches",
 		"canvas_resources", "canvas_revisions", "canvas_saves", "canvas_actions", "canvas_links", "canvas_mounts"}
+	return out
+}()
+
+var currentSchemaContract = func() schemaContract {
+	out := extendSchemaContract(schemaV63Contract, map[string][]string{
+		"external_agent_bindings": {"id", "session_id", "runtime_id", "agent_name", "invite_hash", "expires_at", "credential_hash"},
+	}, "external_agent_session")
+	out.forbiddenTables = schemaV63Contract.forbiddenTables
 	return out
 }()
 

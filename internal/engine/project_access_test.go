@@ -442,7 +442,7 @@ func TestTurnDirectoryWorkspaceExpiresWithoutPersisting(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	st := storetest.New(t)
-	if err := st.CreateSession(ctx, &store.Session{ID: "s", Provider: "mock", Model: "mock", ActiveMode: store.ModeCode}); err != nil {
+	if err := st.CreateSession(ctx, &store.Session{ID: "s", Provider: "mock", Model: "mock", ActiveMode: store.ModeCode, ModeLease: store.ModeLeaseSession}); err != nil {
 		t.Fatal(err)
 	}
 	root := t.TempDir()
@@ -498,6 +498,16 @@ func TestTurnDirectoryWorkspaceExpiresWithoutPersisting(t *testing.T) {
 		}
 	}
 	assertInstructions(true)
+	sess, err := st.GetSession(ctx, "s")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"", "other", "turn"} {
+		rules, err := eng.ExternalProjectRules(ctx, sess, id)
+		if err != nil || strings.Contains(rules, guidance) != (id == "turn") {
+			t.Fatalf("external agent instructions for turn %q: %q, %v", id, rules, err)
+		}
+	}
 	eng.clearRunning("s", "turn")
 	assertInstructions(false)
 	workspace, err = eng.SessionWorkspace(ctx, "s", "", sessionworkspace.ScratchExisting)

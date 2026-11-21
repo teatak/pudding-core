@@ -45,7 +45,7 @@ func migrateStudioV47(tx *sql.Tx) error {
 		}
 	}
 	// Validate while changes are still rollbackable, before recording v47.
-	contract := extendSchemaContract(currentSchemaContract, nil)
+	contract := extendSchemaContract(schemaV63Contract, nil)
 	delete(contract.tables, "assistants")
 	delete(contract.tables, "assistant_memories")
 	delete(contract.tables, "assistant_memory_terms")

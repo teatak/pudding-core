@@ -26,6 +26,8 @@ import (
 const debugMCPTestPNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jGZkAAAAASUVORK5CYII="
 
 type debugMCPTestServer struct {
+	engine  *engine.Engine
+	hub     *event.Hub
 	server  *httptest.Server
 	store   *storetest.Store
 	browser *tool.BrowserMCPRunner
@@ -48,7 +50,7 @@ func newDebugMCPTestServer(t *testing.T) debugMCPTestServer {
 	eng := engine.New(st, hub, registry.Static(mock.New()), st, engine.WithAttachmentHome(homeDir), engine.WithTools(runner), engine.WithPlugins(plugins))
 	srv := httptest.NewServer(New(eng, st, st, hub).WithHome(homeDir).WithPlugins(plugins).WithBrowserMCP(browser).Handler(testToken, nil))
 	t.Cleanup(srv.Close)
-	return debugMCPTestServer{server: srv, store: st, browser: browser, home: homeDir}
+	return debugMCPTestServer{engine: eng, hub: hub, server: srv, store: st, browser: browser, home: homeDir}
 }
 
 func debugMCPRequestForTest(t *testing.T, srvURL, method string, params any, notification bool) (json.RawMessage, http.Header) {
@@ -414,5 +416,121 @@ func TestDebugMCPSwitchesSession(t *testing.T) {
 	}
 	if _, ok := debugMCPListForTest(t, fixture.server.URL)[tool.FileList]; ok {
 		t.Fatal("Code tool remained visible after changing mode to Chat")
+	}
+}
+
+func TestExternalMCPPageEditUsesOneBoundTurn(t *testing.T) {
+	fixture := newDebugMCPTestServer(t)
+	ctx := context.Background()
+	if err := fixture.store.CreateSession(ctx, &store.Session{ID: "bound", Provider: "mock", Model: "mock-model", ActiveMode: store.ModeChat}); err != nil {
+		t.Fatal(err)
+	}
+	post := func(path, credential string, input any, expected int) map[string]any {
+		t.Helper()
+		body, err := json.Marshal(input)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req, err := http.NewRequest("POST", fixture.server.URL+path, bytes.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Authorization", "Bearer "+testToken)
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-Pudding-Binding", credential)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		var out map[string]any
+		if err = json.NewDecoder(resp.Body).Decode(&out); err != nil {
+			t.Fatal(err)
+		}
+		if resp.StatusCode != expected {
+			t.Fatalf("%s status %d: %v", path, resp.StatusCode, out["error"])
+		}
+		return out
+	}
+	bind := func() string {
+		invite := post("/sessions/bound/mcp-agents", "", nil, 201)["invite"]
+		in := map[string]any{"invite": invite, "name": "Example Agent"}
+		credential := post("/agent-mcp/connect", "", in, 200)["credential"].(string)
+		post("/agent-mcp/connect", "", in, 404)
+		return credential
+	}
+	credential, other := bind(), bind()
+	turn := post("/agent-mcp/begin", credential, map[string]string{"task": "Edit a page"}, 200)["turnID"].(string)
+	execute := func(name string, args map[string]any) map[string]any {
+		t.Helper()
+		out := post("/agent-mcp/call", credential, map[string]any{"turnID": turn, "tool": name, "arguments": args}, 200)
+		content := out["content"].([]any)[0].(map[string]any)["text"].(string)
+		if out["isError"] == true {
+			t.Fatalf("%s: %s", name, content)
+		}
+		var fields map[string]any
+		if err := json.Unmarshal([]byte(content), &fields); err != nil {
+			t.Fatal(err)
+		}
+		return fields
+	}
+	events, unsubscribe := fixture.hub.Subscribe("bound")
+	defer unsubscribe()
+	approvalCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	approved := make(chan error, 1)
+	go func() {
+		for {
+			select {
+			case <-approvalCtx.Done():
+				approved <- approvalCtx.Err()
+				return
+			case ev := <-events:
+				if ev.Kind == event.ApprovalRequested {
+					approved <- fixture.engine.ApproveApproval(approvalCtx, "bound", ev.ApprovalID, engine.ApprovalScopeTurn, nil)
+					return
+				}
+			}
+		}
+	}()
+	execute(tool.RequestCapability, map[string]any{"targetMode": "code", "reason": "Edit page for this request", "projectDirs": []string{t.TempDir()}})
+	if err := <-approved; err != nil {
+		t.Fatal(err)
+	}
+	for binding, mode := range map[string]string{credential: "code", other: "chat"} {
+		state := post("/agent-mcp/tools", binding, nil, 200)
+		if state["mode"] != mode {
+			t.Fatalf("binding mode %v, want %s", state["mode"], mode)
+		}
+	}
+	if guide := execute(tool.PluginLoad, map[string]any{"plugin_id": "page-authoring"}); guide["content"] == nil || guide["instructionStatus"] != "current" {
+		t.Fatal("missing current plugin body")
+	}
+	page := execute(tool.PageCreate, map[string]any{"name": "Test", "body": ""})
+	op := execute(tool.PageEdit, map[string]any{"item_id": page["itemID"], "action": "begin", "from": 0, "to": 0, "expected_hash": page["contentHash"]})
+	execute(tool.PageEdit, map[string]any{"item_id": page["itemID"], "action": "commit", "operation_id": op["operationID"], "lease_token": op["leaseToken"], "replacement": "saved"})
+	if body := execute(tool.PageRead, map[string]any{"item_id": page["itemID"]})["body"]; body != "saved" {
+		t.Fatalf("unexpected body %v", body)
+	}
+	post("/agent-mcp/end", other, map[string]string{"turnID": turn}, 409)
+	post("/agent-mcp/end", credential, map[string]string{"turnID": turn, "summary": "Saved"}, 200)
+	post("/agent-mcp/call", credential, map[string]string{"turnID": turn, "tool": tool.TimeGetCurrent}, 409)
+	history, err := fixture.store.GetConversationTurn(ctx, "bound", turn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var calls int
+	for _, m := range history.Messages {
+		for _, p := range m.Parts {
+			if p.Type == store.ContentPartToolUse {
+				calls++
+			}
+		}
+	}
+	if fresh := post("/agent-mcp/tools", credential, nil, 200); fresh["mode"] != "chat" {
+		t.Fatal("turn-only mode survived end")
+	}
+	if calls != 6 || history.Status != store.TurnCompleted {
+		t.Fatalf("stored calls %d, status %s", calls, history.Status)
 	}
 }

@@ -6,4 +6,9 @@ import _ "embed"
 // 同一份建表语句,避免实现里复制 SQL。
 //
 //go:embed schema.sql
-var SchemaSQL string
+var baseSchemaSQL string
+
+//go:embed external_agent_schema.sql
+var ExternalAgentSchema string
+
+var SchemaSQL = baseSchemaSQL + "\n" + ExternalAgentSchema

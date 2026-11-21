@@ -40,6 +40,8 @@ func main() {
 func run() error {
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
+		case "mcp":
+			return runMCP(os.Args[2:], os.Stdin, os.Stdout)
 		case "prompt":
 			return runPrompt(os.Args[2:])
 		case "tools":

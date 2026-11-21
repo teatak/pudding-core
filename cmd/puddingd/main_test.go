@@ -3,6 +3,10 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -85,5 +89,49 @@ func TestRunAgentEvalHelp(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "provider profile ID") || !strings.Contains(stderr.String(), "runs per case") {
 		t.Fatalf("unexpected agent eval help: %s", stderr.String())
+	}
+}
+
+func TestNativeMCPForwardsStdioToRunningDesktop(t *testing.T) {
+	const frame = "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"ping\"}\n"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/mcp/stdio" || r.Header.Get("Authorization") != "Bearer fixture" || r.Header.Get("Upgrade") != "pudding-stdio" {
+			http.Error(w, "invalid handshake", http.StatusForbidden)
+			return
+		}
+		conn, rw, err := w.(http.Hijacker).Hijack()
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		defer conn.Close()
+		if _, err := io.WriteString(conn, "HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: pudding-stdio\r\n\r\n"); err != nil {
+			t.Error(err)
+			return
+		}
+		line, err := rw.ReadString('\n')
+		if err != nil || line != frame {
+			t.Errorf("unexpected stdio frame %q, %v", line, err)
+			return
+		}
+		if _, err := io.WriteString(conn, "reply\n"); err != nil {
+			t.Error(err)
+		}
+	}))
+	defer server.Close()
+	dir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(dir, "mcp"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	descriptor, _ := json.Marshal(map[string]string{"url": server.URL + "/mcp", "token": "fixture"})
+	if err := os.WriteFile(filepath.Join(dir, "mcp", "widget-mcp.json"), descriptor, 0600); err != nil {
+		t.Fatal(err)
+	}
+	var stdout bytes.Buffer
+	if err := runMCP([]string{"--home", dir}, strings.NewReader(frame), &stdout); err != nil {
+		t.Fatal(err)
+	}
+	if stdout.String() != "reply\n" {
+		t.Fatalf("unexpected protocol output %q", stdout.String())
 	}
 }

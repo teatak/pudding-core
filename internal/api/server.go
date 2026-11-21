@@ -162,7 +162,7 @@ func (s *Server) WithCamera(capturer desktopcamera.Capturer) *Server {
 
 // apiPrefixes 是需要 token 鉴权的 API 路径前缀;其余路径交给静态 UI。
 var apiPrefixes = []string{
-	"/remote", "/assistant",
+	"/remote", "/assistant", "/agent-mcp",
 	"/studio/items", "/studio/widget-sources", "/widget-runs", "/widget-pages",
 	"/scheduled-tasks", "/sessions", "/projects", "/settings", "/providers", "/tools", "/skills", "/skill-assets", "/usage", "/plugins", "/plugin-assets", "/plugin-skills", "/plugin-connections", "/plugin-oauth", "/mcp", "/desktop"}
 
@@ -248,6 +248,9 @@ func (s *Server) Handler(token string, static http.Handler) http.Handler {
 	app.Route("/sessions/search").POST(s.searchSessionMessages)
 	app.Route("/sessions/:id").GET(s.getSession).PATCH(s.patchSession).DELETE(s.deleteSession)
 	app.Route("/sessions/:id/clone").POST(s.cloneSession)
+	app.Route("/sessions/:id/mcp-agents").GET(s.listAgents).POST(s.inviteAgent)
+	app.Route("/sessions/:id/mcp-agents/:binding").DELETE(s.removeAgent)
+	app.Route("/agent-mcp/:action").POST(s.agentCommand)
 	app.Route("/sessions/:id/archive").POST(s.archiveSession)
 	app.Route("/sessions/:id/restore").POST(s.restoreSession)
 	app.Route("/sessions/:id/plugins/:pluginID").DELETE(s.unloadSessionPlugin)
