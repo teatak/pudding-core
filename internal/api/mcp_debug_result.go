@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/teatak/pudding-core/internal/attachment"
@@ -61,7 +62,12 @@ func (s *Server) debugMCPToolResult(sessionID string, result tool.Result) (debug
 				continue
 			}
 			seen[item.AttachmentKey] = true
-			image, err := attachment.NewService(s.home).ModelImageForProvider(sessionID, item.AttachmentKey, item.MIME)
+			service := attachment.NewService(s.home)
+			load := service.ModelImageForProvider
+			if result.Name == tool.BrowserScreenshot {
+				load = service.ScreenshotForProvider
+			}
+			image, err := load(sessionID, item.AttachmentKey, item.MIME)
 			if err != nil {
 				return out, fmt.Errorf("read tool image %s: %w", item.Name, err)
 			}
@@ -74,13 +80,19 @@ func (s *Server) debugMCPToolResult(sessionID string, result tool.Result) (debug
 	return out, nil
 }
 
-// The media tool has already checked the session, file type and upload size and
-// stored a session attachment. Send audio bytes on the external-agent transport.
 func (s *Server) externalMCPToolResult(sessionID string, result tool.Result) (debugMCPResult, error) {
+	if result.Ok && result.Name == tool.BrowserScreenshot {
+		content, err := s.externalScreenshotContent(sessionID, result)
+		if err != nil {
+			return debugMCPResult{}, err
+		}
+		result.Content = content
+	}
 	out, err := s.debugMCPToolResult(sessionID, result)
 	if err != nil || !result.Ok || result.Name != tool.MediaRead {
 		return out, err
 	}
+	// The media tool has already validated and stored its audio attachments.
 	for _, item := range result.Attachments {
 		if !strings.HasPrefix(item.MIME, "audio/") {
 			continue
@@ -99,4 +111,22 @@ func (s *Server) externalMCPToolResult(sessionID string, result tool.Result) (de
 		out.Content = append(out.Content, map[string]any{"type": "audio", "mimeType": item.MIME, "data": base64.StdEncoding.EncodeToString(data)})
 	}
 	return out, nil
+}
+
+func (s *Server) externalScreenshotContent(sessionID string, result tool.Result) (string, error) {
+	var metadata map[string]any
+	if err := json.Unmarshal([]byte(result.Content), &metadata); err != nil {
+		return "", fmt.Errorf("decode browser screenshot metadata: %w", err)
+	}
+	// A successful browser capture has one attachment. Only export that file.
+	path, err := tool.ExportMCPScreenshot(s.home, sessionID, result.Attachments[0])
+	if err != nil {
+		metadata["localImageExportError"] = err.Error()
+	} else {
+		metadata["localImagePath"] = path
+		metadata["localImageFolder"] = filepath.Dir(filepath.Dir(path))
+		metadata["exportHint"] = "If the image is not visible inline, use your own image reader on the file path supplied by your client or on localImagePath. Use read_file in Antigravity. In Gemini App, connect localImageFolder in Task mode and use view_file. For browser coordinates using localImagePath, use the original width and height with captureBounds."
+	}
+	data, err := json.Marshal(metadata)
+	return string(data), err
 }

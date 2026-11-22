@@ -591,7 +591,7 @@ func TestForegroundCommandDeadlineCancelAndTurnFinish(t *testing.T) {
 				cancel()
 			}
 			if mode == "turn_finish" {
-				if err := runner.FinishForegroundCommands(call.SessionID, call.TurnID); err != nil {
+				if err := runner.FinishForegroundCommands(call.SessionID, call.TurnID, "turn_finished"); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -642,7 +642,7 @@ func TestForegroundCommandFinalOutputAndBackgroundLifetime(t *testing.T) {
 	}
 	bg := backgroundToolCall(runner, call.SessionID, root, CommandRun, map[string]any{"scope": "project", "command": commandHelperCommand("sleep", "30000")})
 	bgID := decodeBackgroundProcessPayload(t, bg).ProcessID
-	if err := runner.FinishForegroundCommands(call.SessionID, call.TurnID); err != nil {
+	if err := runner.FinishForegroundCommands(call.SessionID, call.TurnID, "turn_finished"); err != nil {
 		t.Fatal(err)
 	}
 	process := runner.processes.Get(call.SessionID, bgID)

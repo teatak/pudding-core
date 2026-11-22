@@ -20,6 +20,40 @@ const attachmentExportToolHint = "Use builtin_attachment_export in Code mode wit
 
 var errAttachmentExportNotRegular = errors.New("attachment is not a regular file")
 
+// ExportMCPScreenshot copies the original capture to a predictable local root.
+// The caller supplies the attachment from the current tool result.
+func ExportMCPScreenshot(homeDir, sessionID string, item store.Attachment) (string, error) {
+	source, found, err := attachment.NewService(homeDir).Path(sessionID, item.AttachmentKey)
+	if err != nil {
+		return "", err
+	}
+	if !found {
+		return "", errors.New("screenshot attachment does not belong to this session")
+	}
+	input, _, err := openAttachmentExportSource(homeDir, source)
+	if err != nil {
+		return "", err
+	}
+	defer input.Close()
+
+	root, dir, err := home.OpenMCPScreenshots(homeDir, sessionID)
+	if err != nil {
+		return "", err
+	}
+	defer root.Close()
+	name := filepath.Base(source)
+	output, err := root.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return "", err
+	}
+	_, copyErr := io.Copy(output, input)
+	if err := errors.Join(copyErr, output.Close()); err != nil {
+		_ = root.Remove(name)
+		return "", err
+	}
+	return filepath.Join(dir, name), nil
+}
+
 func (r *BuiltinRunner) attachmentExport(ctx context.Context, call Call) Result {
 	out := Result{CallID: call.CallID, Name: call.Name}
 	var args struct {

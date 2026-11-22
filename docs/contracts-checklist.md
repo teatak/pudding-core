@@ -9,7 +9,7 @@
 | kind | seq | 落库 | 专属字段 |
 | --- | --- | --- | --- |
 | `widget.notice` | ✓ | ✓ | `turnID`, `clientMessageID`, `userMessageID`；只追加通知 canonical 条目，不启动模型或结束当前 turn |
-| `turn.started` | ✓ | ✓ | `clientMessageID`, `userMessageID?`, `retryOfTurnID?`, `text?`；system/retry 不含 user message |
+| `turn.started` | ✓ | ✓ | `clientMessageID`, `userMessageID?`, `retryOfTurnID?`, `text?`，外部 Agent 可带 `payload.externalAgent`，system/retry 不含 user message |
 | `input.queued` / `input.updated` | ✓ | ✓ | `clientMessageID`, `text?`, `status`;纯附件输入省略空 `text` |
 | `input.steered` | ✓ | ✓ | `turnID`, `clientMessageID`, `userMessageID`, `text?`;在安全采样边界应用引导后发布，后续输出位于该引导之后 |
 | `turn.delta` | — | — | `part(text/thought)`, `delta` |

@@ -14,9 +14,15 @@ type foregroundCommand struct {
 }
 
 type commandCompletionKey struct{}
+type commandTurnContextKey struct{}
 
 func WithCommandCompletion(ctx context.Context, complete func()) context.Context {
 	return context.WithValue(ctx, commandCompletionKey{}, complete)
+}
+
+// An external request can return a process ID while its turn continues.
+func WithCommandTurnContext(ctx, turnCtx context.Context) context.Context {
+	return context.WithValue(ctx, commandTurnContextKey{}, turnCtx)
 }
 
 func (r *BuiltinRunner) commandRunManaged(ctx context.Context, call Call, args commandRunArgs, shell, cwd string, execution *commandExecution, timeout time.Duration) Result {
@@ -53,12 +59,16 @@ func (r *BuiltinRunner) commandRunManaged(ctx context.Context, call Call, args c
 		capture.close()
 		return backgroundProcessError(out, err)
 	}
+	processCtx := ctx
+	if turnCtx, ok := ctx.Value(commandTurnContextKey{}).(context.Context); ok {
+		processCtx = turnCtx
+	}
 	go func() {
 		timer := time.NewTimer(time.Until(process.startedAt.Add(timeout)))
 		defer timer.Stop()
 		select {
 		case <-process.done:
-		case <-ctx.Done():
+		case <-processCtx.Done():
 			_ = process.stop("cancelled")
 		case <-timer.C:
 			_ = process.stop("timed_out")
@@ -94,7 +104,7 @@ func (r *BuiltinRunner) commandRunManaged(ctx context.Context, call Call, args c
 
 // FinishForegroundCommands joins foreground work before the turn diff is
 // finalized. Explicit background processes retain their existing lifetime.
-func (r *BuiltinRunner) FinishForegroundCommands(sessionID, turnID string) error {
+func (r *BuiltinRunner) FinishForegroundCommands(sessionID, turnID, reason string) error {
 	r.processes.mu.Lock()
 	var processes []*backgroundProcess
 	for _, process := range r.processes.processes {
@@ -105,7 +115,7 @@ func (r *BuiltinRunner) FinishForegroundCommands(sessionID, turnID string) error
 	r.processes.mu.Unlock()
 	var errs []error
 	for _, process := range processes {
-		errs = append(errs, process.stop("turn_finished"))
+		errs = append(errs, process.stop(reason))
 	}
 	return errors.Join(errs...)
 }

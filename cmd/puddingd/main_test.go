@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -95,6 +96,9 @@ func TestRunAgentEvalHelp(t *testing.T) {
 func TestNativeMCPForwardsStdioToRunningDesktop(t *testing.T) {
 	const frame = "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"ping\"}\n"
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("X-Pudding-Launcher-Pid"); got != strconv.Itoa(os.Getppid()) {
+			t.Errorf("launcher PID = %q, want %d", got, os.Getppid())
+		}
 		if r.URL.Path != "/mcp/stdio" || r.Header.Get("Authorization") != "Bearer fixture" || r.Header.Get("Upgrade") != "pudding-stdio" {
 			http.Error(w, "invalid handshake", http.StatusForbidden)
 			return

@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"time"
 
 	"github.com/teatak/pudding-core/internal/home"
@@ -58,6 +59,7 @@ func runMCP(args []string, stdin io.Reader, stdout io.Writer) error {
 	req.Header.Set("Authorization", "Bearer "+endpoint.Token)
 	req.Header.Set("Connection", "Upgrade")
 	req.Header.Set("Upgrade", "pudding-stdio")
+	req.Header.Set("X-Pudding-Launcher-Pid", strconv.Itoa(os.Getppid()))
 	if err = conn.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
 		return err
 	}

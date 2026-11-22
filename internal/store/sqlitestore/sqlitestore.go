@@ -907,6 +907,7 @@ func (s *Store) BeginTurn(ctx context.Context, in store.BeginTurnInput) (*store.
 			Kind:            store.MessageKindText,
 			Text:            in.UserText,
 			Parts:           store.UserInputParts(in.UserText, in.UserParts),
+			Metadata:        in.UserMetadata,
 			TurnIndex:       0,
 			ClientMessageID: in.ClientMessageID,
 			CreatedAt:       now,
@@ -933,6 +934,7 @@ func (s *Store) BeginTurn(ctx context.Context, in store.BeginTurnInput) (*store.
 			UserMessageID:   in.UserMessageID,
 			Text:            in.UserText,
 			Parts:           userParts,
+			Payload:         in.UserMetadata,
 		}
 		if err := insertEventTx(ctx, tx, &ev); err != nil {
 			return err

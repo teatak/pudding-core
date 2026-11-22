@@ -19,7 +19,7 @@ import (
 const (
 	baselineSchemaVersion      = 1
 	currentSchemaLayoutVersion = 8
-	currentSchemaVersion       = 64
+	currentSchemaVersion       = 65
 )
 
 var (
@@ -35,6 +35,12 @@ type schemaMigration func(*sql.Tx) error
 // Unpublished Studio migrations 27–29 are consolidated into destination 30.
 // Unpublished Studio migrations 33–46 are consolidated into destination 47.
 var schemaMigrations = map[int]schemaMigration{
+	65: func(tx *sql.Tx) error {
+		if err := addTableColumnIfMissing(tx, "external_agent_bindings", "agent_title", "TEXT NOT NULL DEFAULT ''"); err != nil {
+			return err
+		}
+		return addTableColumnIfMissing(tx, "external_agent_bindings", "agent_icon", "TEXT NOT NULL DEFAULT ''")
+	},
 	64: func(tx *sql.Tx) error {
 		_, err := tx.Exec(store.ExternalAgentSchema)
 		return err
@@ -1053,7 +1059,7 @@ var schemaV63Contract = func() schemaContract {
 
 var currentSchemaContract = func() schemaContract {
 	out := extendSchemaContract(schemaV63Contract, map[string][]string{
-		"external_agent_bindings": {"id", "session_id", "runtime_id", "agent_name", "invite_hash", "expires_at", "credential_hash"},
+		"external_agent_bindings": {"id", "session_id", "runtime_id", "agent_name", "agent_title", "agent_icon", "invite_hash", "expires_at", "credential_hash"},
 	}, "external_agent_session")
 	out.forbiddenTables = schemaV63Contract.forbiddenTables
 	return out

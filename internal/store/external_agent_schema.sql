@@ -3,6 +3,8 @@ CREATE TABLE IF NOT EXISTS external_agent_bindings (
     session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
     runtime_id TEXT NOT NULL,
     agent_name TEXT NOT NULL DEFAULT '',
+    agent_title TEXT NOT NULL DEFAULT '',
+    agent_icon TEXT NOT NULL DEFAULT '',
     invite_hash TEXT UNIQUE,
     expires_at INTEGER NOT NULL,
     credential_hash TEXT UNIQUE

@@ -5,14 +5,21 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"image"
+	"image/png"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/coder/websocket"
 	"github.com/teatak/pudding-core/internal/attachment"
+	"github.com/teatak/pudding-core/internal/browser"
 	"github.com/teatak/pudding-core/internal/engine"
 	"github.com/teatak/pudding-core/internal/event"
 	"github.com/teatak/pudding-core/internal/plugin"
@@ -34,7 +41,7 @@ type debugMCPTestServer struct {
 	home    string
 }
 
-func newDebugMCPTestServer(t *testing.T) debugMCPTestServer {
+func newDebugMCPTestServer(t *testing.T, options ...tool.BuiltinOption) debugMCPTestServer {
 	t.Helper()
 	st := storetest.New(t)
 	if err := st.PutProviderProfile(context.Background(), &store.ProviderProfile{ID: "mock", Protocol: "openai-compatible", Models: []store.ProviderModel{{ID: "mock-model"}}}); err != nil {
@@ -43,7 +50,7 @@ func newDebugMCPTestServer(t *testing.T) debugMCPTestServer {
 	homeDir := t.TempDir()
 	hub := event.NewHub()
 	browser := tool.NewBrowserMCPRunner(homeDir)
-	builtins := tool.NewBuiltinRunner(tool.WithHomeDir(homeDir))
+	builtins := tool.NewBuiltinRunner(append([]tool.BuiltinOption{tool.WithHomeDir(homeDir)}, options...)...)
 	t.Cleanup(func() { _ = builtins.Close() })
 	plugins := plugin.NewService(homeDir, st).WithRuntimeSource(browser).WithBuiltinToolAvailability(builtins.ToolAvailable)
 	runner := tool.NewMultiRunner(builtins, browser)
@@ -419,19 +426,15 @@ func TestDebugMCPSwitchesSession(t *testing.T) {
 	}
 }
 
-func TestExternalMCPPageEditUsesOneBoundTurn(t *testing.T) {
-	fixture := newDebugMCPTestServer(t)
-	ctx := context.Background()
-	if err := fixture.store.CreateSession(ctx, &store.Session{ID: "bound", Provider: "mock", Model: "mock-model", ActiveMode: store.ModeChat}); err != nil {
-		t.Fatal(err)
-	}
-	post := func(path, credential string, input any, expected int) map[string]any {
+func externalMCPPostForTest(t *testing.T, baseURL string) func(string, string, any, int) map[string]any {
+	t.Helper()
+	return func(path, credential string, input any, expected int) map[string]any {
 		t.Helper()
 		body, err := json.Marshal(input)
 		if err != nil {
 			t.Fatal(err)
 		}
-		req, err := http.NewRequest("POST", fixture.server.URL+path, bytes.NewReader(body))
+		req, err := http.NewRequest("POST", baseURL+path, bytes.NewReader(body))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -452,14 +455,58 @@ func TestExternalMCPPageEditUsesOneBoundTurn(t *testing.T) {
 		}
 		return out
 	}
-	bind := func() string {
+}
+
+func approveExternalMCPTurnForTest(t *testing.T, fixture debugMCPTestServer, sessionID string) <-chan error {
+	t.Helper()
+	events, unsubscribe := fixture.hub.Subscribe(sessionID)
+	t.Cleanup(unsubscribe)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	t.Cleanup(cancel)
+	approved := make(chan error, 1)
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				approved <- ctx.Err()
+				return
+			case ev := <-events:
+				if ev.Kind == event.ApprovalRequested {
+					approved <- fixture.engine.ApproveApproval(ctx, sessionID, ev.ApprovalID, engine.ApprovalScopeTurn, nil)
+					return
+				}
+			}
+		}
+	}()
+	return approved
+}
+
+func TestExternalMCPPageEditUsesOneBoundTurn(t *testing.T) {
+	fixture := newDebugMCPTestServer(t)
+	ctx := context.Background()
+	if err := fixture.store.CreateSession(ctx, &store.Session{ID: "bound", Provider: "mock", Model: "mock-model", ActiveMode: store.ModeChat}); err != nil {
+		t.Fatal(err)
+	}
+	post := externalMCPPostForTest(t, fixture.server.URL)
+	bind := func(branded bool) string {
 		invite := post("/sessions/bound/mcp-agents", "", nil, 201)["invite"]
 		in := map[string]any{"invite": invite, "name": "Example Agent"}
+		if branded {
+			in["title"] = "Example App"
+			in["iconPNGBase64"] = debugMCPTestPNG
+		} else {
+			in["icons"] = []map[string]string{{"src": "data:image/png;base64," + debugMCPTestPNG}}
+		}
 		credential := post("/agent-mcp/connect", "", in, 200)["credential"].(string)
 		post("/agent-mcp/connect", "", in, 404)
 		return credential
 	}
-	credential, other := bind(), bind()
+	credential, other := bind(true), bind(false)
+	bindings, err := fixture.store.ListAgentBindings(ctx, "bound")
+	if err != nil || len(bindings) != 2 || bindings[0].Title != "Example App" || bindings[0].IconPNGBase64 != debugMCPTestPNG ||
+		bindings[1].Title != "" || bindings[1].IconPNGBase64 != "" {
+		t.Fatalf("stored client identities: %+v, err=%v", bindings, err)
+	}
 	turn := post("/agent-mcp/begin", credential, map[string]string{"task": "Edit a page"}, 200)["turnID"].(string)
 	execute := func(name string, args map[string]any) map[string]any {
 		t.Helper()
@@ -474,25 +521,7 @@ func TestExternalMCPPageEditUsesOneBoundTurn(t *testing.T) {
 		}
 		return fields
 	}
-	events, unsubscribe := fixture.hub.Subscribe("bound")
-	defer unsubscribe()
-	approvalCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-	approved := make(chan error, 1)
-	go func() {
-		for {
-			select {
-			case <-approvalCtx.Done():
-				approved <- approvalCtx.Err()
-				return
-			case ev := <-events:
-				if ev.Kind == event.ApprovalRequested {
-					approved <- fixture.engine.ApproveApproval(approvalCtx, "bound", ev.ApprovalID, engine.ApprovalScopeTurn, nil)
-					return
-				}
-			}
-		}
-	}()
+	approved := approveExternalMCPTurnForTest(t, fixture, "bound")
 	execute(tool.RequestCapability, map[string]any{"targetMode": "code", "reason": "Edit page for this request", "projectDirs": []string{t.TempDir()}})
 	if err := <-approved; err != nil {
 		t.Fatal(err)
@@ -519,6 +548,21 @@ func TestExternalMCPPageEditUsesOneBoundTurn(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	var metadata struct {
+		ExternalAgent store.ExternalAgentIdentity `json:"externalAgent"`
+	}
+	if err := json.Unmarshal(history.Messages[0].Metadata, &metadata); err != nil || metadata.ExternalAgent != bindings[0].ExternalAgentIdentity {
+		t.Fatalf("external turn identity: %+v, err=%v", metadata, err)
+	}
+	events, err := fixture.store.EventsAfter(ctx, "bound", 0, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.ContainsFunc(events, func(ev event.Event) bool {
+		return ev.Kind == event.TurnStarted && ev.TurnID == turn && bytes.Equal(ev.Payload, history.Messages[0].Metadata)
+	}) {
+		t.Fatal("turn.started must carry the same external identity as history")
+	}
 	var calls int
 	for _, m := range history.Messages {
 		for _, p := range m.Parts {
@@ -532,5 +576,281 @@ func TestExternalMCPPageEditUsesOneBoundTurn(t *testing.T) {
 	}
 	if calls != 6 || history.Status != store.TurnCompleted {
 		t.Fatalf("stored calls %d, status %s", calls, history.Status)
+	}
+	t.Run("disconnect one agent during its next turn", func(t *testing.T) {
+		id := post("/agent-mcp/begin", credential, map[string]string{"task": "Second task"}, 200)["turnID"].(string)
+		resp := req(t, http.MethodDelete, fixture.server.URL+"/sessions/bound/mcp-agents/"+bindings[0].ID, nil)
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("disconnect: %s", resp.Status)
+		}
+		post("/agent-mcp/status", credential, nil, 404)
+		wait, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+		if err := fixture.engine.WaitSession(wait, "bound"); err != nil {
+			t.Fatal(err)
+		}
+		stopped, err := fixture.store.GetConversationTurn(ctx, "bound", id)
+		if err != nil || stopped.Status != store.TurnCancelled {
+			t.Fatalf("disconnected turn: %+v, err=%v", stopped, err)
+		}
+		post("/agent-mcp/status", other, map[string]string{"turnID": id}, 404)
+		next := post("/agent-mcp/begin", other, map[string]string{"task": "Continue independently"}, 200)["turnID"].(string)
+		post("/agent-mcp/end", other, map[string]string{"turnID": next}, 200)
+		post("/agent-mcp/disconnect", other, nil, 200)
+		post("/agent-mcp/status", other, nil, 404)
+	})
+}
+
+func TestExternalMCPBrowserPluginKeepsTurnApproval(t *testing.T) {
+	managed := &fakeBrowserService{tabs: make(map[string]browser.TabSnapshot)}
+	fixture := newDebugMCPTestServer(t, tool.WithBrowser(managed))
+	ctx := context.Background()
+	const sessionID = "browser-approval"
+	if err := fixture.store.CreateSession(ctx, &store.Session{ID: sessionID,
+		Provider: "mock", Model: "mock-model", ActiveMode: store.ModeChat}); err != nil {
+		t.Fatal(err)
+	}
+	post := externalMCPPostForTest(t, fixture.server.URL)
+	invite := post("/sessions/"+sessionID+"/mcp-agents", "", nil, 201)["invite"]
+	credential := post("/agent-mcp/connect", "", map[string]any{"invite": invite, "name": "Example Agent"}, 200)["credential"].(string)
+	turnID := post("/agent-mcp/begin", credential, map[string]string{"task": "Inspect browser"}, 200)["turnID"].(string)
+	approved := approveExternalMCPTurnForTest(t, fixture, sessionID)
+	loaded := post("/agent-mcp/call", credential, map[string]any{
+		"turnID": turnID, "tool": tool.PluginLoad, "arguments": map[string]string{"plugin_id": "browser"},
+	}, 200)
+	if err := <-approved; err != nil {
+		t.Fatal(err)
+	}
+	if loaded["isError"] == true {
+		t.Fatalf("browser plugin load failed: %v", loaded["content"])
+	}
+	status := post("/agent-mcp/status", credential, nil, 200)
+	if status["mode"] != "work" || status["activeTurnID"] != turnID {
+		t.Fatalf("approved browser capability missing from active turn: %v", status)
+	}
+	result := post("/agent-mcp/call", credential, map[string]string{"turnID": turnID, "tool": tool.BrowserStatus}, 200)
+	if result["isError"] == true {
+		t.Fatalf("browser status rejected after plugin approval: %v", result["content"])
+	}
+	root := t.TempDir()
+	const projectRule = "Use the project's skill naming convention."
+	if err := os.WriteFile(filepath.Join(root, "AGENTS.md"), []byte(projectRule), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fixture.engine.SetSessionDirectories(ctx, sessionID, []string{root}); err != nil {
+		t.Fatal(err)
+	}
+	approved = approveExternalMCPTurnForTest(t, fixture, sessionID)
+	loaded = post("/agent-mcp/call", credential, map[string]any{
+		"turnID": turnID, "tool": tool.PluginLoad, "arguments": map[string]string{"plugin_id": plugin.BuiltinSkillAuthoringID},
+	}, 200)
+	if err := <-approved; err != nil {
+		t.Fatal(err)
+	}
+	if loaded["isError"] == true || !slices.ContainsFunc(loaded["content"].([]any), func(block any) bool {
+		text, _ := block.(map[string]any)["text"].(string)
+		return strings.Contains(text, projectRule)
+	}) {
+		t.Fatal("plugin-triggered Code approval did not deliver the project rules")
+	}
+	post("/agent-mcp/end", credential, map[string]string{"turnID": turnID}, 200)
+	status = post("/agent-mcp/status", credential, nil, 200)
+	if status["mode"] != "chat" || status["activeTurnID"] != "" {
+		t.Fatalf("browser capability outlived the turn: %v", status)
+	}
+}
+
+func TestExternalMCPForegroundCommandLifecycle(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell fixture uses POSIX commands")
+	}
+	fixture := newDebugMCPTestServer(t)
+	ctx := context.Background()
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "build.sh"), []byte("printf 'compiling\\n'\nsleep 1\nprintf 'missing manifest\\n' >&2\nexit 7\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	project := &store.Project{ID: "build-project", Name: "Build", RootDirs: []string{root}, ApprovalMode: store.ApprovalFull}
+	if err := fixture.store.CreateProject(ctx, project); err != nil {
+		t.Fatal(err)
+	}
+	const sessionID = "build-session"
+	if err := fixture.store.CreateSession(ctx, &store.Session{ID: sessionID, Provider: "mock", Model: "mock-model",
+		ProjectID: project.ID, ActiveMode: store.ModeCode, ModeLease: store.ModeLeaseSession}); err != nil {
+		t.Fatal(err)
+	}
+	post := externalMCPPostForTest(t, fixture.server.URL)
+	invite := post("/sessions/"+sessionID+"/mcp-agents", "", nil, 201)["invite"]
+	credential := post("/agent-mcp/connect", "", map[string]any{"invite": invite, "name": "Build Agent"}, 200)["credential"].(string)
+	begin := func() string {
+		return post("/agent-mcp/begin", credential, map[string]string{"task": "Run build"}, 200)["turnID"].(string)
+	}
+	call := func(turnID, name string, args map[string]any) map[string]any {
+		t.Helper()
+		out := post("/agent-mcp/call", credential, map[string]any{"turnID": turnID, "tool": name, "arguments": args}, 200)
+		content := out["content"].([]any)[0].(map[string]any)["text"].(string)
+		var result map[string]any
+		if err := json.Unmarshal([]byte(content), &result); err != nil || out["isError"] == true {
+			t.Fatalf("%s: %s (%v)", name, content, err)
+		}
+		return result
+	}
+	t.Run("poll through build failure", func(t *testing.T) {
+		turnID := begin()
+		defer post("/agent-mcp/end", credential, map[string]string{"turnID": turnID, "status": "failed"}, 200)
+		started := call(turnID, tool.CommandRun, map[string]any{"command": "sh build.sh", "scope": "project", "yield_ms": 0})
+		if started["yielded"] != true || started["running"] != true {
+			t.Fatalf("build did not yield a running process: %v", started)
+		}
+		result := started
+		deadline := time.Now().Add(5 * time.Second)
+		for result["running"] == true && time.Now().Before(deadline) {
+			result = call(turnID, tool.CommandSession, map[string]any{"action": "poll", "process_id": started["processID"],
+				"offset": result["nextOffset"], "wait_ms": 1000})
+		}
+		if result["running"] != false || result["exitCode"] != float64(7) || result["stderr"] != "missing manifest\n" {
+			t.Fatalf("lost the build exit code or failure log after yield: %v", result)
+		}
+	})
+	t.Run("stop a yielded command from Pudding", func(t *testing.T) {
+		turnID := begin()
+		started := call(turnID, tool.CommandRun, map[string]any{"command": "sleep 30", "scope": "project", "yield_ms": 0})
+		if started["yielded"] != true || started["running"] != true {
+			t.Fatalf("test command did not yield: %v", started)
+		}
+		post("/sessions/"+sessionID+"/cancel", "", nil, 202)
+		deadline := time.Now().Add(5 * time.Second)
+		var status map[string]any
+		for time.Now().Before(deadline) {
+			status = post("/agent-mcp/status", credential, map[string]string{"turnID": turnID}, 200)
+			if status["status"] != "running" {
+				break
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+		if status["status"] != "cancelled" || status["activeTurnID"] != "" {
+			t.Fatalf("agent did not see the cancelled turn: %v", status)
+		}
+		processURL := fixture.server.URL + "/sessions/" + sessionID + "/processes/" + started["processID"].(string)
+		process := decodeJSON[tool.BackgroundProcessLogSnapshot](t, req(t, http.MethodGet, processURL, nil)).Process
+		if process.Running || process.Status != "cancelled" {
+			t.Fatalf("process did not reach the cancelled state: %+v", process)
+		}
+	})
+}
+
+type mcpScreenshotBrowser struct {
+	fakeBrowserService
+	capture browser.ScreenshotResult
+}
+
+func (f *mcpScreenshotBrowser) Screenshot(ctx context.Context, sessionID, tabID string, _ browser.ScreenshotOptions) (browser.ScreenshotResult, error) {
+	tab, err := f.GetTab(ctx, sessionID, tabID)
+	result := f.capture
+	result.Tab = tab
+	return result, err
+}
+
+func TestExternalMCPBrowserScreenshotProvidesLocalFallback(t *testing.T) {
+	const width, height = 1920, 1080
+	var original bytes.Buffer
+	if err := png.Encode(&original, image.NewGray(image.Rect(0, 0, width, height))); err != nil {
+		t.Fatal(err)
+	}
+	managed := &mcpScreenshotBrowser{fakeBrowserService{tabs: make(map[string]browser.TabSnapshot)}, browser.ScreenshotResult{
+		MIME: "image/png", DataBase64: base64.StdEncoding.EncodeToString(original.Bytes()), Width: width, Height: height,
+		ViewportWidth: width, ViewportHeight: height,
+	}}
+	fixture := newDebugMCPTestServer(t, tool.WithBrowser(managed))
+	ctx := context.Background()
+	post := externalMCPPostForTest(t, fixture.server.URL)
+	homeDir, err := filepath.EvalSymlinks(fixture.home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	folder := filepath.Join(homeDir, "temp", "mcp-screenshots")
+	var savedPath string
+
+	for _, id := range []string{"screenshots", "blocked"} {
+		if err := fixture.store.CreateSession(ctx, &store.Session{ID: id, Provider: "mock", Model: "mock-model",
+			ActiveMode: store.ModeWork, ModeLease: store.ModeLeaseSession, LoadedPluginIDs: []string{"browser"}}); err != nil {
+			t.Fatal(err)
+		}
+		tab := managed.create(id, id+"-tab")
+		invite := post("/sessions/"+id+"/mcp-agents", "", nil, 201)["invite"]
+		credential := post("/agent-mcp/connect", "", map[string]any{"invite": invite, "name": "Example Agent"}, 200)["credential"].(string)
+		turn := post("/agent-mcp/begin", credential, map[string]string{"task": "Capture a browser screenshot"}, 200)["turnID"].(string)
+		if id == "blocked" {
+			managed.capture = browser.ScreenshotResult{MIME: "image/png", DataBase64: debugMCPTestPNG,
+				Width: 1, Height: 1, ViewportWidth: 1, ViewportHeight: 1}
+			if err := os.WriteFile(filepath.Join(folder, id), []byte("blocking file"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+		call := post("/agent-mcp/call", credential, map[string]any{
+			"turnID": turn, "tool": tool.BrowserScreenshot, "arguments": map[string]string{"tabID": tab.ID},
+		}, 200)
+		if call["isError"] == true {
+			t.Fatalf("browser capture failed: %v", call)
+		}
+		blocks := call["content"].([]any)
+		var metadata struct {
+			AttachmentKey string `json:"attachmentKey"`
+			Path          string `json:"localImagePath"`
+			Folder        string `json:"localImageFolder"`
+			ExportError   string `json:"localImageExportError"`
+			ModelWidth    int    `json:"modelWidth"`
+			ModelHeight   int    `json:"modelHeight"`
+		}
+		if err := json.Unmarshal([]byte(blocks[0].(map[string]any)["text"].(string)), &metadata); err != nil {
+			t.Fatal(err)
+		}
+		block := blocks[1].(map[string]any)
+		if block["type"] != "image" || block["mimeType"] != "image/png" {
+			t.Fatalf("unexpected screenshot block: %v / %v", block["type"], block["mimeType"])
+		}
+		pixels, err := png.DecodeConfig(base64.NewDecoder(base64.StdEncoding, strings.NewReader(block["data"].(string))))
+		if err != nil || pixels.Width != metadata.ModelWidth || pixels.Height != metadata.ModelHeight || pixels.Width >= width {
+			t.Fatalf("inline image %dx%d does not match the scaled click coordinate metadata %dx%d: %v", pixels.Width, pixels.Height, metadata.ModelWidth, metadata.ModelHeight, err)
+		}
+		if id == "blocked" {
+			if block["data"] != debugMCPTestPNG {
+				t.Fatal("small screenshot did not retain its original inline bytes")
+			}
+			if metadata.ExportError == "" || metadata.Path != "" {
+				t.Fatalf("expected the inline image with a visible export error, got %+v", metadata)
+			}
+		} else {
+			savedPath = filepath.Join(folder, id, filepath.Base(metadata.AttachmentKey))
+			if metadata.Path != savedPath || metadata.Folder != folder || metadata.ExportError != "" {
+				t.Fatalf("unexpected fallback metadata: %+v", metadata)
+			}
+			data, err := os.ReadFile(savedPath)
+			if err != nil || !bytes.Equal(data, original.Bytes()) {
+				t.Fatalf("expected the original PNG on disk, err=%v", err)
+			}
+		}
+		post("/agent-mcp/end", credential, map[string]string{"turnID": turn}, 200)
+	}
+
+	req, err := http.NewRequest(http.MethodDelete, fixture.server.URL+"/sessions/screenshots", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Authorization", "Bearer "+testToken)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("delete session: %d", resp.StatusCode)
+	}
+	if _, err := os.Stat(savedPath); !os.IsNotExist(err) {
+		t.Fatalf("deleted session's screenshot remains: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(folder, "blocked")); err != nil {
+		t.Fatalf("cleanup removed a different session's path: %v", err)
 	}
 }

@@ -8,6 +8,18 @@ import (
 	"strings"
 )
 
+const mcpScreenshotsDir = "mcp-screenshots"
+
+// OpenMCPScreenshots opens the session's export directory under the folder
+// external clients can connect for local image reads.
+func OpenMCPScreenshots(dir, sessionID string) (*os.Root, string, error) {
+	return sessionTempArea(dir, sessionID, mcpScreenshotsDir, true)
+}
+
+func RemoveMCPScreenshots(dir, sessionID string) error {
+	return removeSessionTempArea(dir, sessionID, mcpScreenshotsDir)
+}
+
 // OpenSessionArtifacts opens the current session's persistent analysis area.
 // It remains under the global temp scope and is not a project workspace.
 func OpenSessionArtifacts(dir, sessionID string) (*os.Root, string, error) {
@@ -31,10 +43,14 @@ func ExistingSessionArtifacts(dir, sessionID string) (string, bool, error) {
 }
 
 func RemoveSessionArtifacts(dir, sessionID string) error {
+	return removeSessionTempArea(dir, sessionID, "session-artifacts")
+}
+
+func removeSessionTempArea(dir, sessionID, area string) error {
 	if strings.TrimSpace(dir) == "" || strings.TrimSpace(sessionID) == "" {
 		return nil
 	}
-	base, _, err := sessionArtifactsBase(dir, false)
+	base, _, err := sessionTempBase(dir, area, false)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil
 	}
@@ -46,10 +62,14 @@ func RemoveSessionArtifacts(dir, sessionID string) error {
 }
 
 func sessionArtifactsRoot(dir, sessionID string, create bool) (*os.Root, string, error) {
+	return sessionTempArea(dir, sessionID, "session-artifacts", create)
+}
+
+func sessionTempArea(dir, sessionID, area string, create bool) (*os.Root, string, error) {
 	if strings.TrimSpace(dir) == "" || strings.TrimSpace(sessionID) == "" {
 		return nil, "", errors.New("home: session artifacts require home and session id")
 	}
-	base, path, err := sessionArtifactsBase(dir, create)
+	base, path, err := sessionTempBase(dir, area, create)
 	if err != nil {
 		return nil, "", err
 	}
@@ -59,7 +79,7 @@ func sessionArtifactsRoot(dir, sessionID string, create bool) (*os.Root, string,
 	return root, filepath.Join(path, component), err
 }
 
-func sessionArtifactsBase(dir string, create bool) (*os.Root, string, error) {
+func sessionTempBase(dir, area string, create bool) (*os.Root, string, error) {
 	resolvedHome, err := filepath.EvalSymlinks(strings.TrimSpace(dir))
 	if err != nil {
 		return nil, "", err
@@ -78,8 +98,8 @@ func sessionArtifactsBase(dir string, create bool) (*os.Root, string, error) {
 		return nil, "", err
 	}
 	defer temp.Close()
-	base, err := openArtifactDirectory(temp, "session-artifacts", create)
-	return base, filepath.Join(resolvedHome, "temp", "session-artifacts"), err
+	base, err := openArtifactDirectory(temp, area, create)
+	return base, filepath.Join(TempPath(resolvedHome), area), err
 }
 
 // Validate each managed component before opening it. Root-relative operations

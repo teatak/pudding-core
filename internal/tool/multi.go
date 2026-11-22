@@ -32,6 +32,18 @@ func (r *MultiRunner) Close() error {
 	return errors.Join(errs...)
 }
 
+func (r *MultiRunner) FinishForegroundCommands(sessionID, turnID, reason string) error {
+	var errs []error
+	for _, runner := range r.runners {
+		if finisher, ok := runner.(interface {
+			FinishForegroundCommands(string, string, string) error
+		}); ok {
+			errs = append(errs, finisher.FinishForegroundCommands(sessionID, turnID, reason))
+		}
+	}
+	return errors.Join(errs...)
+}
+
 func (r *MultiRunner) ListBackgroundProcesses(sessionID string) []BackgroundProcessSnapshot {
 	items := make([]BackgroundProcessSnapshot, 0)
 	for _, runner := range r.runners {

@@ -942,6 +942,9 @@ func (s *Server) releaseSessionResources(ctx context.Context, id string, removeS
 		if err := home.RemoveSessionArtifacts(s.home, id); err != nil {
 			slog.Warn("remove session artifacts failed", "sessionID", id, "err", err)
 		}
+		if err := home.RemoveMCPScreenshots(s.home, id); err != nil {
+			slog.Warn("remove MCP screenshots failed", "sessionID", id, "err", err)
+		}
 	}
 	if s.voice != nil {
 		s.voice.ReleaseSession(id)

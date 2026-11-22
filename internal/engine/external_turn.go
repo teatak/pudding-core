@@ -34,11 +34,12 @@ type externalRequest struct {
 }
 
 type ExternalToolReply struct {
-	SkillRefs    map[string]tool.SkillReference
-	Mode         store.AgentMode
-	Result       tool.Result
-	PluginID     string
-	UserMessages []string
+	SkillRefs           map[string]tool.SkillReference
+	Mode                store.AgentMode
+	RefreshProjectRules bool
+	Result              tool.Result
+	PluginID            string
+	UserMessages        []string
 }
 
 type externalResponse struct {
@@ -62,7 +63,17 @@ func (e *Engine) BeginExternalTurn(ctx context.Context, credentialHash, task str
 		return "", err
 	}
 	turnID := store.NewID("turn")
-	_, err = e.store.BeginTurn(ctx, store.BeginTurnInput{SessionID: sess.ID, TurnID: turnID, UserMessageID: store.NewID("msg"), ClientMessageID: externalClientID(b.ID, turnID), UserText: b.Name + " · " + task, Provider: sess.Provider, Model: sess.Model, Mode: sess.ActiveMode})
+	metadata, err := json.Marshal(struct {
+		ExternalAgent store.ExternalAgentIdentity `json:"externalAgent"`
+	}{ExternalAgent: b.ExternalAgentIdentity})
+	if err != nil {
+		return "", err
+	}
+	_, err = e.store.BeginTurn(ctx, store.BeginTurnInput{
+		SessionID: sess.ID, TurnID: turnID, UserMessageID: store.NewID("msg"),
+		ClientMessageID: externalClientID(b.ID, turnID), UserText: b.Name + " · " + task, UserMetadata: metadata,
+		Provider: sess.Provider, Model: sess.Model, Mode: sess.ActiveMode,
+	})
 	if err != nil {
 		return "", err
 	}
@@ -106,6 +117,9 @@ loop:
 			}
 			callCtx, cancel := context.WithCancel(ctx)
 			stop := context.AfterFunc(req.ctx, cancel)
+			if req.name == tool.CommandRun {
+				callCtx = tool.WithCommandTurnContext(callCtx, ctx)
+			}
 			reply, nextMode, err := e.executeExternalRequest(callCtx, sess.ID, a, &parts, req, mode)
 			mode = nextMode
 			stop()
@@ -182,13 +196,16 @@ func (e *Engine) executeExternalRequest(ctx context.Context, sid string, active 
 		}
 	}
 	call := tool.Call{SessionID: sid, TurnID: active.turnID, CallID: store.NewID("call"), Name: req.name, Args: req.args}
+	previousMode := mode
 	reply.Result, mode, err = e.executeDirectToolCall(ctx, mode, defs, parts, call)
 	reply.Mode = mode
+	reply.RefreshProjectRules = mode == store.ModeCode && (mode != previousMode || (req.name == tool.RequestCapability && reply.Result.Ok))
 	if ref, ok := tool.ReferencedSkill(reply.Result.Name, reply.Result.Ok, reply.Result.Content); ok {
 		active.external.skillRefs[ref.Key()] = ref
 	}
 	reply.SkillRefs = maps.Clone(active.external.skillRefs)
-	if req.name == tool.RequestCapability && reply.Result.Ok {
+	// Loading a plugin can also obtain a capability approval for this turn.
+	if mode != previousMode {
 		e.mu.Lock()
 		active.external.baseMode = current.ActiveMode
 		active.external.mode = mode

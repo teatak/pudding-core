@@ -24,6 +24,7 @@ export const turnStartedEvent = z.object({
   userMessageID: z.string().optional(),
   text: z.string().optional(),
   parts: z.array(contentPart).optional(),
+  payload: z.object({ externalAgent: z.object({ name: z.string(), title: z.string().optional(), iconPNGBase64: z.string().optional() }) }).optional(),
 });
 
 // turn.delta 不落库、无 seq;丢失由 turn.completed 后 refetch 兜底

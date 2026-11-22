@@ -1306,8 +1306,14 @@ func (e *Engine) finishTurnWithInterrupted(
 // not start a provider request or schedule automatic context compaction.
 func (e *Engine) finishTurnState(sessionID, turnID string, mode store.AgentMode, status store.TurnStatus, errMsg string, assistantParts []store.ContentPart, interruptedOutputCommitted bool) error {
 	in := store.FinishTurnInput{TurnID: turnID, Status: status, Mode: mode, Error: errMsg}
-	if runner, ok := e.tools.(interface{ FinishForegroundCommands(string, string) error }); ok {
-		if err := runner.FinishForegroundCommands(sessionID, turnID); err != nil {
+	if runner, ok := e.tools.(interface {
+		FinishForegroundCommands(string, string, string) error
+	}); ok {
+		reason := "turn_finished"
+		if status == store.TurnCancelled {
+			reason = "cancelled"
+		}
+		if err := runner.FinishForegroundCommands(sessionID, turnID, reason); err != nil {
 			slog.Warn("engine: finish foreground commands failed", "turnID", turnID, "err", err)
 		}
 	}

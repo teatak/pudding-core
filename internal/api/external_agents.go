@@ -1,12 +1,15 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"image/png"
 	"net/http"
 	"slices"
 	"strings"
@@ -55,6 +58,10 @@ func (s *Server) listAgents(c *cart.Context) error {
 func (s *Server) removeAgent(c *cart.Context) error {
 	sid, _ := c.Param("id")
 	id, _ := c.Param("binding")
+	return s.disconnectAgent(c, sid, id)
+}
+
+func (s *Server) disconnectAgent(c *cart.Context, sid, id string) error {
 	if err := s.store.RemoveAgentBinding(c.Request.Context(), sid, id); err != nil {
 		return s.failAgent(c, err)
 	}
@@ -64,15 +71,31 @@ func (s *Server) removeAgent(c *cart.Context) error {
 }
 
 type agentRequest struct {
-	Invite    string           `json:"invite"`
-	Name      string           `json:"name"`
-	Task      string           `json:"task"`
-	TurnID    string           `json:"turnID"`
-	Tool      string           `json:"tool"`
-	Query     string           `json:"query"`
-	Arguments json.RawMessage  `json:"arguments"`
-	Status    store.TurnStatus `json:"status"`
-	Summary   string           `json:"summary"`
+	Invite        string           `json:"invite"`
+	Name          string           `json:"name"`
+	Title         string           `json:"title"`
+	IconPNGBase64 string           `json:"iconPNGBase64"`
+	Task          string           `json:"task"`
+	TurnID        string           `json:"turnID"`
+	Tool          string           `json:"tool"`
+	Query         string           `json:"query"`
+	Arguments     json.RawMessage  `json:"arguments"`
+	Status        store.TurnStatus `json:"status"`
+	Summary       string           `json:"summary"`
+}
+
+func externalAgentIcon(encoded string) string {
+	if len(encoded) == 0 || len(encoded) > 64*1024 {
+		return ""
+	}
+	data, err := base64.StdEncoding.DecodeString(encoded)
+	if err != nil {
+		return ""
+	}
+	if _, err := png.DecodeConfig(bytes.NewReader(data)); err != nil {
+		return ""
+	}
+	return encoded
 }
 
 func (s *Server) agentCommand(c *cart.Context) error {
@@ -88,8 +111,13 @@ func (s *Server) agentCommand(c *cart.Context) error {
 		if name == "" || len(name) > 100 || strings.ContainsAny(name, "\r\n\x00") || in.Invite == "" {
 			return badRequest(c, "agent name and invitation required")
 		}
+		title := strings.TrimSpace(in.Title)
+		if len(title) > 200 || strings.ContainsAny(title, "\r\n\x00") {
+			title = ""
+		}
+		identity := store.ExternalAgentIdentity{Name: name, Title: title, IconPNGBase64: externalAgentIcon(in.IconPNGBase64)}
 		credential := rand.Text()
-		b, err := s.store.RedeemAgentInvite(ctx, agentHash(in.Invite), agentHash(credential), name, time.Now().UnixMilli())
+		b, err := s.store.RedeemAgentInvite(ctx, agentHash(in.Invite), agentHash(credential), identity, time.Now().UnixMilli())
 		if errors.Is(err, store.ErrNotFound) {
 			c.JSON(http.StatusNotFound, map[string]string{"error": "Invitation expired, already redeemed, or unavailable. Create a new invitation in Pudding."})
 			return nil
@@ -112,6 +140,9 @@ func (s *Server) agentCommand(c *cart.Context) error {
 	}
 	if err != nil {
 		return s.failAgent(c, err)
+	}
+	if action == "disconnect" {
+		return s.disconnectAgent(c, b.SessionID, b.ID)
 	}
 	ctx = plugin.WithRuntimeID(ctx, b.RuntimeID)
 	sess, err := s.store.GetSession(ctx, b.SessionID)
@@ -196,7 +227,7 @@ func (s *Server) agentCommand(c *cart.Context) error {
 		for _, message := range reply.UserMessages {
 			out.Content = append(out.Content, map[string]any{"type": "text", "text": "User in Pudding: " + message})
 		}
-		if result.Name == tool.RequestCapability && result.Ok && reply.Mode == store.ModeCode {
+		if reply.RefreshProjectRules {
 			sess.ActiveMode = reply.Mode
 			rules, err := s.engine.ExternalProjectRules(ctx, sess, in.TurnID)
 			if err != nil {

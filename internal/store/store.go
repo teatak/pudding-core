@@ -1872,6 +1872,7 @@ type BeginTurnInput struct {
 	ClientMessageID string
 	UserText        string
 	UserParts       []ContentPart
+	UserMetadata    json.RawMessage
 	// Provider / Model 由 engine 在提交时刻解析后传入,随 turn 落库。
 	Provider    string
 	Model       string
