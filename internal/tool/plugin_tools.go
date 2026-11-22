@@ -51,10 +51,16 @@ func BuiltinPluginIDForTool(name string) (string, bool) {
 }
 
 func IsPluginAPITool(name string) bool {
+	return PluginAPIEndpointKind(name) != ""
+}
+
+func PluginAPIEndpointKind(name string) string {
 	switch name {
-	case RESTRequest, GraphQLRequest, GraphQLIntrospect, GraphQLSearch:
-		return true
+	case RESTRequest:
+		return plugin.EndpointKindREST
+	case GraphQLRequest, GraphQLIntrospect, GraphQLSearch:
+		return plugin.EndpointKindGraphQL
 	default:
-		return false
+		return ""
 	}
 }

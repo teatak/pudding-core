@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"image"
 	"image/png"
 	"net/http"
@@ -50,9 +51,10 @@ func newDebugMCPTestServer(t *testing.T, options ...tool.BuiltinOption) debugMCP
 	homeDir := t.TempDir()
 	hub := event.NewHub()
 	browser := tool.NewBrowserMCPRunner(homeDir)
-	builtins := tool.NewBuiltinRunner(append([]tool.BuiltinOption{tool.WithHomeDir(homeDir)}, options...)...)
+	plugins := plugin.NewService(homeDir, st).WithRuntimeSource(browser)
+	builtins := tool.NewBuiltinRunner(append([]tool.BuiltinOption{tool.WithHomeDir(homeDir), tool.WithPluginEndpoints(plugins)}, options...)...)
 	t.Cleanup(func() { _ = builtins.Close() })
-	plugins := plugin.NewService(homeDir, st).WithRuntimeSource(browser).WithBuiltinToolAvailability(builtins.ToolAvailable)
+	plugins.WithBuiltinToolAvailability(builtins.ToolAvailable)
 	runner := tool.NewMultiRunner(builtins, browser)
 	eng := engine.New(st, hub, registry.Static(mock.New()), st, engine.WithAttachmentHome(homeDir), engine.WithTools(runner), engine.WithPlugins(plugins))
 	srv := httptest.NewServer(New(eng, st, st, hub).WithHome(homeDir).WithPlugins(plugins).WithBrowserMCP(browser).Handler(testToken, nil))
@@ -600,6 +602,73 @@ func TestExternalMCPPageEditUsesOneBoundTurn(t *testing.T) {
 		post("/agent-mcp/disconnect", other, nil, 200)
 		post("/agent-mcp/status", other, nil, 404)
 	})
+}
+
+func TestExternalMCPSharedEndpointRefreshesPluginSkill(t *testing.T) {
+	endpoint := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":{"value":42}}`))
+	}))
+	defer endpoint.Close()
+	fixture := newDebugMCPTestServer(t)
+	dir := filepath.Join(fixture.home, "plugins", "notes")
+	skillDir := filepath.Join(dir, "skills", "read")
+	if err := os.MkdirAll(skillDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	manifest := fmt.Sprintf(`id: notes
+name: Notes
+auth: {required: false}
+skills: [skills/read/SKILL.md]
+endpoints:
+  notes_api: {kind: rest, url: '%[1]s'}
+  notes_graph: {kind: graphql, url: '%[1]s'}
+`, endpoint.URL)
+	if err := os.WriteFile(filepath.Join(dir, plugin.PluginFileName), []byte(manifest), 0600); err != nil {
+		t.Fatal(err)
+	}
+	writeGuide := func(body string) string {
+		t.Helper()
+		document := "---\nname: read\ndescription: Read notes.\n---\n" + body
+		if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(document), 0600); err != nil {
+			t.Fatal(err)
+		}
+		return document
+	}
+	initialGuide := writeGuide("Initial guide")
+	session := &store.Session{
+		ID: "notes-session", Provider: "mock", Model: "mock-model", ActiveMode: store.ModeWork,
+		ModeLease: store.ModeLeaseSession, LoadedPluginIDs: []string{"notes"},
+	}
+	if err := fixture.store.CreateSession(context.Background(), session); err != nil {
+		t.Fatal(err)
+	}
+	post := externalMCPPostForTest(t, fixture.server.URL)
+	invite := post("/sessions/notes-session/mcp-agents", "", nil, 201)["invite"]
+	credential := post("/agent-mcp/connect", "", map[string]any{"invite": invite, "name": "Reader"}, 200)["credential"].(string)
+	discovery := post("/agent-mcp/tools", credential, map[string]string{"query": tool.RESTRequest}, 200)
+	discovered, _ := discovery["instructions"].(map[string]any)
+	initial, _ := discovered["plugin_skill:notes"].(map[string]any)
+	if initial["content"] != initialGuide {
+		t.Fatalf("missing plugin guide in REST tool discovery: %v", discovered)
+	}
+	turn := post("/agent-mcp/begin", credential, map[string]string{"task": "Read the latest notes"}, 200)["turnID"]
+	for _, step := range []struct {
+		name, guide string
+		args        map[string]string
+	}{
+		{tool.RESTRequest, "First guide", map[string]string{"endpoint": "notes_api", "path": "/notes"}},
+		{tool.GraphQLRequest, "Updated guide", map[string]string{"endpoint": "notes_graph", "query": "{ value }"}},
+	} {
+		want := writeGuide(step.guide)
+		call := post("/agent-mcp/call", credential, map[string]any{"turnID": turn, "tool": step.name, "arguments": step.args}, 200)
+		guides, _ := call["instructions"].(map[string]any)
+		guide, _ := guides["plugin_skill:notes"].(map[string]any)
+		if call["isError"] == true || guide["content"] != want {
+			t.Fatalf("expected %s result and its current guide %q, got %v", step.name, want, call)
+		}
+	}
+	post("/agent-mcp/end", credential, map[string]any{"turnID": turn}, 200)
 }
 
 func TestExternalMCPBrowserPluginKeepsTurnApproval(t *testing.T) {

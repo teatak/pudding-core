@@ -198,6 +198,9 @@ func (e *Engine) executeExternalRequest(ctx context.Context, sid string, active 
 	call := tool.Call{SessionID: sid, TurnID: active.turnID, CallID: store.NewID("call"), Name: req.name, Args: req.args}
 	previousMode := mode
 	reply.Result, mode, err = e.executeDirectToolCall(ctx, mode, defs, parts, call)
+	if reply.Result.EndpointPluginID != "" {
+		reply.PluginID = reply.Result.EndpointPluginID
+	}
 	reply.Mode = mode
 	reply.RefreshProjectRules = mode == store.ModeCode && (mode != previousMode || (req.name == tool.RequestCapability && reply.Result.Ok))
 	if ref, ok := tool.ReferencedSkill(reply.Result.Name, reply.Result.Ok, reply.Result.Content); ok {

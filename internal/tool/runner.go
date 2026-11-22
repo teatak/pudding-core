@@ -47,6 +47,8 @@ type Result struct {
 	ContextAttachments []store.Attachment
 	SummaryKind        string
 	SummaryCount       int
+	// EndpointPluginID identifies the plugin selected for a shared REST or GraphQL call.
+	EndpointPluginID string `json:"-"`
 }
 
 const (

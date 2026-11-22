@@ -1876,10 +1876,7 @@ func pluginDefinitionCallable(state sessionPluginState, mode store.AgentMode) bo
 }
 
 func pluginAPIToolCallable(name string, states map[string]sessionPluginState, mode store.AgentMode) bool {
-	kind := plugin.EndpointKindREST
-	if name != tool.RESTRequest {
-		kind = plugin.EndpointKindGraphQL
-	}
+	kind := tool.PluginAPIEndpointKind(name)
 	for _, state := range states {
 		if !pluginDefinitionCallable(state, mode) {
 			continue
@@ -2300,6 +2297,7 @@ func (e *Engine) dispatchToolCall(ctx context.Context, sessionID, turnID string,
 			result = pluginAPINotLoadedResult(call)
 		default:
 			result = e.executeAllowedTool(ctx, sessionID, turnID, nextMode, call)
+			result.EndpointPluginID = pluginID
 		}
 	} else if !tool.HasDefinition(allowedTools, call.Name) {
 		known, err := e.toolNameKnown(ctx, sessionID, call.Name)

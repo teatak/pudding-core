@@ -288,6 +288,7 @@ func (s *Server) agentCatalog(ctx context.Context, sess *store.Session, b *store
 		}
 	}
 	var guideIDs []string
+	endpointKinds := map[string]bool{}
 	for _, d := range defs {
 		names = append(names, d.Name)
 		if q == "" || !strings.Contains(strings.ToLower(d.Name+" "+d.Description), q) {
@@ -297,6 +298,9 @@ func (s *Server) agentCatalog(ctx context.Context, sess *store.Session, b *store
 			continue
 		}
 		matches = append(matches, debugMCPTool{Name: d.Name, Description: d.Description, InputSchema: d.InputSchema})
+		if kind := tool.PluginAPIEndpointKind(d.Name); kind != "" {
+			endpointKinds[kind] = true
+		}
 		id := d.PluginID
 		if id == "" {
 			id, _ = tool.BuiltinPluginIDForTool(d.Name)
@@ -311,8 +315,18 @@ func (s *Server) agentCatalog(ctx context.Context, sess *store.Session, b *store
 			return nil, err
 		}
 		for _, p := range list {
-			if p != nil && p.Enabled {
-				plugins = append(plugins, map[string]any{"id": p.ID, "description": p.Description, "requiredMode": p.RequiredMode, "loaded": slices.Contains(sess.LoadedPluginIDs, p.ID)})
+			if p == nil || !p.Enabled {
+				continue
+			}
+			loaded := slices.Contains(sess.LoadedPluginIDs, p.ID)
+			plugins = append(plugins, map[string]any{"id": p.ID, "description": p.Description, "requiredMode": p.RequiredMode, "loaded": loaded})
+			if loaded && len(endpointKinds) > 0 && !slices.Contains(guideIDs, p.ID) {
+				for _, endpoint := range p.Endpoints {
+					if endpointKinds[endpoint.Kind] {
+						guideIDs = append(guideIDs, p.ID)
+						break
+					}
+				}
 			}
 		}
 	}
