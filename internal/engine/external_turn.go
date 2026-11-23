@@ -217,6 +217,13 @@ func (e *Engine) executeExternalRequest(ctx context.Context, sid string, active 
 	if err != nil {
 		return reply, mode, err
 	}
+	// The canonical result is already in history. Send the same compact JSON that
+	// these coding tools describe, with readback only when the reader is available.
+	switch reply.Result.Name {
+	case tool.FileSlice, tool.FileSearch, tool.CommandRun, tool.CommandSession:
+		reply.Result.Content = tool.ModelResultContent(reply.Result.Name, reply.Result.Ok, reply.Result.Content,
+			active.turnID, call.CallID, tool.HasDefinition(defs, tool.HistoryGetMessage))
+	}
 	if steers := active.consumeSteers(); len(steers) > 0 {
 		if err = e.commitTurnParts(active.turnID, parts, true); err != nil {
 			return reply, mode, err

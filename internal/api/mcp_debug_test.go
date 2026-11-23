@@ -26,6 +26,7 @@ import (
 	"github.com/teatak/pudding-core/internal/plugin"
 	"github.com/teatak/pudding-core/internal/provider/mock"
 	"github.com/teatak/pudding-core/internal/provider/registry"
+	"github.com/teatak/pudding-core/internal/skill"
 	"github.com/teatak/pudding-core/internal/store"
 	"github.com/teatak/pudding-core/internal/store/storetest"
 	"github.com/teatak/pudding-core/internal/tool"
@@ -52,12 +53,13 @@ func newDebugMCPTestServer(t *testing.T, options ...tool.BuiltinOption) debugMCP
 	hub := event.NewHub()
 	browser := tool.NewBrowserMCPRunner(homeDir)
 	plugins := plugin.NewService(homeDir, st).WithRuntimeSource(browser)
-	builtins := tool.NewBuiltinRunner(append([]tool.BuiltinOption{tool.WithHomeDir(homeDir), tool.WithPluginEndpoints(plugins)}, options...)...)
+	skills := skill.NewService(homeDir)
+	builtins := tool.NewBuiltinRunner(append([]tool.BuiltinOption{tool.WithHomeDir(homeDir), tool.WithHistorySearch(st), tool.WithPluginEndpoints(plugins), tool.WithSkills(skills)}, options...)...)
 	t.Cleanup(func() { _ = builtins.Close() })
 	plugins.WithBuiltinToolAvailability(builtins.ToolAvailable)
 	runner := tool.NewMultiRunner(builtins, browser)
-	eng := engine.New(st, hub, registry.Static(mock.New()), st, engine.WithAttachmentHome(homeDir), engine.WithTools(runner), engine.WithPlugins(plugins))
-	srv := httptest.NewServer(New(eng, st, st, hub).WithHome(homeDir).WithPlugins(plugins).WithBrowserMCP(browser).Handler(testToken, nil))
+	eng := engine.New(st, hub, registry.Static(mock.New()), st, engine.WithAttachmentHome(homeDir), engine.WithTools(runner), engine.WithPlugins(plugins), engine.WithSkills(skills))
+	srv := httptest.NewServer(New(eng, st, st, hub).WithHome(homeDir).WithPlugins(plugins).WithSkills(skills).WithBrowserMCP(browser).Handler(testToken, nil))
 	t.Cleanup(srv.Close)
 	return debugMCPTestServer{engine: eng, hub: hub, server: srv, store: st, browser: browser, home: homeDir}
 }
@@ -646,7 +648,21 @@ endpoints:
 	post := externalMCPPostForTest(t, fixture.server.URL)
 	invite := post("/sessions/notes-session/mcp-agents", "", nil, 201)["invite"]
 	credential := post("/agent-mcp/connect", "", map[string]any{"invite": invite, "name": "Reader"}, 200)["credential"].(string)
+	brief := post("/agent-mcp/tools", credential, map[string]bool{"namesOnly": true}, 200)
+	if names, ok := brief["tools"].([]any); !ok || !slices.Contains(names, any(tool.RESTRequest)) {
+		t.Fatalf("missing REST tool in connection catalog: %v", brief)
+	}
+	for _, field := range []string{"instructions", "projectInstructions", "plugins", "skills", "matches"} {
+		if _, exists := brief[field]; exists {
+			t.Fatalf("connection catalog includes %s", field)
+		}
+	}
 	discovery := post("/agent-mcp/tools", credential, map[string]string{"query": tool.RESTRequest}, 200)
+	for _, field := range []string{"plugins", "skills", "tools"} {
+		if _, exists := discovery[field]; exists {
+			t.Fatalf("targeted lookup includes %s", field)
+		}
+	}
 	discovered, _ := discovery["instructions"].(map[string]any)
 	initial, _ := discovered["plugin_skill:notes"].(map[string]any)
 	if initial["content"] != initialGuide {
@@ -668,6 +684,39 @@ endpoints:
 			t.Fatalf("expected %s result and its current guide %q, got %v", step.name, want, call)
 		}
 	}
+	post("/agent-mcp/end", credential, map[string]any{"turnID": turn}, 200)
+}
+
+func TestExternalMCPSkillReadDeliversOneBodyAndRemainsRefreshable(t *testing.T) {
+	fixture := newDebugMCPTestServer(t)
+	dir := filepath.Join(fixture.home, "skills", "notes")
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	const body = "UNIQUE_NOTES_GUIDE_BODY"
+	if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte("---\nname: notes\ndescription: Read notes.\n---\n"+body), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.store.CreateSession(context.Background(), &store.Session{ID: "notes", Provider: "mock", Model: "mock-model", ActiveMode: store.ModeWork}); err != nil {
+		t.Fatal(err)
+	}
+	post := externalMCPPostForTest(t, fixture.server.URL)
+	invite := post("/sessions/notes/mcp-agents", "", nil, 201)["invite"]
+	credential := post("/agent-mcp/connect", "", map[string]any{"invite": invite, "name": "Reader"}, 200)["credential"].(string)
+	turn := post("/agent-mcp/begin", credential, map[string]string{"task": "Read notes skill"}, 200)["turnID"]
+	count := func(result map[string]any, want int) {
+		t.Helper()
+		data, err := json.Marshal(result)
+		if err != nil || result["isError"] == true || bytes.Count(data, []byte(body)) != want {
+			t.Fatalf("expected %d guide copies, got %s (%v)", want, data, err)
+		}
+	}
+	count(post("/agent-mcp/call", credential, map[string]any{
+		"turnID": turn, "tool": tool.SkillRead, "arguments": map[string]string{"skill_id": "notes"},
+	}, 200), 1)
+	count(post("/agent-mcp/tools", credential, map[string]string{"query": tool.TimeGetCurrent}, 200), 0)
+	count(post("/agent-mcp/tools", credential, nil, 200), 1)
+	count(post("/agent-mcp/call", credential, map[string]any{"turnID": turn, "tool": tool.TimeGetCurrent}, 200), 1)
 	post("/agent-mcp/end", credential, map[string]any{"turnID": turn}, 200)
 }
 
@@ -717,16 +766,65 @@ func TestExternalMCPBrowserPluginKeepsTurnApproval(t *testing.T) {
 	if err := <-approved; err != nil {
 		t.Fatal(err)
 	}
-	if loaded["isError"] == true || !slices.ContainsFunc(loaded["content"].([]any), func(block any) bool {
+	rules, _ := loaded["projectInstructions"].(string)
+	if loaded["isError"] == true || !strings.Contains(rules, projectRule) || slices.ContainsFunc(loaded["content"].([]any), func(block any) bool {
 		text, _ := block.(map[string]any)["text"].(string)
 		return strings.Contains(text, projectRule)
 	}) {
-		t.Fatal("plugin-triggered Code approval did not deliver the project rules")
+		t.Fatal("plugin-triggered Code approval must deliver project rules once in their own field")
 	}
 	post("/agent-mcp/end", credential, map[string]string{"turnID": turnID}, 200)
 	status = post("/agent-mcp/status", credential, nil, 200)
 	if status["mode"] != "chat" || status["activeTurnID"] != "" {
 		t.Fatalf("browser capability outlived the turn: %v", status)
+	}
+}
+
+func TestExternalMCPFilePreviews(t *testing.T) {
+	fixture := newDebugMCPTestServer(t)
+	root := t.TempDir()
+	var lines []string
+	for i := 1; i <= 30; i++ {
+		lines = append(lines, fmt.Sprintf("sample line %02d", i))
+	}
+	if err := os.WriteFile(filepath.Join(root, "sample.txt"), []byte(strings.Join(lines, "\n")), 0600); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	const sessionID = "file-previews"
+	if err := fixture.store.CreateSession(ctx, &store.Session{ID: sessionID, Provider: "mock", Model: "mock-model", ActiveMode: store.ModeCode, ModeLease: store.ModeLeaseSession}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fixture.engine.SetSessionDirectories(ctx, sessionID, []string{root}); err != nil {
+		t.Fatal(err)
+	}
+	post := externalMCPPostForTest(t, fixture.server.URL)
+	invite := post("/sessions/"+sessionID+"/mcp-agents", "", nil, 201)["invite"]
+	credential := post("/agent-mcp/connect", "", map[string]any{"invite": invite, "name": "Code Agent"}, 200)["credential"].(string)
+	turn := post("/agent-mcp/begin", credential, map[string]string{"task": "Inspect source"}, 200)["turnID"]
+	defer post("/agent-mcp/end", credential, map[string]any{"turnID": turn}, 200)
+	call := func(name string, args map[string]any) map[string]any {
+		t.Helper()
+		out := post("/agent-mcp/call", credential, map[string]any{"turnID": turn, "tool": name, "arguments": args}, 200)
+		raw := out["content"].([]any)[0].(map[string]any)["text"].(string)
+		var fields map[string]any
+		if err := json.Unmarshal([]byte(raw), &fields); err != nil || out["isError"] == true {
+			t.Fatalf("%s: %s (%v)", name, raw, err)
+		}
+		return fields
+	}
+	slice := call(tool.FileSlice, map[string]any{"scope": "project", "path": "sample.txt", "start": 1, "end": 2})
+	if _, duplicate := slice["content"]; duplicate || slice["numberedContent"] != "1: sample line 01\n2: sample line 02" {
+		t.Fatalf("expected one numbered copy of source lines: %v", slice)
+	}
+	search := call(tool.FileSearch, map[string]any{"scope": "project", "path": "sample.txt", "query": "sample"})
+	if search["preview_only"] != true || search["matchCount"] != float64(30) || search["shown_matches"] != float64(20) {
+		t.Fatalf("unexpected search preview: %v", search)
+	}
+	page := call(tool.HistoryGetMessage, map[string]any{"result_ref": search["result_ref"], "field": "matches", "unit": "items", "offset": 29})
+	items := page["items"].([]any)
+	if len(items) != 1 || items[0].(map[string]any)["text"] != "sample line 30" {
+		t.Fatalf("last canonical match missing: %v", page)
 	}
 }
 
@@ -780,6 +878,23 @@ func TestExternalMCPForegroundCommandLifecycle(t *testing.T) {
 		}
 		if result["running"] != false || result["exitCode"] != float64(7) || result["stderr"] != "missing manifest\n" {
 			t.Fatalf("lost the build exit code or failure log after yield: %v", result)
+		}
+	})
+	t.Run("long log retains exit status and exact middle output", func(t *testing.T) {
+		log := strings.Repeat("compiling dependency\n", 350) + "middle marker\n" + strings.Repeat("linking dependency\n", 350)
+		if err := os.WriteFile(filepath.Join(root, "build.log"), []byte(log), 0600); err != nil {
+			t.Fatal(err)
+		}
+		turnID := begin()
+		defer post("/agent-mcp/end", credential, map[string]string{"turnID": turnID, "status": "failed"}, 200)
+		result := call(turnID, tool.CommandRun, map[string]any{"command": "cat build.log; exit 7", "scope": "project"})
+		if result["preview_only"] != true || result["exitCode"] != float64(7) {
+			t.Fatalf("expected bounded log with exit status: %v", result)
+		}
+		page := call(turnID, tool.HistoryGetMessage, map[string]any{"result_ref": result["result_ref"], "field": "stdout", "unit": "lines", "query": "middle marker"})
+		lines := page["lines"].([]any)
+		if len(lines) != 1 || strings.TrimSuffix(lines[0].(map[string]any)["text"].(string), "\n") != "middle marker" {
+			t.Fatalf("missing original log line: %v", page)
 		}
 	})
 	t.Run("stop a yielded command from Pudding", func(t *testing.T) {

@@ -79,6 +79,7 @@ type agentRequest struct {
 	TurnID        string           `json:"turnID"`
 	Tool          string           `json:"tool"`
 	Query         string           `json:"query"`
+	NamesOnly     bool             `json:"namesOnly"`
 	Arguments     json.RawMessage  `json:"arguments"`
 	Status        store.TurnStatus `json:"status"`
 	Summary       string           `json:"summary"`
@@ -155,7 +156,7 @@ func (s *Server) agentCommand(c *cart.Context) error {
 	}
 	switch action {
 	case "tools":
-		catalog, err := s.agentCatalog(ctx, sess, b, in.Query)
+		catalog, err := s.agentCatalog(ctx, sess, b, in.Query, in.NamesOnly)
 		if err != nil {
 			return s.failAgent(c, err)
 		}
@@ -210,7 +211,7 @@ func (s *Server) agentCommand(c *cart.Context) error {
 			return s.failAgent(c, err)
 		}
 		result := reply.Result
-		if _, ok := tool.ReferencedSkill(result.Name, result.Ok, result.Content); ok {
+		if ref, ok := tool.ReferencedSkill(result.Name, result.Ok, result.Content); ok {
 			sess, err = s.store.GetSession(ctx, b.SessionID)
 			if err != nil {
 				return s.failAgent(c, err)
@@ -219,6 +220,8 @@ func (s *Server) agentCommand(c *cart.Context) error {
 			if err != nil {
 				return s.failAgent(c, err)
 			}
+			// The primary result already carries this guide. SkillRefs is a per-reply copy.
+			delete(reply.SkillRefs, ref.Key())
 		}
 		out, err := s.externalMCPToolResult(b.SessionID, result)
 		if err != nil {
@@ -227,14 +230,14 @@ func (s *Server) agentCommand(c *cart.Context) error {
 		for _, message := range reply.UserMessages {
 			out.Content = append(out.Content, map[string]any{"type": "text", "text": "User in Pudding: " + message})
 		}
+		var projectInstructions *string
 		if reply.RefreshProjectRules {
 			sess.ActiveMode = reply.Mode
 			rules, err := s.engine.ExternalProjectRules(ctx, sess, in.TurnID)
 			if err != nil {
-				rules = "Could not read project instructions: " + err.Error()
-			}
-			if rules != "" {
-				out.Content = append(out.Content, map[string]any{"type": "text", "text": rules})
+				out.Content = append(out.Content, map[string]any{"type": "text", "text": "Could not read project instructions: " + err.Error()})
+			} else {
+				projectInstructions = &rules
 			}
 		}
 		var guides map[string]json.RawMessage
@@ -244,7 +247,7 @@ func (s *Server) agentCommand(c *cart.Context) error {
 				plugins = []string{reply.PluginID}
 			}
 			sess.ActiveMode = reply.Mode
-			guides, err = s.engine.ExternalGuides(ctx, sess, plugins, reply.SkillRefs)
+			guides, err = s.engine.ExternalGuides(ctx, sess, plugins, reply.SkillRefs, true)
 			if err != nil {
 				// The tool may have already made changes. Preserve its outcome.
 				out.Content = append(out.Content, map[string]any{"type": "text", "text": "Could not refresh skill instructions: " + err.Error()})
@@ -252,8 +255,9 @@ func (s *Server) agentCommand(c *cart.Context) error {
 		}
 		c.JSON(200, struct {
 			debugMCPResult
-			Instructions map[string]json.RawMessage `json:"instructions,omitempty"`
-		}{out, guides})
+			Instructions        map[string]json.RawMessage `json:"instructions,omitempty"`
+			ProjectInstructions *string                    `json:"projectInstructions,omitempty"`
+		}{out, guides, projectInstructions})
 	case "end":
 		if in.Status == "" {
 			in.Status = store.TurnCompleted
@@ -271,17 +275,27 @@ func (s *Server) agentCommand(c *cart.Context) error {
 	return nil
 }
 
-func (s *Server) agentCatalog(ctx context.Context, sess *store.Session, b *store.ExternalAgentBinding, query string) (map[string]any, error) {
+func (s *Server) agentCatalog(ctx context.Context, sess *store.Session, b *store.ExternalAgentBinding, query string, namesOnly bool) (map[string]any, error) {
 	turnID, mode := s.engine.ExternalTurnContext(b, sess.ActiveMode)
 	sess.ActiveMode = mode
 	defs, err := s.engine.ToolDefinitions(ctx, sess.ID, mode)
 	if err != nil {
 		return nil, err
 	}
-	names := []string{}
+	out := map[string]any{"session": sess.Title, "mode": mode, "activeTurnID": turnID}
+	q := strings.ToLower(strings.TrimSpace(query))
+	if q == "" || namesOnly {
+		names := make([]string, 0, len(defs))
+		for _, d := range defs {
+			names = append(names, d.Name)
+		}
+		out["tools"] = names
+		if namesOnly {
+			return out, nil
+		}
+	}
 	matches := []debugMCPTool{}
 	plugins := []map[string]any{}
-	q := strings.ToLower(strings.TrimSpace(query))
 	if q != "" {
 		if i := slices.IndexFunc(defs, func(d provider.ToolDef) bool { return strings.EqualFold(d.Name, q) }); i >= 0 {
 			defs = defs[i : i+1]
@@ -290,7 +304,6 @@ func (s *Server) agentCatalog(ctx context.Context, sess *store.Session, b *store
 	var guideIDs []string
 	endpointKinds := map[string]bool{}
 	for _, d := range defs {
-		names = append(names, d.Name)
 		if q == "" || !strings.Contains(strings.ToLower(d.Name+" "+d.Description), q) {
 			continue
 		}
@@ -309,7 +322,7 @@ func (s *Server) agentCatalog(ctx context.Context, sess *store.Session, b *store
 			guideIDs = append(guideIDs, id)
 		}
 	}
-	if s.plugins != nil {
+	if s.plugins != nil && (q == "" || len(endpointKinds) > 0) {
 		list, err := s.plugins.ListDefinitions(ctx)
 		if err != nil {
 			return nil, err
@@ -319,7 +332,9 @@ func (s *Server) agentCatalog(ctx context.Context, sess *store.Session, b *store
 				continue
 			}
 			loaded := slices.Contains(sess.LoadedPluginIDs, p.ID)
-			plugins = append(plugins, map[string]any{"id": p.ID, "description": p.Description, "requiredMode": p.RequiredMode, "loaded": loaded})
+			if q == "" {
+				plugins = append(plugins, map[string]any{"id": p.ID, "description": p.Description, "requiredMode": p.RequiredMode, "loaded": loaded})
+			}
 			if loaded && len(endpointKinds) > 0 && !slices.Contains(guideIDs, p.ID) {
 				for _, endpoint := range p.Endpoints {
 					if endpointKinds[endpoint.Kind] {
@@ -330,8 +345,12 @@ func (s *Server) agentCatalog(ctx context.Context, sess *store.Session, b *store
 			}
 		}
 	}
-	out := map[string]any{"session": sess.Title, "mode": sess.ActiveMode, "tools": names, "matches": matches, "plugins": plugins, "activeTurnID": turnID}
-	if s.skills != nil {
+	if q != "" {
+		out["matches"] = matches
+	} else {
+		out["plugins"] = plugins
+	}
+	if q == "" && s.skills != nil {
 		skills, err := s.skills.ListSkills(ctx)
 		if err != nil {
 			return nil, err
@@ -341,7 +360,7 @@ func (s *Server) agentCatalog(ctx context.Context, sess *store.Session, b *store
 	if q == "" {
 		guideIDs = sess.LoadedPluginIDs
 	}
-	guides, err := s.engine.ExternalGuides(ctx, sess, guideIDs, nil)
+	guides, err := s.engine.ExternalGuides(ctx, sess, guideIDs, nil, q == "")
 	if err != nil {
 		return nil, err
 	}

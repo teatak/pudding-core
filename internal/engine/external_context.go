@@ -50,7 +50,10 @@ func (e *Engine) externalSkillRefs(ctx context.Context, sessionID string) (map[s
 	return refs, nil
 }
 
-func (e *Engine) ExternalGuides(ctx context.Context, sess *store.Session, plugins []string, refs map[string]tool.SkillReference) (map[string]json.RawMessage, error) {
+func (e *Engine) ExternalGuides(ctx context.Context, sess *store.Session, plugins []string, refs map[string]tool.SkillReference, includeGlobal bool) (map[string]json.RawMessage, error) {
+	if !includeGlobal && len(plugins) == 0 {
+		return nil, nil
+	}
 	var err error
 	if refs == nil {
 		refs, err = e.externalSkillRefs(ctx, sess.ID)
@@ -60,7 +63,7 @@ func (e *Engine) ExternalGuides(ctx context.Context, sess *store.Session, plugin
 	}
 	selected := make(map[string]tool.SkillReference)
 	for key, ref := range refs {
-		if ref.Kind == tool.GlobalSkillReference {
+		if includeGlobal && ref.Kind == tool.GlobalSkillReference {
 			selected[key] = ref
 		}
 	}
