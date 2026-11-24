@@ -58,7 +58,7 @@ web 契约 `providerProfile.protocol` 与设置表单下拉;不在枚举内的 p
 
 | 端点 | 请求 | 响应 | 错误 |
 | --- | --- | --- | --- |
-| `POST /sessions` | `{title?, provider, model, projectID?}` | 201 Session | — |
+| `POST /sessions` | `{title?, clientRequestID?, projectID?, provider, model}，创建待接入 Agent 的空会话时可用 `externalAgent: true` 代替模型参数` | 201 Session | — |
 | `GET /sessions` | — | `{sessions: []}`，普通／归档列表仅返回主会话 | — |
 | `GET /sessions/{id}/children` | — | `{children: [{session,status,latestTurnID?,pendingApprovals,resultCollected,summary?}]}`，包括最新重试轮次 | 404 |
 | `POST /sessions/{id}/collaboration/stop` | — | 204；取消子会话运行／排队输入，保留主会话与历史 | 400 / 404 |

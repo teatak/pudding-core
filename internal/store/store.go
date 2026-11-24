@@ -48,7 +48,7 @@ type Session struct {
 	Title               string `json:"title"`
 	AssistantSessionID  string `json:"assistantSessionID,omitempty"`
 	AssistantTaskActive bool   `json:"assistantTaskActive,omitempty"`
-	// Provider 是 provider profile 名;会话创建时必须显式写入。
+	// Provider and Model may both be empty until a local model is selected.
 	Provider          string    `json:"provider"`
 	Model             string    `json:"model"`
 	ReasoningEffort   string    `json:"reasoningEffort,omitempty"`
@@ -255,12 +255,23 @@ func (p *ProviderProfile) ModelByID(id string) (ProviderModel, bool) {
 }
 
 func NormalizeSessionProviderModel(s *Session) error {
+	if err := NormalizeRootSession(s); err != nil {
+		return err
+	}
+	if s.Model == "" {
+		return ErrInvalidSession
+	}
+	return nil
+}
+
+// NormalizeRootSession also permits a conversation driven by an external agent.
+func NormalizeRootSession(s *Session) error {
 	if s == nil {
 		return ErrInvalidSession
 	}
 	s.Provider = strings.TrimSpace(s.Provider)
 	s.Model = strings.TrimSpace(s.Model)
-	if s.Provider == "" || s.Model == "" {
+	if (s.Provider == "") != (s.Model == "") {
 		return ErrInvalidSession
 	}
 	s.ReasoningEffort = strings.TrimSpace(s.ReasoningEffort)

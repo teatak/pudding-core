@@ -1077,6 +1077,44 @@ func TestExternalMCPBrowserScreenshotProvidesLocalFallback(t *testing.T) {
 	}
 }
 
+func TestExternalMCPWithoutLocalModel(t *testing.T) {
+	fixture := newDebugMCPTestServer(t)
+	ctx := context.Background()
+	if err := fixture.store.DeleteProviderProfile(ctx, "mock"); err != nil {
+		t.Fatal(err)
+	}
+	post := externalMCPPostForTest(t, fixture.server.URL)
+	if out := post("/sessions", "", map[string]any{}, 400); out["error"] != "no_model" {
+		t.Fatalf("ordinary conversation without a model: %v", out)
+	}
+	request := map[string]any{"externalAgent": true, "clientRequestID": "agent-first"}
+	session := post("/sessions", "", request, 201)
+	id := session["id"].(string)
+	if session["provider"] != "" || session["model"] != "" || post("/sessions", "", request, 201)["id"] != id {
+		t.Fatal("expected one empty conversation on create and retry")
+	}
+	if out := post("/sessions/"+id+"/submit", "", map[string]string{"clientMessageID": "local", "text": "Hello"}, 400); out["error"] != "no_model" {
+		t.Fatalf("local submit without a model: %v", out)
+	}
+	invite := post("/sessions/"+id+"/mcp-agents", "", nil, 201)["invite"]
+	credential := post("/agent-mcp/connect", "", map[string]any{"invite": invite, "name": "External"}, 200)["credential"].(string)
+	turnID := post("/agent-mcp/begin", credential, map[string]string{"task": "Check time"}, 200)["turnID"].(string)
+	result := post("/agent-mcp/call", credential, map[string]any{"turnID": turnID, "tool": tool.TimeGetCurrent, "arguments": map[string]any{}}, 200)
+	if result["isError"] == true || result["content"] == nil {
+		t.Fatalf("external time tool: %v", result)
+	}
+	post("/agent-mcp/end", credential, map[string]string{"turnID": turnID, "summary": "Time checked"}, 200)
+	turn, err := fixture.store.GetConversationTurn(ctx, id, turnID)
+	if err != nil || turn.Status != store.TurnCompleted {
+		t.Fatalf("persisted external turn: %+v, %v", turn, err)
+	}
+	provider, model := "mock", "local-model"
+	updated, err := fixture.store.UpdateSession(ctx, id, store.SessionUpdate{Provider: &provider, Model: &model})
+	if err != nil || updated.Model != model || updated.Provider != provider {
+		t.Fatalf("select local model on same conversation: %+v, %v", updated, err)
+	}
+}
+
 func TestExternalMCPProjectInstructionsDeferredUntilCodeTool(t *testing.T) {
 	fixture := newDebugMCPTestServer(t)
 	root := t.TempDir()

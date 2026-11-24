@@ -14,7 +14,7 @@ func (s *Store) CreateSessionOnce(ctx context.Context, requestID string, session
 	if requestID == "" {
 		return nil, store.ErrInvalidSession
 	}
-	if err := store.NormalizeSessionProviderModel(session); err != nil {
+	if err := store.NormalizeRootSession(session); err != nil {
 		return nil, err
 	}
 	// The existing primary key holds the durable creation identity. Its separate

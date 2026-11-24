@@ -469,6 +469,7 @@ func requestBaseURL(r *http.Request) string {
 
 type createSessionReq struct {
 	ClientRequestID *string `json:"clientRequestID"`
+	ExternalAgent   bool    `json:"externalAgent"`
 	Title           string  `json:"title"`
 	Provider        string  `json:"provider"`
 	Model           string  `json:"model"`
@@ -484,7 +485,10 @@ func (s *Server) createSession(c *cart.Context) error {
 	req.Provider = strings.TrimSpace(req.Provider)
 	req.Model = strings.TrimSpace(req.Model)
 	req.ProjectID = strings.TrimSpace(req.ProjectID)
-	if req.Provider == "" || req.Model == "" {
+	if req.ExternalAgent && (req.Provider != "" || req.Model != "") {
+		return badRequest(c, "external agent session must start without a local model")
+	}
+	if !req.ExternalAgent && (req.Provider == "" || req.Model == "") {
 		c.JSON(http.StatusBadRequest, map[string]string{"error": "no_model"})
 		return nil
 	}

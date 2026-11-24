@@ -39,13 +39,15 @@ export type AssistantAppearance = z.infer<typeof assistantAppearance>;
 export type AssistantSnapshot = z.infer<typeof assistantSnapshot>;
 export type SaveAssistantInput = z.infer<typeof saveAssistantRequest>;
 
-export const createSessionRequest = z.object({
+const createSessionFields = z.object({
   clientRequestID: z.string().regex(/^[A-Za-z0-9_-]{1,200}$/).optional(),
   title: z.string().optional(),
-  provider: z.string().min(1),
-  model: z.string().min(1),
   projectID: z.string().optional(),
 });
+export const createSessionRequest = z.discriminatedUnion("externalAgent", [
+  createSessionFields.extend({ externalAgent: z.literal(false).optional(), provider: z.string().min(1), model: z.string().min(1) }),
+  createSessionFields.extend({ externalAgent: z.literal(true), provider: z.never().optional(), model: z.never().optional() }),
+]);
 
 export const taskSchedule = z.object({
   kind: z.enum(["once", "daily", "weekly"]), timezone: z.string(),
@@ -86,7 +88,7 @@ export const session = z.object({
   assistantSessionID: z.string().optional(),
   id: z.string(),
   title: z.string(),
-  provider: z.string(), // provider profile 名;session 创建时必须显式写入
+  provider: z.string(), // May be empty until a local model is selected.
   model: z.string(),
   reasoningEffort: z.string().optional(),
   reasoningModelKey: z.string().optional(),

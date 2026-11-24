@@ -19,6 +19,8 @@ func TestSchemaReleaseContract(t *testing.T) {
 	// Published fingerprints through v32 are immutable. Unpublished Studio
 	// layouts 33–46 remain recognized sources, with v47 the only destination.
 	releasedFingerprints := map[int]string{
+		67: "c9ed022df9f018826738f4f9b0c14fd9540f18239c990899267c7fb700a1ffab",
+		66: "9f77564db5b457a85f5cba1ff903ba6e0cd17983d147660ea724be8b833ddd01",
 		65: "c9ed022df9f018826738f4f9b0c14fd9540f18239c990899267c7fb700a1ffab",
 		64: "f4c7398470192e13917c140ed78506d9cf439a11e026d99859f1e65a0024cbb8",
 		61: "2f00655dd94ca5c1ad84a0545295750c5f71f0052e8323f83ef4d2ee67b367fd",
@@ -109,6 +111,42 @@ func TestOpenCreatesVersionedSchema(t *testing.T) {
 	}
 	if version != currentSchemaVersion {
 		t.Fatalf("schema version = %d, want %d", version, currentSchemaVersion)
+	}
+}
+
+func TestOpenUnifiesAgentSessions(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "pudding.db")
+	db := openMigrationTestDB(t, path)
+	if err := createCurrentSchema(db); err != nil {
+		t.Fatal(err)
+	}
+	_, err := db.Exec(`ALTER TABLE sessions ADD COLUMN kind TEXT NOT NULL DEFAULT 'chat';
+INSERT INTO sessions (id, kind, provider, model, created_at, updated_at, last_activity_at) VALUES
+('bound','legacy_agent','mock','m',1,1,1), ('external','agent','','',1,1,1);
+INSERT INTO external_agent_bindings (id, session_id, runtime_id, expires_at, credential_hash)
+VALUES ('b','bound','r',0,'existing-credential');
+PRAGMA user_version=66;`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	st, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	ctx := context.Background()
+	for id, want := range map[string]string{"external": "", "bound": "m"} {
+		session, err := st.GetSession(ctx, id)
+		if err != nil || session.Model != want {
+			t.Fatalf("session %s: %+v, %v", id, session, err)
+		}
+	}
+	binding, err := st.AgentBinding(ctx, "existing-credential")
+	if err != nil || binding.SessionID != "bound" {
+		t.Fatalf("existing binding: %+v, %v", binding, err)
 	}
 }
 

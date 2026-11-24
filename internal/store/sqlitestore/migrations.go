@@ -19,7 +19,7 @@ import (
 const (
 	baselineSchemaVersion      = 1
 	currentSchemaLayoutVersion = 8
-	currentSchemaVersion       = 65
+	currentSchemaVersion       = 67
 )
 
 var (
@@ -35,6 +35,15 @@ type schemaMigration func(*sql.Tx) error
 // Unpublished Studio migrations 27–29 are consolidated into destination 30.
 // Unpublished Studio migrations 33–46 are consolidated into destination 47.
 var schemaMigrations = map[int]schemaMigration{
+	// v66 was an unpublished experiment that classified conversations by source.
+	67: func(tx *sql.Tx) error {
+		exists, err := tableColumnExists(tx, "sessions", "kind")
+		if err != nil || !exists {
+			return err
+		}
+		_, err = tx.Exec("ALTER TABLE sessions DROP COLUMN kind")
+		return err
+	},
 	65: func(tx *sql.Tx) error {
 		if err := addTableColumnIfMissing(tx, "external_agent_bindings", "agent_title", "TEXT NOT NULL DEFAULT ''"); err != nil {
 			return err
@@ -771,7 +780,7 @@ func setSchemaVersion(db *sql.DB, version int) error {
 }
 
 func supportedSchemaVersion(version int) bool {
-	return version == baselineSchemaVersion || schemaMigrations[version] != nil || (version >= 33 && version < 47)
+	return version == baselineSchemaVersion || version == 66 || schemaMigrations[version] != nil || (version >= 33 && version < 47)
 }
 
 func runSchemaMigration(db *sql.DB, version int, migration schemaMigration) (err error) {
@@ -1083,6 +1092,13 @@ type schemaReader interface {
 }
 
 func validateCurrentSchema(db schemaReader) error {
+	columns, err := tableColumns(db, "sessions")
+	if err != nil {
+		return err
+	}
+	if _, exists := columns["kind"]; exists {
+		return fmt.Errorf("retired column sessions.kind remains")
+	}
 	return validateSchemaWithRetiredColumns(db, currentSchemaContract)
 }
 

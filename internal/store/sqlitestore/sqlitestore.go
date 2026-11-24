@@ -378,7 +378,7 @@ func (s *Store) DeleteProject(ctx context.Context, id string) error {
 }
 
 func (s *Store) CreateSession(ctx context.Context, sess *store.Session) error {
-	if err := store.NormalizeSessionProviderModel(sess); err != nil {
+	if err := store.NormalizeRootSession(sess); err != nil {
 		return err
 	}
 	return s.tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
@@ -600,6 +600,9 @@ func (s *Store) UpdateSession(ctx context.Context, id string, upd store.SessionU
 			modelChanged = true
 		}
 		if modelChanged {
+			if sess.Model == "" || sess.Provider == "" {
+				return store.ErrInvalidSession
+			}
 			sess.ReasoningEffort = ""
 			sess.ReasoningModelKey = ""
 		}
