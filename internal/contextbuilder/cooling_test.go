@@ -133,12 +133,26 @@ func TestExternalMCPTurnsCoolToolResultsAndImagesByDefault(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	normState := &store.ProviderState{
+		Provider: "mock",
+		Model:    "m",
+		Kind:     provider.ContinuationAnthropic,
+		Data:     json.RawMessage(`[{"type":"thinking","thinking":"KEEP_ANTHROPIC_THINKING","signature":"sig_keep"},{"type":"tool_use","id":"n_big","name":"builtin_file_read","input":{}},{"type":"tool_use","id":"n_shot","name":"builtin_browser_screenshot","input":{}}]`),
+	}
+	if _, err := db.AppendTurnOutput(ctx, store.AppendTurnOutputInput{
+		TurnID:        "norm1",
+		ProviderState: normState,
+		Parts: []store.ContentPart{
+			{Type: store.ContentPartToolUse, CallID: "n_big", Name: tool.FileRead, Args: json.RawMessage(`{}`)},
+			{Type: store.ContentPartToolUse, CallID: "n_shot", Name: tool.BrowserScreenshot, Args: json.RawMessage(`{}`)},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := db.AppendTurnOutput(ctx, store.AppendTurnOutputInput{
 		TurnID: "norm1",
 		Parts: []store.ContentPart{
-			{Type: store.ContentPartToolUse, CallID: "n_big", Name: tool.FileRead, Args: json.RawMessage(`{}`)},
 			{Type: store.ContentPartToolResult, CallID: "n_big", Name: tool.FileRead, Ok: true, Content: normLarge},
-			{Type: store.ContentPartToolUse, CallID: "n_shot", Name: tool.BrowserScreenshot, Args: json.RawMessage(`{}`)},
 			{Type: store.ContentPartToolResult, CallID: "n_shot", Name: tool.BrowserScreenshot, Ok: true, Content: `{"ok":true}`},
 			store.AttachmentPart(normShot),
 		},
@@ -217,6 +231,13 @@ func TestExternalMCPTurnsCoolToolResultsAndImagesByDefault(t *testing.T) {
 	if extImages != 0 || normImages != 1 || !placeholderFound {
 		t.Fatalf("unexpected image cooling: extImages=%d normImages=%d placeholder=%v", extImages, normImages, placeholderFound)
 	}
+	anthWire, err := json.Marshal(anthropic.RequestInput(req).Messages)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(anthWire), "KEEP_ANTHROPIC_THINKING") {
+		t.Fatalf("external cold image stripped subsequent Anthropic thinking: %s", anthWire)
+	}
 
 	stored, err := db.ListMessages(ctx, "s", 0)
 	if err != nil {
@@ -243,5 +264,23 @@ func TestExternalMCPTurnsCoolToolResultsAndImagesByDefault(t *testing.T) {
 	uncooledWire, _ := json.Marshal(uncooledReq.Messages)
 	if strings.Contains(string(uncooledWire), "cold_only") || !strings.Contains(string(uncooledWire), "EXTERNAL_LARGE_OUTPUT") {
 		t.Fatal("external text result cooled without HistoryGetMessage")
+	}
+
+	// Without MediaRead, external images remain inline instead of being replaced with placeholders.
+	withoutMediaRead := []provider.ToolDef{defs[0], defs[1], defs[2], defs[3], defs[4]}
+	noMediaReq, err := b.BuildForProviderWithTools(ctx, "s", "mock", "m", string(store.ModeCode), withoutMediaRead, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var noMediaExtImages int
+	for _, m := range noMediaReq.Messages {
+		for _, p := range m.Parts {
+			if p.Type == provider.PartImage && p.ImageKey == extShot.AttachmentKey {
+				noMediaExtImages++
+			}
+		}
+	}
+	if noMediaExtImages != 1 {
+		t.Fatalf("external image cooled without MediaRead: %d", noMediaExtImages)
 	}
 }

@@ -422,6 +422,124 @@ func TestCompactOversizedMultiTurnUsesRollingBatches(t *testing.T) {
 			t.Fatal("single oversized message triggered provider calls or changed history")
 		}
 	})
+
+	t.Run("small_window_retains_tail", func(t *testing.T) {
+		smallEng, smallMS, _, smallSID := newTestEngine(t)
+		defer smallEng.Stop()
+		if err := smallMS.PutProviderProfile(ctx, &store.ProviderProfile{ID: "mock", Protocol: "openai-compatible",
+			Models: []store.ProviderModel{{ID: "mock-model", ContextWindow: 8192}}}); err != nil {
+			t.Fatal(err)
+		}
+		for i := 1; i <= 4; i++ {
+			appendEngineTestTurn(t, smallMS, smallSID, fmt.Sprintf("old-%d", i), fmt.Sprintf("OLD_%d %s", i, strings.Repeat("x", 4000)), "ok")
+		}
+		for i := 1; i <= 2; i++ {
+			appendEngineTestTurn(t, smallMS, smallSID, fmt.Sprintf("tail-%d", i), fmt.Sprintf("RETAIN_TAIL_FACT_%d %s", i, strings.Repeat("r", 12000)), "ok")
+		}
+		var smallReqs []provider.Request
+		smallEng.resolver = registry.Static(compactClientFunc(func(ctx context.Context, req provider.Request) (<-chan provider.Chunk, error) {
+			input := requestInputTokens(req)
+			output, _ := req.Config.MaxOutputTokens()
+			if output <= 0 || input+output > req.Config.ContextWindow {
+				t.Errorf("small-window rolling batch exceeded window: input=%d output=%d window=%d", input, output, req.Config.ContextWindow)
+			}
+			smallReqs = append(smallReqs, req)
+			return compactChunks(provider.Chunk{Delta: fmt.Sprintf("small batch %d summary.", len(smallReqs)), Done: true, Finish: provider.FinishStop}), nil
+		}))
+		if _, err := smallEng.Compact(ctx, CompactInput{SessionID: smallSID}); err != nil {
+			t.Fatalf("small-window rolling compact failed: %v", err)
+		}
+		if len(smallReqs) < 2 {
+			t.Fatalf("expected rolling batches for small window, got %d request(s)", len(smallReqs))
+		}
+		finalPrompt := smallReqs[len(smallReqs)-1].Messages[0].Text
+		if !strings.Contains(finalPrompt, `id="rolling_summary"`) || !strings.Contains(finalPrompt, `action="retain"`) || !strings.Contains(finalPrompt, "RETAIN_TAIL_FACT_1") {
+			t.Fatalf("small-window probe dropped retained tail or rolling summary: %s", finalPrompt)
+		}
+	})
+
+	t.Run("running_compact_preserves_retain_order", func(t *testing.T) {
+		runEng, runMS, _, runSID := newTestEngine(t)
+		defer runEng.Stop()
+		runEng.tools = &recordingToolRunner{defs: []provider.ToolDef{{Name: tool.TimeGetCurrent, Capability: store.ModeCode}}}
+		if err := runMS.PutProviderProfile(ctx, &store.ProviderProfile{ID: "mock", Protocol: "openai-compatible",
+			Models: []store.ProviderModel{{ID: "mock-model", ContextWindow: 8192, Capabilities: &store.ModelCaps{Tools: true}}}}); err != nil {
+			t.Fatal(err)
+		}
+		sess, _ := runMS.GetSession(ctx, runSID)
+		resolved, err := runEng.resolveModel(ctx, sess)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := runMS.BeginTurn(ctx, store.BeginTurnInput{
+			SessionID: runSID, TurnID: "running", UserMessageID: "u_run", ClientMessageID: "u_run",
+			UserText: "RUNNING_INPUT_BEFORE_COLD " + strings.Repeat("u", 10000), Mode: store.ModeCode,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := runMS.AppendTurnOutput(ctx, store.AppendTurnOutputInput{
+			TurnID: "running",
+			Parts: []store.ContentPart{
+				{Type: store.ContentPartToolUse, CallID: "c1", Name: tool.TimeGetCurrent, Args: []byte(`{}`)},
+				{Type: store.ContentPartToolResult, CallID: "c1", Name: tool.TimeGetCurrent, Ok: true, Content: "COLD_1 " + strings.Repeat("a", 10000)},
+				{Type: store.ContentPartToolUse, CallID: "c2", Name: tool.TimeGetCurrent, Args: []byte(`{}`)},
+				{Type: store.ContentPartToolResult, CallID: "c2", Name: tool.TimeGetCurrent, Ok: true, Content: "COLD_2 " + strings.Repeat("b", 10000)},
+				{Type: store.ContentPartToolUse, CallID: "c3", Name: tool.TimeGetCurrent, Args: []byte(`{}`)},
+				{Type: store.ContentPartToolResult, CallID: "c3", Name: tool.TimeGetCurrent, Ok: true, Content: "RETAIN_AFTER_COLD " + strings.Repeat("z", 4000)},
+			},
+		}); err != nil {
+			t.Fatal(err)
+		}
+		var runReqs []provider.Request
+		runEng.resolver = registry.Static(compactClientFunc(func(ctx context.Context, req provider.Request) (<-chan provider.Chunk, error) {
+			runReqs = append(runReqs, req)
+			return compactChunks(provider.Chunk{Delta: fmt.Sprintf("running batch %d.", len(runReqs)), Done: true, Finish: provider.FinishStop}), nil
+		}))
+		if _, err := runEng.compact(ctx, CompactInput{SessionID: runSID}, resolved, store.ModeCode, "running", false); err != nil {
+			t.Fatalf("running rolling compact failed: %v", err)
+		}
+		if len(runReqs) < 2 {
+			t.Fatalf("expected rolling batches for running turn, got %d", len(runReqs))
+		}
+		finalPrompt := runReqs[len(runReqs)-1].Messages[0].Text
+		idxBefore := strings.Index(finalPrompt, "RUNNING_INPUT_BEFORE_COLD")
+		idxRolling := strings.Index(finalPrompt, `id="rolling_summary"`)
+		idxAfter := strings.Index(finalPrompt, "RETAIN_AFTER_COLD")
+		if idxBefore < 0 || idxRolling < 0 || idxAfter < 0 || !(idxBefore < idxRolling && idxRolling < idxAfter) {
+			t.Fatalf("retain order broken across rolling batch: before=%d rolling=%d after=%d", idxBefore, idxRolling, idxAfter)
+		}
+	})
+
+	t.Run("single_source_with_large_retain_drops_retain", func(t *testing.T) {
+		singleRetainEng, singleRetainMS, _, singleRetainSID := newTestEngine(t)
+		defer singleRetainEng.Stop()
+		if err := singleRetainMS.PutProviderProfile(ctx, &store.ProviderProfile{ID: "mock", Protocol: "openai-compatible",
+			Models: []store.ProviderModel{{ID: "mock-model", ContextWindow: 8192}}}); err != nil {
+			t.Fatal(err)
+		}
+		sess, _ := singleRetainMS.GetSession(ctx, singleRetainSID)
+		resolved, err := singleRetainEng.resolveModel(ctx, sess)
+		if err != nil {
+			t.Fatal(err)
+		}
+		msgs := []*store.Message{
+			{ID: "src1", Role: store.RoleUser, Text: "SINGLE_SOURCE_FACT " + strings.Repeat("s", 14000)},
+			{ID: "ret1", Role: store.RoleUser, Text: "LARGE_RETAIN_FACT " + strings.Repeat("r", 22000)},
+		}
+		var calls []provider.Request
+		client := compactClientFunc(func(ctx context.Context, req provider.Request) (<-chan provider.Chunk, error) {
+			calls = append(calls, req)
+			return compactChunks(provider.Chunk{Delta: "single source summarized.", Done: true, Finish: provider.FinishStop}), nil
+		})
+		summary, err := singleRetainEng.summarizeCompactHistory(ctx, singleRetainSID, resolved, client, msgs, msgs[:1], "", 512)
+		if err != nil || summary == "" || len(calls) != 1 {
+			t.Fatalf("single source with large retain failed: summary=%q calls=%d err=%v", summary, len(calls), err)
+		}
+		prompt := calls[0].Messages[0].Text
+		if !strings.Contains(prompt, "SINGLE_SOURCE_FACT") || strings.Contains(prompt, "LARGE_RETAIN_FACT") {
+			t.Fatalf("expected single source without overflowing retain: %s", prompt)
+		}
+	})
 }
 
 func TestExternalMCPHistoryCooledInUsageAndCompact(t *testing.T) {

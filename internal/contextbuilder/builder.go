@@ -163,6 +163,8 @@ func (b *Builder) buildMessagesWithCooling(ctx context.Context, sess *store.Sess
 	msgs = store.SubagentContextMessages(msgs)
 	msgs = messagesWithSkillReferences(msgs, EffectiveMessages(msgs), sess.LoadedPluginIDs)
 	msgs = historyInTurnOrder(msgs)
+	externalTurns := ExternalMCPTurns(msgs)
+	coolExternalImages := len(externalTurns) > 0 && toolIncluded(allowedTools, tool.MediaRead)
 	if toolIncluded(allowedTools, tool.HistoryGetMessage) {
 		msgs = cooledMessages(msgs, cooling)
 	}
@@ -291,7 +293,14 @@ func (b *Builder) buildMessagesWithCooling(ctx context.Context, sess *store.Sess
 			}
 		case store.RoleAssistant, store.RoleTool:
 			if isToolAttachmentMessage(m) {
-				parts := b.providerParts(sessionID, m.TurnID, m.Parts, currentMode, allowedTools, cfg)
+				var parts []provider.Part
+				if coolExternalImages && externalTurns[m.TurnID] && isExternalColdToolImage(m.Parts[0], cfg, b.attachmentHome) {
+					part := omittedToolImagePart("", "", m.Parts[0].AttachmentKey, m.TurnID)
+					part.Text = EscapeSourceText(part.Text)
+					parts = []provider.Part{part}
+				} else {
+					parts = b.providerParts(sessionID, m.TurnID, m.Parts, currentMode, allowedTools, cfg)
+				}
 				if sourceCallID != "" {
 					assistantParts = append(assistantParts, provider.AttributeToolAttachments(parts, sourceCallID, sourceTool, m.Parts[0].AttachmentCreatedAt)...)
 				} else if len(parts) > 0 {
@@ -331,7 +340,7 @@ func (b *Builder) buildMessagesWithCooling(ctx context.Context, sess *store.Sess
 		}
 	}
 	flushAssistant()
-	req.Messages = applySavedToolImagesWithExternal(req.Messages, msgs, cooling, toolIncluded(allowedTools, tool.MediaRead))
+	req.Messages = applySavedToolImages(req.Messages, msgs, cooling)
 	return req, nil
 }
 
@@ -479,6 +488,14 @@ func isToolAttachmentMessage(msg *store.Message) bool {
 	}
 	part := msg.Parts[0]
 	return part.Type == store.ContentPartAttachment && part.Origin == attachment.OriginTool
+}
+
+func isExternalColdToolImage(part store.ContentPart, cfg provider.ModelConfig, attachmentHome string) bool {
+	if !imageAttachmentsAllowed(cfg) || strings.TrimSpace(attachmentHome) == "" || part.AttachmentKey == "" {
+		return false
+	}
+	mime := strings.ToLower(strings.TrimSpace(part.MIME))
+	return strings.HasPrefix(mime, "image/") && mime != "image/svg+xml"
 }
 
 func wrapSystemReminder(text string) string {

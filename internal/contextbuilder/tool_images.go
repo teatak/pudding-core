@@ -120,55 +120,43 @@ func ImageEpoch(messages []*store.Message) string {
 // Resolve the boundary before mode/tool filtering, so a temporarily unavailable
 // tool cannot revive older images when its boundary image is absent on the wire.
 func applySavedToolImages(messages []provider.Message, canonical []*store.Message, state store.ContextCooling) []provider.Message {
-	return applySavedToolImagesWithExternal(messages, canonical, state, false)
-}
-
-func applySavedToolImagesWithExternal(messages []provider.Message, canonical []*store.Message, state store.ContextCooling, coolExternalImages bool) []provider.Message {
-	targets := map[string]bool{}
-	if state.ImageThroughID != "" && ImageEpoch(canonical) == state.SummaryMessageID {
-		var history []provider.Message
-		var callID, name, turnID string
-		for _, m := range canonical {
-			if m.TurnID != turnID {
-				callID, name, turnID = "", "", m.TurnID
-			}
-			var parts []provider.Part
-			for _, p := range m.Parts {
-				switch p.Type {
-				case store.ContentPartToolUse:
-					parts = append(parts, provider.Part{Type: provider.PartToolUse, Name: tool.CurrentToolName(p.Name), CallID: p.CallID, Args: p.Args})
-				case store.ContentPartToolResult:
-					callID, name = p.CallID, tool.CurrentToolName(p.Name)
-				case store.ContentPartAttachment:
-					if p.Origin == "tool" && strings.HasPrefix(p.MIME, "image/") {
-						parts = append(parts, provider.Part{Type: provider.PartImage, Name: name, CallID: callID, ImageKey: p.AttachmentKey, ImageTurnID: m.TurnID})
-					}
-				}
-			}
-			history = append(history, provider.Message{Parts: parts})
-		}
-		for k, v := range imageTargets(history, state.ImageThroughID) {
-			if v {
-				targets[k] = true
-			}
-		}
-	}
-	if coolExternalImages {
-		externalTurns := ExternalMCPTurns(canonical)
-		if len(externalTurns) > 0 {
-			for _, msg := range messages {
-				for _, part := range msg.Parts {
-					if part.Type == provider.PartImage && part.ImageKey != "" && part.CallID != "" && externalTurns[part.ImageTurnID] {
-						targets[ToolImageID(part)] = true
-					}
-				}
-			}
-		}
-	}
-	if len(targets) == 0 {
+	if state.ImageThroughID == "" || ImageEpoch(canonical) != state.SummaryMessageID {
 		return messages
 	}
-	return omitToolImages(messages, targets)
+	var history []provider.Message
+	var callID, name, turnID string
+	for _, m := range canonical {
+		if m.TurnID != turnID {
+			callID, name, turnID = "", "", m.TurnID
+		}
+		var parts []provider.Part
+		for _, p := range m.Parts {
+			switch p.Type {
+			case store.ContentPartToolUse:
+				parts = append(parts, provider.Part{Type: provider.PartToolUse, Name: tool.CurrentToolName(p.Name), CallID: p.CallID, Args: p.Args})
+			case store.ContentPartToolResult:
+				callID, name = p.CallID, tool.CurrentToolName(p.Name)
+			case store.ContentPartAttachment:
+				if p.Origin == "tool" && strings.HasPrefix(p.MIME, "image/") {
+					parts = append(parts, provider.Part{Type: provider.PartImage, Name: name, CallID: callID, ImageKey: p.AttachmentKey, ImageTurnID: m.TurnID})
+				}
+			}
+		}
+		history = append(history, provider.Message{Parts: parts})
+	}
+	return omitToolImages(messages, imageTargets(history, state.ImageThroughID))
+}
+
+func omittedToolImagePart(callID, name, imageKey, turnID string) provider.Part {
+	args, _ := json.Marshal(map[string]string{"source": "attachment", "attachmentKey": imageKey, "purpose": tool.MediaPurposeObservation})
+	return provider.Part{
+		Type:        provider.PartText,
+		CallID:      callID,
+		Name:        name,
+		ImageKey:    imageKey,
+		ImageTurnID: turnID,
+		Text:        fmt.Sprintf("[Earlier screenshot omitted from model context; original preserved. To inspect it again, call %s with %s. Use purpose=reference instead if this image is needed for ongoing comparison. This is a historical image, not the current screen.]", tool.MediaRead, args),
+	}
 }
 
 func omitToolImages(messages []provider.Message, targets map[string]bool) []provider.Message {
@@ -180,13 +168,11 @@ func omitToolImages(messages []provider.Message, targets map[string]bool) []prov
 	for i, message := range out {
 		parts := append([]provider.Part(nil), message.Parts...)
 		for j, part := range parts {
-			if part.ImageKey == "" || !targets[ToolImageID(part)] {
+			if part.Type != provider.PartImage || part.ImageKey == "" || !targets[ToolImageID(part)] {
 				continue
 			}
 			prefixChanged = true
-			args, _ := json.Marshal(map[string]string{"source": "attachment", "attachmentKey": part.ImageKey, "purpose": tool.MediaPurposeObservation})
-			parts[j] = provider.Part{Type: provider.PartText, CallID: part.CallID, Name: part.Name, ImageKey: part.ImageKey, ImageTurnID: part.ImageTurnID,
-				Text: fmt.Sprintf("[Earlier screenshot omitted from model context; original preserved. To inspect it again, call %s with %s. Use purpose=reference instead if this image is needed for ongoing comparison. This is a historical image, not the current screen.]", tool.MediaRead, args)}
+			parts[j] = omittedToolImagePart(part.CallID, part.Name, part.ImageKey, part.ImageTurnID)
 		}
 		out[i].Parts = parts
 		if len(parts) > 0 {
