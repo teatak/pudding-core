@@ -491,6 +491,10 @@ func compactMessageRecord(msg *store.Message, text, action string) string {
 }
 
 func compactMessageText(msg *store.Message) string {
+	return compactMessageTextFor(msg, false)
+}
+
+func compactMessageTextFor(msg *store.Message, coolToolResults bool) string {
 	if len(msg.Parts) == 0 {
 		return msg.Text
 	}
@@ -507,7 +511,11 @@ func compactMessageText(msg *store.Message) string {
 		case store.ContentPartToolUse:
 			fmt.Fprintf(&text, "tool_call %s id=%s args=%s", part.Name, part.CallID, part.Args)
 		case store.ContentPartToolResult:
-			content := tool.ModelResultContent(part.Name, part.Ok, part.Content, msg.TurnID, part.CallID, true)
+			raw := part.Content
+			if coolToolResults {
+				raw = tool.ColdResultContent(part.Name, part.Ok, part.Content, msg.TurnID, part.CallID)
+			}
+			content := tool.ModelResultContent(part.Name, part.Ok, raw, msg.TurnID, part.CallID, true)
 			fmt.Fprintf(&text, "tool_result %s id=%s ok=%t\n%s", part.Name, part.CallID, part.Ok, content)
 		default:
 			// Keep form answers, attachment references and workspace context.

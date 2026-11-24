@@ -361,8 +361,8 @@ func TestCompactEmptySummaryDoesNotChangeHistory(t *testing.T) {
 	}
 }
 
-func TestCompactRegressionOversizedTailPreservesHistory(t *testing.T) {
-	eng, ms, _, sid := newTestEngine(t, mock.WithScript([]string{"short summary"}), mock.WithDelay(0))
+func TestCompactOversizedMultiTurnUsesRollingBatches(t *testing.T) {
+	eng, ms, _, sid := newTestEngine(t)
 	defer eng.Stop()
 	ctx := context.Background()
 	if err := ms.PutProviderProfile(ctx, &store.ProviderProfile{ID: "mock", Protocol: "openai-compatible",
@@ -373,15 +373,110 @@ func TestCompactRegressionOversizedTailPreservesHistory(t *testing.T) {
 	for i := 2; i <= 3; i++ {
 		appendEngineTestTurn(t, ms, sid, fmt.Sprint(i), strings.Repeat("x", 160000), "answer")
 	}
-	capture := &captureClient{reqCh: make(chan provider.Request, 1)}
-	eng.resolver = registry.Static(capture)
-	before, _ := ms.ListMessages(ctx, sid, 0)
-	if _, err := eng.Compact(ctx, CompactInput{SessionID: sid}); !errors.Is(err, ErrContextBudget) {
-		t.Fatalf("oversized retained context must fail: %v", err)
+	var requests []provider.Request
+	eng.resolver = registry.Static(compactClientFunc(func(ctx context.Context, req provider.Request) (<-chan provider.Chunk, error) {
+		input := requestInputTokens(req)
+		output, _ := req.Config.MaxOutputTokens()
+		if output <= 0 || input+output > req.Config.ContextWindow {
+			t.Errorf("rolling batch request exceeded window: input=%d output=%d window=%d", input, output, req.Config.ContextWindow)
+		}
+		requests = append(requests, req)
+		return compactChunks(provider.Chunk{Delta: fmt.Sprintf("rolling batch %d summary.", len(requests)), Done: true, Finish: provider.FinishStop}), nil
+	}))
+	if _, err := eng.Compact(ctx, CompactInput{SessionID: sid}); err != nil {
+		t.Fatalf("multi-turn rolling compact failed: %v", err)
 	}
-	after, _ := ms.ListMessages(ctx, sid, 0)
-	if len(after) != len(before) || len(capture.reqCh) != 0 {
-		t.Fatal("oversized history was silently split or modified")
+	if len(requests) < 2 {
+		t.Fatalf("expected rolling batches for oversized history, got %d request(s)", len(requests))
+	}
+	for i := 1; i < len(requests); i++ {
+		if !strings.Contains(requests[i].Messages[0].Text, `id="rolling_summary"`) {
+			t.Fatalf("batch %d missing rolling summary carry-over", i+1)
+		}
+	}
+	usage, err := eng.SessionUsage(ctx, sid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if usage.ContextEstimatedTokens >= 64000 {
+		t.Fatalf("post-compact usage still exceeds window: %+v", usage)
+	}
+
+	t.Run("single_oversized_message", func(t *testing.T) {
+		singleEng, singleMS, _, singleSID := newTestEngine(t)
+		defer singleEng.Stop()
+		if err := singleMS.PutProviderProfile(ctx, &store.ProviderProfile{ID: "mock", Protocol: "openai-compatible",
+			Models: []store.ProviderModel{{ID: "mock-model", ContextWindow: 64000}}}); err != nil {
+			t.Fatal(err)
+		}
+		appendEngineTestTurn(t, singleMS, singleSID, "1", strings.Repeat("y", 280000), "answer")
+		appendEngineTestTurn(t, singleMS, singleSID, "2", "tail", "answer")
+		capture := &captureClient{reqCh: make(chan provider.Request, 1)}
+		singleEng.resolver = registry.Static(capture)
+		before, _ := singleMS.ListMessages(ctx, singleSID, 0)
+		if _, err := singleEng.Compact(ctx, CompactInput{SessionID: singleSID}); !errors.Is(err, ErrContextBudget) {
+			t.Fatalf("single oversized message must fail: %v", err)
+		}
+		after, _ := singleMS.ListMessages(ctx, singleSID, 0)
+		if len(after) != len(before) || len(capture.reqCh) != 0 {
+			t.Fatal("single oversized message triggered provider calls or changed history")
+		}
+	})
+}
+
+func TestExternalMCPHistoryCooledInUsageAndCompact(t *testing.T) {
+	eng, ms, _, sid := newTestEngine(t)
+	defer eng.Stop()
+	ctx := context.Background()
+	eng.tools = &recordingToolRunner{defs: []provider.ToolDef{
+		{Name: tool.FileRead, Capability: store.ModeCode},
+		{Name: tool.HistoryGetMessage, Capability: store.ModeChat},
+	}}
+	for i := 0; i < 4; i++ {
+		turnID := fmt.Sprintf("ext-%d", i)
+		if _, err := ms.BeginTurn(ctx, store.BeginTurnInput{
+			SessionID: sid, TurnID: turnID, UserMessageID: "u-" + turnID,
+			ClientMessageID: "external-mcp:agent_1:" + turnID,
+			UserText:        fmt.Sprintf("Agent · Task %d", i),
+			UserMetadata:    json.RawMessage(`{"externalAgent":{"name":"Antigravity"}}`),
+			Mode:            store.ModeCode,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		big := fmt.Sprintf("RAW_EXTERNAL_OUTPUT_%d\n%s", i, strings.Repeat("line ", 1400))
+		if _, err := ms.AppendTurnOutput(ctx, store.AppendTurnOutputInput{
+			TurnID: turnID,
+			Parts: []store.ContentPart{
+				{Type: store.ContentPartToolUse, CallID: "c-" + turnID, Name: tool.FileRead, Args: json.RawMessage(`{}`)},
+				{Type: store.ContentPartToolResult, CallID: "c-" + turnID, Name: tool.FileRead, Ok: true, Content: big},
+				{Type: store.ContentPartText, Text: fmt.Sprintf("FINAL_EXTERNAL_SUMMARY_%d", i)},
+			},
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := ms.FinishTurn(ctx, store.FinishTurnInput{TurnID: turnID, Status: store.TurnCompleted, Mode: store.ModeCode}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	usage, err := eng.SessionUsage(ctx, sid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Four raw outputs exceed 28,000 chars (~7,000+ tokens) before fixed overhead;
+	// cooling folds them to compact result_ref stubs.
+	if usage.MessageEstimatedTokens > 1500 {
+		t.Fatalf("external MCP history was not cooled in SessionUsage: %+v", usage)
+	}
+	all, err := ms.ListMessages(ctx, sid, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	history, err := compactHistoryText(all, all)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(history, "RAW_EXTERNAL_OUTPUT_") || !strings.Contains(history, `"cold_only":true`) || !strings.Contains(history, "FINAL_EXTERNAL_SUMMARY_0") {
+		t.Fatalf("compactHistoryText did not cool external outputs cleanly: %s", history)
 	}
 }
 

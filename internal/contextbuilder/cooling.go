@@ -2,6 +2,8 @@ package contextbuilder
 
 import (
 	"context"
+	"encoding/json"
+	"strings"
 
 	"github.com/teatak/pudding-core/internal/config"
 	"github.com/teatak/pudding-core/internal/store"
@@ -75,34 +77,68 @@ func CoolingCandidate(messages []*store.Message, currentTurnID string, keepEnded
 	return state
 }
 
-func cooledMessages(messages []*store.Message, state store.ContextCooling) []*store.Message {
-	if state.ThroughTurnID == "" {
-		return messages
-	}
-	summaryID := ""
-	coldTurns := map[string]bool{}
-	found := false
+// ExternalMCPTurns returns turn IDs initiated by external MCP agents.
+func ExternalMCPTurns(messages []*store.Message) map[string]bool {
+	turns := make(map[string]bool)
 	for _, m := range messages {
-		if m.Role == store.RoleSummary {
-			summaryID = m.ID
-		}
-		if !found && m.TurnID != "" && m.Role != store.RoleSummary {
-			coldTurns[m.TurnID] = true
-			found = m.TurnID == state.ThroughTurnID
+		if isExternalMCPMessage(m) {
+			turns[m.TurnID] = true
 		}
 	}
-	// A proposed Compact or a hard task reset must not inherit an old watermark.
-	if !found || summaryID != state.SummaryMessageID {
+	return turns
+}
+
+func isExternalMCPMessage(m *store.Message) bool {
+	if m == nil || m.Role != store.RoleUser || m.TurnID == "" {
+		return false
+	}
+	if strings.HasPrefix(m.ClientMessageID, "external-mcp:") {
+		return true
+	}
+	if len(m.Metadata) == 0 {
+		return false
+	}
+	var meta struct {
+		ExternalAgent *store.ExternalAgentIdentity `json:"externalAgent"`
+	}
+	return json.Unmarshal(m.Metadata, &meta) == nil && meta.ExternalAgent != nil && strings.TrimSpace(meta.ExternalAgent.Name) != ""
+}
+
+func cooledMessages(messages []*store.Message, state store.ContextCooling) []*store.Message {
+	externalTurns := ExternalMCPTurns(messages)
+	coldTurns := map[string]bool{}
+	if state.ThroughTurnID != "" {
+		summaryID := ""
+		found := false
+		for _, m := range messages {
+			if m.Role == store.RoleSummary {
+				summaryID = m.ID
+			}
+			if !found && m.TurnID != "" && m.Role != store.RoleSummary {
+				coldTurns[m.TurnID] = true
+				found = m.TurnID == state.ThroughTurnID
+			}
+		}
+		// A proposed Compact or a hard task reset must not inherit an old watermark.
+		if !found || summaryID != state.SummaryMessageID {
+			clear(coldTurns)
+		}
+	}
+	if len(coldTurns) == 0 && len(externalTurns) == 0 {
 		return messages
 	}
 	out := append([]*store.Message(nil), messages...)
 	for i, m := range messages {
-		if !coldTurns[m.TurnID] {
+		inColdTurn := coldTurns[m.TurnID]
+		inExternalTurn := externalTurns[m.TurnID]
+		if !inColdTurn && !inExternalTurn {
 			continue
 		}
-		if notice := widgetNotification(m); notice != nil {
-			out[i] = coldWidgetNotification(m, notice)
-			continue
+		if inColdTurn {
+			if notice := widgetNotification(m); notice != nil {
+				out[i] = coldWidgetNotification(m, notice)
+				continue
+			}
 		}
 		if m.Role != store.RoleTool && m.Role != store.RoleAssistant {
 			continue

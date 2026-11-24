@@ -120,31 +120,55 @@ func ImageEpoch(messages []*store.Message) string {
 // Resolve the boundary before mode/tool filtering, so a temporarily unavailable
 // tool cannot revive older images when its boundary image is absent on the wire.
 func applySavedToolImages(messages []provider.Message, canonical []*store.Message, state store.ContextCooling) []provider.Message {
-	if state.ImageThroughID == "" || ImageEpoch(canonical) != state.SummaryMessageID {
-		return messages
-	}
-	var history []provider.Message
-	var callID, name, turnID string
-	for _, m := range canonical {
-		if m.TurnID != turnID {
-			callID, name, turnID = "", "", m.TurnID
+	return applySavedToolImagesWithExternal(messages, canonical, state, false)
+}
+
+func applySavedToolImagesWithExternal(messages []provider.Message, canonical []*store.Message, state store.ContextCooling, coolExternalImages bool) []provider.Message {
+	targets := map[string]bool{}
+	if state.ImageThroughID != "" && ImageEpoch(canonical) == state.SummaryMessageID {
+		var history []provider.Message
+		var callID, name, turnID string
+		for _, m := range canonical {
+			if m.TurnID != turnID {
+				callID, name, turnID = "", "", m.TurnID
+			}
+			var parts []provider.Part
+			for _, p := range m.Parts {
+				switch p.Type {
+				case store.ContentPartToolUse:
+					parts = append(parts, provider.Part{Type: provider.PartToolUse, Name: tool.CurrentToolName(p.Name), CallID: p.CallID, Args: p.Args})
+				case store.ContentPartToolResult:
+					callID, name = p.CallID, tool.CurrentToolName(p.Name)
+				case store.ContentPartAttachment:
+					if p.Origin == "tool" && strings.HasPrefix(p.MIME, "image/") {
+						parts = append(parts, provider.Part{Type: provider.PartImage, Name: name, CallID: callID, ImageKey: p.AttachmentKey, ImageTurnID: m.TurnID})
+					}
+				}
+			}
+			history = append(history, provider.Message{Parts: parts})
 		}
-		var parts []provider.Part
-		for _, p := range m.Parts {
-			switch p.Type {
-			case store.ContentPartToolUse:
-				parts = append(parts, provider.Part{Type: provider.PartToolUse, Name: tool.CurrentToolName(p.Name), CallID: p.CallID, Args: p.Args})
-			case store.ContentPartToolResult:
-				callID, name = p.CallID, tool.CurrentToolName(p.Name)
-			case store.ContentPartAttachment:
-				if p.Origin == "tool" && strings.HasPrefix(p.MIME, "image/") {
-					parts = append(parts, provider.Part{Type: provider.PartImage, Name: name, CallID: callID, ImageKey: p.AttachmentKey, ImageTurnID: m.TurnID})
+		for k, v := range imageTargets(history, state.ImageThroughID) {
+			if v {
+				targets[k] = true
+			}
+		}
+	}
+	if coolExternalImages {
+		externalTurns := ExternalMCPTurns(canonical)
+		if len(externalTurns) > 0 {
+			for _, msg := range messages {
+				for _, part := range msg.Parts {
+					if part.Type == provider.PartImage && part.ImageKey != "" && part.CallID != "" && externalTurns[part.ImageTurnID] {
+						targets[ToolImageID(part)] = true
+					}
 				}
 			}
 		}
-		history = append(history, provider.Message{Parts: parts})
 	}
-	return omitToolImages(messages, imageTargets(history, state.ImageThroughID))
+	if len(targets) == 0 {
+		return messages
+	}
+	return omitToolImages(messages, targets)
 }
 
 func omitToolImages(messages []provider.Message, targets map[string]bool) []provider.Message {

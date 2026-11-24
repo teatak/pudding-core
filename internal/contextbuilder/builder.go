@@ -331,7 +331,7 @@ func (b *Builder) buildMessagesWithCooling(ctx context.Context, sess *store.Sess
 		}
 	}
 	flushAssistant()
-	req.Messages = applySavedToolImages(req.Messages, msgs, cooling)
+	req.Messages = applySavedToolImagesWithExternal(req.Messages, msgs, cooling, toolIncluded(allowedTools, tool.MediaRead))
 	return req, nil
 }
 
