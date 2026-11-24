@@ -51,6 +51,13 @@ func externalClientID(bindingID, turnID string) string {
 	return "external-mcp:" + bindingID + ":" + turnID
 }
 
+// Share the turn-start lock so a revoked credential cannot begin a turn after a handoff.
+func (e *Engine) RedeemExternalAgentInvite(ctx context.Context, invite, credential string, identity store.ExternalAgentIdentity) (*store.ExternalAgentBinding, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.store.RedeemAgentInvite(ctx, invite, credential, identity, time.Now().UnixMilli())
+}
+
 func (e *Engine) BeginExternalTurn(ctx context.Context, credentialHash, task string) (string, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -186,12 +193,14 @@ func (e *Engine) executeExternalRequest(ctx context.Context, sid string, active 
 			return reply, mode, err
 		}
 	}
+	isCodeTool := false
 	for _, def := range defs {
 		if def.Name == req.name {
 			reply.PluginID = def.PluginID
 			if reply.PluginID == "" {
 				reply.PluginID, _ = tool.BuiltinPluginIDForTool(req.name)
 			}
+			isCodeTool = IsExternalCodeTool(def)
 			break
 		}
 	}
@@ -202,7 +211,7 @@ func (e *Engine) executeExternalRequest(ctx context.Context, sid string, active 
 		reply.PluginID = reply.Result.EndpointPluginID
 	}
 	reply.Mode = mode
-	reply.RefreshProjectRules = mode == store.ModeCode && (mode != previousMode || (req.name == tool.RequestCapability && reply.Result.Ok))
+	reply.RefreshProjectRules = mode == store.ModeCode && (isCodeTool || mode != previousMode || (req.name == tool.RequestCapability && reply.Result.Ok))
 	if ref, ok := tool.ReferencedSkill(reply.Result.Name, reply.Result.Ok, reply.Result.Content); ok {
 		active.external.skillRefs[ref.Key()] = ref
 	}
@@ -236,6 +245,17 @@ func (e *Engine) executeExternalRequest(ctx context.Context, sid string, active 
 		}
 	}
 	return reply, mode, nil
+}
+
+func IsExternalCodeTool(def provider.ToolDef) bool {
+	if def.Name == tool.RequestCapability || def.Name == tool.PluginLoad || def.Name == tool.PluginUnload {
+		return false
+	}
+	required := store.NormalizeAgentMode(def.Capability)
+	if required == "" {
+		required = tool.RequiredModeForName(def.Name)
+	}
+	return required == store.ModeCode
 }
 
 func (e *Engine) externalRequest(ctx context.Context, b *store.ExternalAgentBinding, id string, r externalRequest) (ExternalToolReply, error) {

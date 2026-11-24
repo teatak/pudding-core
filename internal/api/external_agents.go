@@ -38,7 +38,7 @@ func (s *Server) inviteAgent(c *cart.Context) error {
 	b := store.ExternalAgentBinding{ID: store.NewID("agent"), SessionID: sid, RuntimeID: plugin.RuntimeIDFromContext(ctx)}
 	expires := time.Now().Add(10 * time.Minute)
 	if err := s.store.CreateAgentInvite(ctx, b, agentHash(code), expires.UnixMilli()); err != nil {
-		return s.failAgent(c, err)
+		return s.failAgentHandoff(c, err)
 	}
 	c.Header("Cache-Control", "no-store")
 	c.JSON(http.StatusCreated, map[string]any{"invite": code, "expiresAt": expires})
@@ -117,14 +117,19 @@ func (s *Server) agentCommand(c *cart.Context) error {
 			title = ""
 		}
 		identity := store.ExternalAgentIdentity{Name: name, Title: title, IconPNGBase64: externalAgentIcon(in.IconPNGBase64)}
-		credential := rand.Text()
-		b, err := s.store.RedeemAgentInvite(ctx, agentHash(in.Invite), agentHash(credential), identity, time.Now().UnixMilli())
+		credential := c.Request.Header.Get("X-Pudding-Binding")
+		if credential == "" {
+			credential = rand.Text()
+		} else if decoded, err := hex.DecodeString(credential); err != nil || len(decoded) != 32 {
+			return badRequest(c, "invalid binding credential")
+		}
+		b, err := s.engine.RedeemExternalAgentInvite(ctx, agentHash(in.Invite), agentHash(credential), identity)
 		if errors.Is(err, store.ErrNotFound) {
 			c.JSON(http.StatusNotFound, map[string]string{"error": "Invitation expired, already redeemed, or unavailable. Create a new invitation in Pudding."})
 			return nil
 		}
 		if err != nil {
-			return s.failAgent(c, err)
+			return s.failAgentHandoff(c, err)
 		}
 		c.JSON(200, map[string]any{"bindingID": b.ID, "credential": credential})
 		return nil
@@ -187,15 +192,32 @@ func (s *Server) agentCommand(c *cart.Context) error {
 		if task == "" || len(task) > 2000 {
 			return badRequest(c, "provide a short task")
 		}
-		rules, err := s.engine.ExternalProjectRules(ctx, sess, "")
+		dirs, err := s.engine.ExternalProjectDirs(ctx, sess, "")
 		if err != nil {
 			return s.failAgent(c, err)
 		}
 		id, err := s.engine.BeginExternalTurn(ctx, hash, task)
 		if err != nil {
+			if errors.Is(err, store.ErrTurnRunning) {
+				if activeID, _ := s.engine.ExternalTurnContext(b, sess.ActiveMode); activeID != "" {
+					c.JSON(http.StatusConflict, map[string]any{
+						"error":        "This binding already has an active turn (" + activeID + "). Reuse that turnID, inspect it with pudding_session_status, or call pudding_turn_end before starting another turn.",
+						"activeTurnID": activeID,
+					})
+					return nil
+				}
+				c.JSON(http.StatusConflict, map[string]string{
+					"error": "Another task is running in this Pudding conversation. Wait for it to finish or stop it in Pudding, then retry pudding_turn_begin.",
+				})
+				return nil
+			}
 			return s.failAgent(c, err)
 		}
-		c.JSON(200, map[string]any{"turnID": id, "session": sess.Title, "mode": sess.ActiveMode, "projectInstructions": rules})
+		reply := map[string]any{"turnID": id, "session": sess.Title, "mode": sess.ActiveMode}
+		if len(dirs) > 0 {
+			reply["projectDirectories"] = dirs
+		}
+		c.JSON(200, reply)
 	case "call":
 		if in.Tool == "" || in.TurnID == "" {
 			return badRequest(c, "turnID and tool are required")
@@ -301,6 +323,7 @@ func (s *Server) agentCatalog(ctx context.Context, sess *store.Session, b *store
 			defs = defs[i : i+1]
 		}
 	}
+	needsProjectRules := q == ""
 	var guideIDs []string
 	endpointKinds := map[string]bool{}
 	for _, d := range defs {
@@ -311,6 +334,9 @@ func (s *Server) agentCatalog(ctx context.Context, sess *store.Session, b *store
 			continue
 		}
 		matches = append(matches, debugMCPTool{Name: d.Name, Description: d.Description, InputSchema: d.InputSchema})
+		if !needsProjectRules && mode == store.ModeCode && engine.IsExternalCodeTool(d) {
+			needsProjectRules = true
+		}
 		if kind := tool.PluginAPIEndpointKind(d.Name); kind != "" {
 			endpointKinds[kind] = true
 		}
@@ -364,19 +390,35 @@ func (s *Server) agentCatalog(ctx context.Context, sess *store.Session, b *store
 	if err != nil {
 		return nil, err
 	}
-	if q == "" {
+	if needsProjectRules {
 		rules, err := s.engine.ExternalProjectRules(ctx, sess, turnID)
 		if err != nil {
 			return nil, err
 		}
-		out["projectInstructions"] = rules
+		if rules != "" {
+			out["projectInstructions"] = rules
+		}
 	}
 	out["instructions"] = guides
 	return out, nil
 }
 
+func (s *Server) failAgentHandoff(c *cart.Context, err error) error {
+	if errors.Is(err, store.ErrTurnRunning) {
+		c.JSON(http.StatusConflict, map[string]string{"error": "Wait for the current task to finish or stop it in Pudding, then retry the agent handoff."})
+		return nil
+	}
+	return s.failAgent(c, err)
+}
+
 func (s *Server) failAgent(c *cart.Context, err error) error {
-	if errors.Is(err, engine.ErrTurnNotActive) || errors.Is(err, store.ErrTurnRunning) {
+	if errors.Is(err, engine.ErrTurnNotActive) {
+		c.JSON(http.StatusConflict, map[string]string{
+			"error": "Turn is not active (it may have ended or timed out). Check pudding_session_status or start a new turn with pudding_turn_begin.",
+		})
+		return nil
+	}
+	if errors.Is(err, store.ErrTurnRunning) {
 		c.JSON(http.StatusConflict, map[string]string{"error": err.Error()})
 		return nil
 	}

@@ -35,8 +35,9 @@ tools-report:
 tools-eval:
 	go run -tags "$(BUILDTAGS)" ./cmd/puddingd tools eval $(RUNARGS)
 
-agent-eval:
-	go run -tags "$(BUILDTAGS)" ./cmd/puddingd agent eval $(RUNARGS)
+# Launch outside go run so project commands inherit the caller's Go environment.
+agent-eval: daemon
+	"$(abspath $(DAEMON_OUT))" agent eval $(RUNARGS)
 
 test:
 	go test -tags "$(BUILDTAGS)" ./...

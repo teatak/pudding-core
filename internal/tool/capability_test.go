@@ -51,7 +51,7 @@ func TestRequestCapabilitySchemaOnlyExposesWorkAndCode(t *testing.T) {
 	}
 }
 
-func TestRequiredModeForDynamicMCPTools(t *testing.T) {
+func TestRequiredModeForNameWithoutRuntimeDefinition(t *testing.T) {
 	tests := []struct {
 		name string
 		want store.AgentMode
@@ -59,7 +59,6 @@ func TestRequiredModeForDynamicMCPTools(t *testing.T) {
 		{name: "plugin_mcp__github__list_issues", want: store.ModeWork},
 		{name: PluginLoad, want: store.ModeChat},
 		{name: PluginUnload, want: store.ModeChat},
-		{name: "widget_list", want: store.ModeCode},
 		{name: "widget_draft_open", want: store.ModeCode},
 		{name: "canvas_create", want: store.ModeCode},
 		{name: RequestUserInput, want: store.ModeChat},

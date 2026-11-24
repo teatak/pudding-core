@@ -25,6 +25,7 @@ import (
 	"github.com/teatak/pudding-core/internal/buildinfo"
 	"github.com/teatak/pudding-core/internal/computer"
 	"github.com/teatak/pudding-core/internal/config"
+	"github.com/teatak/pudding-core/internal/credentialstore"
 	"github.com/teatak/pudding-core/internal/desktopcamera"
 	"github.com/teatak/pudding-core/internal/desktopscreen"
 	"github.com/teatak/pudding-core/internal/engine"
@@ -42,10 +43,11 @@ import (
 )
 
 type Options struct {
-	Home  string // 空 = 通道默认目录
-	Addr  string // 空 = 通道默认地址
-	Mock  bool
-	UIDir string // Optional external client bundle; empty means API-only.
+	Home             string // 空 = 通道默认目录
+	Addr             string // 空 = 通道默认地址
+	Mock             bool
+	UIDir            string                 // Optional external client bundle; empty means API-only.
+	CredentialCipher credentialstore.Cipher // An embedded host can supply its native credential backend.
 }
 
 type Daemon struct {
@@ -114,6 +116,9 @@ func Start(opts Options) (*Daemon, error) {
 		return nil, err
 	}
 	cfg := config.NewManager(dir)
+	if opts.CredentialCipher != nil {
+		cfg.WithCredentialCipher(opts.CredentialCipher)
+	}
 	if err := cfg.Prepare(); err != nil {
 		_ = st.Close()
 		return nil, err

@@ -12,7 +12,10 @@ import (
 
 func (s *Store) CreateAgentInvite(ctx context.Context, b store.ExternalAgentBinding, hash string, expires int64) error {
 	return s.tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
-		if _, err := tx.ExecContext(ctx, `DELETE FROM external_agent_bindings WHERE invite_hash IS NOT NULL AND expires_at<=?`, time.Now().UnixMilli()); err != nil {
+		if err := checkAgentHandoff(ctx, tx, b.SessionID); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `DELETE FROM external_agent_bindings WHERE invite_hash IS NOT NULL AND (session_id=? OR expires_at<=?)`, b.SessionID, time.Now().UnixMilli()); err != nil {
 			return err
 		}
 		_, err := tx.ExecContext(ctx, `INSERT INTO external_agent_bindings(id,session_id,runtime_id,invite_hash,expires_at) VALUES(?,?,?,?,?)`, b.ID, b.SessionID, b.RuntimeID, hash, expires)
@@ -36,8 +39,44 @@ func scanAgent(row interface{ Scan(...any) error }) (*store.ExternalAgentBinding
 	return &b, err
 }
 
+// Only a handoff can displace the owner of a running turn.
+func checkAgentHandoff(ctx context.Context, tx *sql.Tx, sid string) error {
+	var busy bool
+	err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM external_agent_bindings WHERE session_id=? AND credential_hash IS NOT NULL)
+        AND EXISTS(SELECT 1 FROM turns WHERE session_id=? AND status=?)`, sid, sid, store.TurnRunning).Scan(&busy)
+	if err != nil {
+		return err
+	}
+	if busy {
+		return store.ErrTurnRunning
+	}
+	return nil
+}
+
 func (s *Store) RedeemAgentInvite(ctx context.Context, invite, credential string, identity store.ExternalAgentIdentity, now int64) (*store.ExternalAgentBinding, error) {
-	return scanAgent(s.db.QueryRowContext(ctx, `UPDATE external_agent_bindings SET invite_hash=NULL,credential_hash=?,agent_name=?,agent_title=?,agent_icon=? WHERE invite_hash=? AND expires_at>? AND session_id IN (SELECT id FROM sessions WHERE archived_at=0) RETURNING `+externalAgentColumns, credential, identity.Name, identity.Title, identity.IconPNGBase64, invite, now))
+	var binding *store.ExternalAgentBinding
+	err := s.tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		pending, err := scanAgent(tx.QueryRowContext(ctx, `SELECT `+externalAgentColumns+` FROM external_agent_bindings WHERE invite_hash=? AND expires_at>? AND session_id IN (SELECT id FROM sessions WHERE archived_at=0)`, invite, now))
+		if err != nil {
+			return err
+		}
+		if err := checkAgentHandoff(ctx, tx, pending.SessionID); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE external_agent_bindings SET invite_hash=NULL,credential_hash=?,agent_name=?,agent_title=?,agent_icon=? WHERE id=?`, credential, identity.Name, identity.Title, identity.IconPNGBase64, pending.ID); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `DELETE FROM external_agent_bindings WHERE session_id=? AND id<>?`, pending.SessionID, pending.ID); err != nil {
+			return err
+		}
+		pending.ExternalAgentIdentity = identity
+		binding = pending
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return binding, nil
 }
 
 func (s *Store) AgentBinding(ctx context.Context, credential string) (*store.ExternalAgentBinding, error) {

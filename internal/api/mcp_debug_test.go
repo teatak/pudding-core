@@ -485,15 +485,50 @@ func approveExternalMCPTurnForTest(t *testing.T, fixture debugMCPTestServer, ses
 	return approved
 }
 
-func TestExternalMCPPageEditUsesOneBoundTurn(t *testing.T) {
+func TestExternalMCPAgentHandoff(t *testing.T) {
 	fixture := newDebugMCPTestServer(t)
 	ctx := context.Background()
-	if err := fixture.store.CreateSession(ctx, &store.Session{ID: "bound", Provider: "mock", Model: "mock-model", ActiveMode: store.ModeChat}); err != nil {
+	sid := "handoff"
+	if err := fixture.store.CreateSession(ctx, &store.Session{ID: sid, Provider: "mock", Model: "mock-model"}); err != nil {
 		t.Fatal(err)
 	}
 	post := externalMCPPostForTest(t, fixture.server.URL)
-	bind := func(branded bool) string {
-		invite := post("/sessions/bound/mcp-agents", "", nil, 201)["invite"]
+	invite := func() any { return post("/sessions/handoff/mcp-agents", "", nil, 201)["invite"] }
+	connect := func(code any, credential string, status int) map[string]any {
+		return post("/agent-mcp/connect", credential, map[string]any{"invite": code, "name": "Same app"}, status)
+	}
+	old := connect(invite(), "", 200)["credential"].(string)
+	abandoned, next := invite(), invite()
+	connect(abandoned, "", 404)
+	turn := post("/agent-mcp/begin", old, map[string]string{"task": "Current work"}, 200)["turnID"]
+	post("/sessions/handoff/mcp-agents", "", nil, 409)
+	connect(next, "", 409)
+	post("/agent-mcp/end", old, map[string]any{"turnID": turn}, 200)
+	newCredential := strings.Repeat("ab", 32)
+	if got := connect(next, newCredential, 200)["credential"]; got != newCredential {
+		t.Fatal("prepared credential was not accepted")
+	}
+	connect(next, "", 404)
+	post("/agent-mcp/begin", old, map[string]string{"task": "Stale chat"}, 404)
+	nextTurn := post("/agent-mcp/begin", newCredential, map[string]string{"task": "New work"}, 200)["turnID"]
+	post("/agent-mcp/end", newCredential, map[string]any{"turnID": nextTurn}, 200)
+	bindings, err := fixture.store.ListAgentBindings(ctx, sid)
+	if err != nil || len(bindings) != 1 {
+		t.Fatalf("bindings=%v err=%v", bindings, err)
+	}
+}
+
+func TestExternalMCPPageEditUsesOneBoundTurn(t *testing.T) {
+	fixture := newDebugMCPTestServer(t)
+	ctx := context.Background()
+	for _, sid := range []string{"bound", "other"} {
+		if err := fixture.store.CreateSession(ctx, &store.Session{ID: sid, Provider: "mock", Model: "mock-model", ActiveMode: store.ModeChat}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	post := externalMCPPostForTest(t, fixture.server.URL)
+	bind := func(sid string, branded bool) string {
+		invite := post("/sessions/"+sid+"/mcp-agents", "", nil, 201)["invite"]
 		in := map[string]any{"invite": invite, "name": "Example Agent"}
 		if branded {
 			in["title"] = "Example App"
@@ -505,11 +540,14 @@ func TestExternalMCPPageEditUsesOneBoundTurn(t *testing.T) {
 		post("/agent-mcp/connect", "", in, 404)
 		return credential
 	}
-	credential, other := bind(true), bind(false)
+	credential, other := bind("bound", true), bind("other", false)
 	bindings, err := fixture.store.ListAgentBindings(ctx, "bound")
-	if err != nil || len(bindings) != 2 || bindings[0].Title != "Example App" || bindings[0].IconPNGBase64 != debugMCPTestPNG ||
-		bindings[1].Title != "" || bindings[1].IconPNGBase64 != "" {
+	if err != nil || len(bindings) != 1 || bindings[0].Title != "Example App" || bindings[0].IconPNGBase64 != debugMCPTestPNG {
 		t.Fatalf("stored client identities: %+v, err=%v", bindings, err)
+	}
+	otherBindings, err := fixture.store.ListAgentBindings(ctx, "other")
+	if err != nil || len(otherBindings) != 1 || otherBindings[0].Title != "" || otherBindings[0].IconPNGBase64 != "" {
+		t.Fatalf("stored other identity: %+v, err=%v", otherBindings, err)
 	}
 	turn := post("/agent-mcp/begin", credential, map[string]string{"task": "Edit a page"}, 200)["turnID"].(string)
 	execute := func(name string, args map[string]any) map[string]any {
@@ -1036,5 +1074,113 @@ func TestExternalMCPBrowserScreenshotProvidesLocalFallback(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(folder, "blocked")); err != nil {
 		t.Fatalf("cleanup removed a different session's path: %v", err)
+	}
+}
+
+func TestExternalMCPProjectInstructionsDeferredUntilCodeTool(t *testing.T) {
+	fixture := newDebugMCPTestServer(t)
+	root := t.TempDir()
+	const projectRule = "Always preserve existing error boundaries."
+	if err := os.WriteFile(filepath.Join(root, "AGENTS.md"), []byte(projectRule), 0600); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	const sessionID = "deferred-rules"
+	if err := fixture.store.CreateSession(ctx, &store.Session{
+		ID: sessionID, Provider: "mock", Model: "mock-model",
+		ActiveMode: store.ModeCode, ModeLease: store.ModeLeaseSession,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fixture.engine.SetSessionDirectories(ctx, sessionID, []string{root}); err != nil {
+		t.Fatal(err)
+	}
+	post := externalMCPPostForTest(t, fixture.server.URL)
+	invite := post("/sessions/"+sessionID+"/mcp-agents", "", nil, 201)["invite"]
+	credential := post("/agent-mcp/connect", "", map[string]any{"invite": invite, "name": "Code Agent"}, 200)["credential"].(string)
+
+	began := post("/agent-mcp/begin", credential, map[string]string{"task": "Check time"}, 200)
+	turnID := began["turnID"].(string)
+	defer post("/agent-mcp/end", credential, map[string]any{"turnID": turnID}, 200)
+	if _, exists := began["projectInstructions"]; exists {
+		t.Fatalf("begin unexpectedly sent full projectInstructions: %v", began)
+	}
+	dirs, _ := began["projectDirectories"].([]any)
+	wantDir, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		wantDir = root
+	}
+	if len(dirs) != 1 || dirs[0] != wantDir {
+		t.Fatalf("expected projectDirectories [%s], got %v", wantDir, began["projectDirectories"])
+	}
+
+	nonCodeLookup := post("/agent-mcp/tools", credential, map[string]string{"query": tool.TimeGetCurrent}, 200)
+	if _, exists := nonCodeLookup["projectInstructions"]; exists {
+		t.Fatalf("non-code tool lookup should omit projectInstructions: %v", nonCodeLookup)
+	}
+	nonCodeCall := post("/agent-mcp/call", credential, map[string]any{"turnID": turnID, "tool": tool.TimeGetCurrent, "arguments": map[string]any{}}, 200)
+	if nonCodeCall["isError"] == true {
+		t.Fatalf("time tool failed: %v", nonCodeCall)
+	}
+	if _, exists := nonCodeCall["projectInstructions"]; exists {
+		t.Fatalf("non-code tool call should omit projectInstructions: %v", nonCodeCall)
+	}
+
+	codeLookup := post("/agent-mcp/tools", credential, map[string]string{"query": tool.FileRead}, 200)
+	if rules, _ := codeLookup["projectInstructions"].(string); !strings.Contains(rules, projectRule) {
+		t.Fatalf("code tool lookup must deliver projectInstructions, got %v", codeLookup)
+	}
+	codeCall := post("/agent-mcp/call", credential, map[string]any{
+		"turnID": turnID, "tool": tool.FileList, "arguments": map[string]string{"scope": "project", "path": "."},
+	}, 200)
+	if codeCall["isError"] == true {
+		t.Fatalf("file list failed: %v", codeCall)
+	}
+	if rules, _ := codeCall["projectInstructions"].(string); !strings.Contains(rules, projectRule) {
+		t.Fatalf("code tool call must deliver projectInstructions, got %v", codeCall)
+	}
+}
+
+func TestExternalMCPTurnRecoveryConflictHints(t *testing.T) {
+	fixture := newDebugMCPTestServer(t)
+	ctx := context.Background()
+	const sessionID = "recovery-hints"
+	if err := fixture.store.CreateSession(ctx, &store.Session{ID: sessionID, Provider: "mock", Model: "mock-model", ActiveMode: store.ModeChat}); err != nil {
+		t.Fatal(err)
+	}
+	post := externalMCPPostForTest(t, fixture.server.URL)
+	invite := post("/sessions/"+sessionID+"/mcp-agents", "", nil, 201)["invite"]
+	credential := post("/agent-mcp/connect", "", map[string]any{"invite": invite, "name": "Recovery Agent"}, 200)["credential"].(string)
+
+	turnID := post("/agent-mcp/begin", credential, map[string]string{"task": "First pass"}, 200)["turnID"].(string)
+	ownConflict := post("/agent-mcp/begin", credential, map[string]string{"task": "Forgot turnID"}, 409)
+	if ownConflict["activeTurnID"] != turnID {
+		t.Fatalf("expected own activeTurnID %q, got %+v", turnID, ownConflict)
+	}
+	ownErr, _ := ownConflict["error"].(string)
+	if !strings.Contains(ownErr, turnID) || !strings.Contains(ownErr, "pudding_session_status") || !strings.Contains(ownErr, "pudding_turn_end") {
+		t.Fatalf("unexpected own conflict hint: %q", ownErr)
+	}
+
+	post("/agent-mcp/end", credential, map[string]string{"turnID": turnID}, 200)
+	endedCall := post("/agent-mcp/call", credential, map[string]string{"turnID": turnID, "tool": tool.TimeGetCurrent}, 409)
+	endedErr, _ := endedCall["error"].(string)
+	if !strings.Contains(endedErr, "pudding_session_status") || !strings.Contains(endedErr, "pudding_turn_begin") {
+		t.Fatalf("unexpected inactive turn hint: %q", endedErr)
+	}
+
+	if _, err := fixture.store.BeginTurn(ctx, store.BeginTurnInput{
+		SessionID: sessionID, TurnID: "turn_other_running", UserMessageID: "msg_other",
+		ClientMessageID: "other_client", UserText: "Other active turn",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	otherConflict := post("/agent-mcp/begin", credential, map[string]string{"task": "Wait for other"}, 409)
+	if _, leaked := otherConflict["activeTurnID"]; leaked {
+		t.Fatalf("must not expose another turn's ID: %+v", otherConflict)
+	}
+	otherErr, _ := otherConflict["error"].(string)
+	if strings.Contains(otherErr, "turn_other_running") || !strings.Contains(otherErr, "pudding_turn_begin") {
+		t.Fatalf("unexpected foreign conflict hint: %q", otherErr)
 	}
 }

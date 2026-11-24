@@ -2300,22 +2300,7 @@ func (e *Engine) dispatchToolCall(ctx context.Context, sessionID, turnID string,
 			result.EndpointPluginID = pluginID
 		}
 	} else if !tool.HasDefinition(allowedTools, call.Name) {
-		known, err := e.toolNameKnown(ctx, sessionID, call.Name)
-		if err != nil {
-			result = tool.Result{CallID: call.CallID, Name: call.Name, Ok: false, Content: fmt.Sprintf("list tools: %v", err)}
-		} else if known {
-			if tool.NameAllowedForMode(nextMode, call.Name) {
-				if pluginID, pluginTool := tool.BuiltinPluginIDForTool(call.Name); pluginTool && e.plugins != nil {
-					result = e.pluginToolUnavailableResult(ctx, sessionID, call, pluginID)
-				} else {
-					result = toolUnavailableResult(call)
-				}
-			} else {
-				result = toolNotAllowedResult(call, nextMode)
-			}
-		} else {
-			result = unknownToolResult(call)
-		}
+		result = e.unadvertisedToolResult(ctx, sessionID, nextMode, call)
 	} else {
 		result = e.executeAllowedTool(ctx, sessionID, turnID, nextMode, call)
 	}
@@ -2847,18 +2832,27 @@ func (e *Engine) projectRootDirsForToolCall(ctx context.Context, sessionID, turn
 	return workspace.RootDirs, nil
 }
 
-func (e *Engine) toolNameKnown(ctx context.Context, sessionID, name string) (bool, error) {
-	if name == tool.RequestCapability || ((name == tool.PluginLoad || name == tool.PluginUnload) && e.plugins != nil) {
-		return true, nil
-	}
+// Use the runtime definition to explain a rejected call. Only the advertised
+// tool list can authorize execution.
+func (e *Engine) unadvertisedToolResult(ctx context.Context, sessionID string, mode store.AgentMode, call tool.Call) tool.Result {
 	if e.tools == nil {
-		return false, nil
+		return unknownToolResult(call)
 	}
 	defs, err := e.tools.Definitions(ctx, sessionID)
 	if err != nil {
-		return false, err
+		return tool.Result{CallID: call.CallID, Name: call.Name, Ok: false, Content: fmt.Sprintf("list tools: %v", err)}
 	}
-	return tool.HasDefinition(defs, name), nil
+	def, known := providerToolDefinition(defs, call.Name)
+	if !known {
+		return unknownToolResult(call)
+	}
+	if !tool.ToolDefAllowedForMode(mode, def) {
+		return toolNotAllowedResult(call, mode)
+	}
+	if def.PluginID != "" && e.plugins != nil {
+		return e.pluginToolUnavailableResult(ctx, sessionID, call, def.PluginID)
+	}
+	return toolUnavailableResult(call)
 }
 
 func (e *Engine) pluginToolUnavailableResult(ctx context.Context, sessionID string, call tool.Call, pluginID string) tool.Result {

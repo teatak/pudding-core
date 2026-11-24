@@ -2726,3 +2726,35 @@ func TestReadDBEnforcesQueryOnlyAndReadsCommittedWrites(t *testing.T) {
 		t.Fatalf(":memory: GetProject = %+v err=%v", got, err)
 	}
 }
+
+func TestAgentInviteConsolidatesLegacyBindingsOnRedemption(t *testing.T) {
+	st, _ := openTestStore(t)
+	ctx := context.Background()
+	createTestSession(t, st, "target")
+	createTestSession(t, st, "separate")
+	for id, session := range map[string]string{"old-a": "target", "old-b": "target", "keep": "separate"} {
+		if _, err := st.db.Exec(`INSERT INTO external_agent_bindings (id,session_id,runtime_id,credential_hash,expires_at) VALUES (?,?,'',?,0)`, id, session, id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	now := time.Now().UnixMilli()
+	if err := st.CreateAgentInvite(ctx, store.ExternalAgentBinding{ID: "new", SessionID: "target"}, "invite", now+1000); err != nil {
+		t.Fatal(err)
+	}
+	identity := store.ExternalAgentIdentity{Name: "Agent"}
+	if _, err := st.RedeemAgentInvite(ctx, "invite", "new-key", identity, now+1000); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("expired invitation: %v", err)
+	}
+	if bindings, err := st.ListAgentBindings(ctx, "target"); err != nil || len(bindings) != 2 {
+		t.Fatalf("legacy bindings: %v, err=%v", bindings, err)
+	}
+	if _, err := st.RedeemAgentInvite(ctx, "invite", "new-key", identity, now); err != nil {
+		t.Fatal(err)
+	}
+	if bindings, err := st.ListAgentBindings(ctx, "target"); err != nil || len(bindings) != 1 || bindings[0].ID != "new" {
+		t.Fatalf("replacement: %v, err=%v", bindings, err)
+	}
+	if _, err := st.AgentBinding(ctx, "keep"); err != nil {
+		t.Fatalf("unrelated binding: %v", err)
+	}
+}

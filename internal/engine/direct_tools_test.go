@@ -91,6 +91,53 @@ func TestDirectToolCallUsesCanonicalTurn(t *testing.T) {
 	}
 }
 
+func TestChatRecoversUnloadedWidgetTools(t *testing.T) {
+	ctx := plugin.WithRuntimeID(context.Background(), "desktop")
+	const interaction = "widget-interaction"
+	const authoring = "widget-authoring"
+	interactionTools := []string{"widget_list", "widget_open", "widget_targets", "widget_observe"}
+	runner := &recordingToolRunner{result: tool.Result{Ok: true, Content: `{"ok":true}`}}
+	for _, name := range interactionTools {
+		runner.defs = append(runner.defs, provider.ToolDef{Name: name, PluginID: interaction, Capability: store.ModeChat})
+	}
+	runner.defs = append(runner.defs, provider.ToolDef{Name: "widget_draft_open", PluginID: authoring, Capability: store.ModeCode})
+	eng, db := newDirectToolEngine(t, WithTools(runner), WithPlugins(&mutablePluginSource{defs: []*plugin.Definition{
+		{ID: interaction, Enabled: true, RequiredMode: "chat"},
+		{ID: authoring, Enabled: true, RequiredMode: "code"},
+	}}))
+	const sid = "widget-chat"
+	if err := db.CreateSession(ctx, &store.Session{ID: sid, Provider: "configured", Model: "configured-model", ActiveMode: store.ModeChat}); err != nil {
+		t.Fatal(err)
+	}
+	call := func(name, args string) tool.Result {
+		t.Helper()
+		result, err := eng.CallTool(ctx, sid, store.ModeChat, name, json.RawMessage(args))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return result
+	}
+	for _, name := range interactionTools {
+		result := call(name, `{}`)
+		var guidance struct{ Reason, PluginID string }
+		if err := json.Unmarshal([]byte(result.Content), &guidance); err != nil || result.Ok || guidance.Reason != "plugin_not_loaded" || guidance.PluginID != interaction {
+			t.Fatalf("%s: expected a hint to load %s, got %s", name, interaction, result.Content)
+		}
+	}
+	if result := call("widget_draft_open", `{}`); result.Ok || !strings.Contains(result.Content, `"reason":"capability_required"`) {
+		t.Fatalf("draft editing must require Code: %s", result.Content)
+	}
+	if len(runner.calls) != 0 {
+		t.Fatalf("unavailable tools reached the runner: %v", runner.calls)
+	}
+	if result := call(tool.PluginLoad, `{"plugin_id":"widget-interaction"}`); !result.Ok {
+		t.Fatal(result.Content)
+	}
+	if result := call("widget_open", `{"id":"saved"}`); !result.Ok || len(runner.calls) != 1 || runner.calls[0].Mode != store.ModeChat {
+		t.Fatalf("widget_open should execute in Chat after load: %+v, calls: %v", result, runner.calls)
+	}
+}
+
 type directPluginSource struct{}
 
 func (directPluginSource) ListDefinitions(context.Context) ([]*plugin.Definition, error) {

@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/teatak/pudding-core/internal/config"
+	"github.com/teatak/pudding-core/internal/credentialstore"
 	"github.com/teatak/pudding-core/internal/daemon"
 	"github.com/teatak/pudding-core/internal/home"
 	"github.com/teatak/pudding-core/internal/store"
@@ -80,11 +81,13 @@ func Run(ctx context.Context, opts Options) (Report, error) {
 		profile: &store.ProviderProfile{ID: "mock", DisplayName: "mock", Models: []store.ProviderModel{{ID: "mock", Capabilities: &store.ModelCaps{Tools: true}}}},
 		model:   "mock",
 	}
+	var cipher credentialstore.Cipher
 	if !opts.Mock {
 		sourceHome, err := home.Resolve(opts.SourceHome)
 		if err != nil {
 			return Report{}, err
 		}
+		cipher = credentialstore.NewBridge(sourceHome)
 		selected, err = selectProviderModel(ctx, config.NewManager(sourceHome), opts.Provider, opts.Model)
 		if err != nil {
 			return Report{}, err
@@ -105,13 +108,16 @@ func Run(ctx context.Context, opts Options) (Report, error) {
 		return Report{}, err
 	}
 	evalConfig := config.NewManager(evalHome)
+	if cipher != nil {
+		evalConfig.WithCredentialCipher(cipher)
+	}
 	if err := evalConfig.Prepare(); err != nil {
 		return Report{}, err
 	}
 	if err := evalConfig.PutProviderProfile(context.Background(), selected.profile); err != nil {
 		return Report{}, fmt.Errorf("agent eval: prepare selected provider: %w", err)
 	}
-	d, err := daemon.Start(daemon.Options{Home: evalHome, Addr: "127.0.0.1:0", Mock: opts.Mock})
+	d, err := daemon.Start(daemon.Options{Home: evalHome, Addr: "127.0.0.1:0", Mock: opts.Mock, CredentialCipher: cipher})
 	if err != nil {
 		return Report{}, fmt.Errorf("agent eval: start daemon: %w", err)
 	}

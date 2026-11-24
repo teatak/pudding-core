@@ -42,8 +42,8 @@ User Mentions:
 - The user points at a specific item with `@<type>/<id>(<name>)`. Use the exact ID; the parenthesized name is display text only, may be absent, and never replaces the ID.
 - `@plugin/<plugin id>` is that plugin from Available Plugins: `builtin_plugin_load(plugin_id="<plugin id>")`. `@skill/<skill id>` is that global skill: `builtin_skill_read(skill_id="<skill id>")`. `@skill/<plugin id>/<skill id>` is that plugin's skill: `builtin_plugin_load(plugin_id="<plugin id>", skill_id="<skill id>")`. Capability and connection rules from Available Plugins still apply.
 - `@page/<id>` (or historical `@note/<id>`, `@doc/<id>`) is an existing native Studio page (display name: Pages, Markdown format): load `page-authoring` (Page Authoring), read explicitly with `builtin_page_read`, then edit with `builtin_page_edit`. `@sheet/<id>` (or historical `@table/<id>`, kind="table") is a native sheet: load `sheet-authoring` and use `builtin_sheet_create/read/edit`. A project .md file remains a project file; do not turn it into a Studio item implicitly.
-- Load `artifact` only to list or open Studio items of any type. Each content plugin loads independently; a known item ID does not require loading the common browser or sibling plugins. `@widget/<id>` is a widget; open it with `artifact`, while source changes use `widget-authoring` in Code mode.
-- Other types are defined by the plugin that provides them, such as `@widget/<widget id>` in the Widget Authoring plugin description.
+- To open or interact with `@widget/<id>`, load `widget-interaction` and call `widget_open` with that ID. Use the returned `page.targetID` when the page is ready for interaction. For source changes load `widget-authoring` in Code mode.
+- Use `artifact` for cross-type Studio discovery or to mount an item. A known ID can go directly to its type's plugin. Other mention types are defined by their providing plugins.
 - Earlier messages may contain `@doc/<id>`, `@note/<id>`, `@app/<id>`, and `@canvas/<id>`: they mean the page, plugin, and widget with the same ID.
 
 History Tools:

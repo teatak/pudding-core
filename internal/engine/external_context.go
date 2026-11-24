@@ -12,9 +12,9 @@ import (
 	"github.com/teatak/pudding-core/internal/tool"
 )
 
-func (e *Engine) ExternalProjectRules(ctx context.Context, sess *store.Session, turnID string) (string, error) {
+func (e *Engine) ExternalProjectDirs(ctx context.Context, sess *store.Session, turnID string) ([]string, error) {
 	if sess.ActiveMode != store.ModeCode {
-		return "", nil
+		return nil, nil
 	}
 	var workspace sessionworkspace.Workspace
 	var err error
@@ -25,9 +25,17 @@ func (e *Engine) ExternalProjectRules(ctx context.Context, sess *store.Session, 
 		workspace, err = e.SessionWorkspace(ctx, sess.ID, turnID, sessionworkspace.ScratchExisting)
 	}
 	if err != nil {
+		return nil, err
+	}
+	return store.NormalizeProjectDirs(workspace.RootDirs), nil
+}
+
+func (e *Engine) ExternalProjectRules(ctx context.Context, sess *store.Session, turnID string) (string, error) {
+	dirs, err := e.ExternalProjectDirs(ctx, sess, turnID)
+	if err != nil || len(dirs) == 0 {
 		return "", err
 	}
-	return contextbuilder.AppendProjectContext("", workspace.RootDirs), nil
+	return contextbuilder.AppendProjectContext("", dirs), nil
 }
 
 // Track selections, never file contents. A running turn can reuse these references

@@ -691,9 +691,10 @@ func (r *BuiltinRunner) syncBrowserState(ctx context.Context, sessionID string, 
 
 func browserToolError(out Result, err error) Result {
 	reason := "browser_error"
+	detail := err.Error()
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		reason = "browser_operation_cancelled"
-		return toolJSONError(out, reason, "Browser request cancelled or timed out. Already dispatched input may have taken effect; observe before retrying.")
+		detail = "Browser request cancelled or timed out."
 	} else if code := browser.ErrorCode(err); code != "" {
 		reason = code
 	} else if errors.Is(err, browser.ErrUnavailable) {
@@ -703,5 +704,22 @@ func browserToolError(out Result, err error) Result {
 	} else if errors.Is(err, browser.ErrTabNotFound) {
 		reason = "browser_tab_not_found"
 	}
-	return toolJSONError(out, reason, err.Error())
+	payload := map[string]any{"ok": false, "reason": reason, "detail": detail}
+	switch reason {
+	case "element_stale", "element_ambiguous", "browser_frame_expired":
+		payload["nextStep"] = "Observe the current page or frame again and use its unique element ref."
+	case "observation_stale":
+		payload["nextStep"] = "Get a fresh observation or screenshot. Use its observationID and current CSS coordinates."
+	case "browser_wait_timeout", "browser_action_outcome_unknown", "browser_operation_cancelled":
+		if out.Name == BrowserDownloads {
+			payload["nextStep"] = "List downloads and inspect their status before considering another transfer."
+		} else {
+			payload["nextStep"] = "Input may already have taken effect; observe before retrying."
+		}
+	case "browser_dialog_open", "browser_dialog_expired":
+		payload["nextStep"] = "Inspect the current dialog with builtin_browser_dialog before responding. Check the outcome before repeating the triggering action."
+	}
+	out.SummaryKind = SummaryReturnedFields
+	out.SummaryCount = len(payload)
+	return toolJSON(out, false, payload)
 }
