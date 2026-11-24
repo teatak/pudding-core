@@ -340,7 +340,7 @@ func TestCompactOversizedInputFailsBeforeProvider(t *testing.T) {
 		return compactChunks(provider.Chunk{Delta: "must not call", Done: true, Finish: provider.FinishStop}), nil
 	})
 	messages := []*store.Message{{ID: "large", Role: store.RoleUser, Text: strings.Repeat("source ", 12000)}}
-	summary, err := eng.summarizeCompactHistory(ctx, sid, resolved, client, messages, messages, "", 100)
+	summary, err := eng.summarizeCompactHistory(ctx, sid, resolved, client, messages, messages, "", 100, true)
 	if !errors.Is(err, ErrContextBudget) || calls != 0 || summary != "" {
 		t.Fatalf("oversized history must fail without splitting or calling provider: calls=%d error=%v", calls, err)
 	}
@@ -390,7 +390,7 @@ func TestCompactOversizedMultiTurnUsesRollingBatches(t *testing.T) {
 		t.Fatalf("expected rolling batches for oversized history, got %d request(s)", len(requests))
 	}
 	for i := 1; i < len(requests); i++ {
-		if !strings.Contains(requests[i].Messages[0].Text, `id="rolling_summary"`) {
+		if !strings.Contains(requests[i].Messages[0].Text, fmt.Sprintf("rolling batch %d summary.", i)) {
 			t.Fatalf("batch %d missing rolling summary carry-over", i+1)
 		}
 	}
@@ -453,7 +453,7 @@ func TestCompactOversizedMultiTurnUsesRollingBatches(t *testing.T) {
 			t.Fatalf("expected rolling batches for small window, got %d request(s)", len(smallReqs))
 		}
 		finalPrompt := smallReqs[len(smallReqs)-1].Messages[0].Text
-		if !strings.Contains(finalPrompt, `id="rolling_summary"`) || !strings.Contains(finalPrompt, `action="retain"`) || !strings.Contains(finalPrompt, "RETAIN_TAIL_FACT_1") {
+		if !strings.Contains(finalPrompt, fmt.Sprintf("small batch %d summary.", len(smallReqs)-1)) || !strings.Contains(finalPrompt, `action="retain"`) || !strings.Contains(finalPrompt, "RETAIN_TAIL_FACT_1") {
 			t.Fatalf("small-window probe dropped retained tail or rolling summary: %s", finalPrompt)
 		}
 	})
@@ -503,7 +503,7 @@ func TestCompactOversizedMultiTurnUsesRollingBatches(t *testing.T) {
 		}
 		finalPrompt := runReqs[len(runReqs)-1].Messages[0].Text
 		idxBefore := strings.Index(finalPrompt, "RUNNING_INPUT_BEFORE_COLD")
-		idxRolling := strings.Index(finalPrompt, `id="rolling_summary"`)
+		idxRolling := strings.Index(finalPrompt, fmt.Sprintf("running batch %d.", len(runReqs)-1))
 		idxAfter := strings.Index(finalPrompt, "RETAIN_AFTER_COLD")
 		if idxBefore < 0 || idxRolling < 0 || idxAfter < 0 || !(idxBefore < idxRolling && idxRolling < idxAfter) {
 			t.Fatalf("retain order broken across rolling batch: before=%d rolling=%d after=%d", idxBefore, idxRolling, idxAfter)
@@ -531,7 +531,7 @@ func TestCompactOversizedMultiTurnUsesRollingBatches(t *testing.T) {
 			calls = append(calls, req)
 			return compactChunks(provider.Chunk{Delta: "single source summarized.", Done: true, Finish: provider.FinishStop}), nil
 		})
-		summary, err := singleRetainEng.summarizeCompactHistory(ctx, singleRetainSID, resolved, client, msgs, msgs[:1], "", 512)
+		summary, err := singleRetainEng.summarizeCompactHistory(ctx, singleRetainSID, resolved, client, msgs, msgs[:1], "", 512, true)
 		if err != nil || summary == "" || len(calls) != 1 {
 			t.Fatalf("single source with large retain failed: summary=%q calls=%d err=%v", summary, len(calls), err)
 		}
@@ -542,6 +542,80 @@ func TestCompactOversizedMultiTurnUsesRollingBatches(t *testing.T) {
 	})
 }
 
+// Both second messages fit alone in an 8K window. The first partial made the
+// original final request either overflow or leave only four output tokens.
+func TestCompactHandoffWithNearWindowMessage(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		size int
+	}{{"carry_exceeds_window", 29551}, {"carry_leaves_four_tokens", 28939}} {
+		t.Run(tc.name, func(t *testing.T) {
+			eng, db, _, sid := newTestEngine(t)
+			defer eng.Stop()
+			ctx := context.Background()
+			profile := &store.ProviderProfile{ID: "mock", Protocol: "openai-compatible", Models: []store.ProviderModel{{ID: "mock-model", ContextWindow: 8192}}}
+			if err := db.PutProviderProfile(ctx, profile); err != nil {
+				t.Fatal(err)
+			}
+			title := "Handoff"
+			if _, err := db.UpdateSession(ctx, sid, store.SessionUpdate{Title: &title}); err != nil {
+				t.Fatal(err)
+			}
+			for i, text := range []string{strings.Repeat("a", 5000), strings.Repeat("b", tc.size)} {
+				id := fmt.Sprintf("source%d", i+1)
+				if _, err := db.BeginTurn(ctx, store.BeginTurnInput{SessionID: sid, TurnID: id, UserMessageID: id, ClientMessageID: "external-mcp:agent:" + id, UserText: text}); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := db.FinishTurn(ctx, store.FinishTurnInput{TurnID: id, Status: store.TurnCompleted}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			const first = "first outcome @message(source1)"
+			const second = "second outcome @message(source2)"
+			var summaries, replies int
+			eng.resolver = registry.Static(compactClientFunc(func(_ context.Context, req provider.Request) (<-chan provider.Chunk, error) {
+				text := "continued"
+				if req.System == compactSystemPrompt {
+					summaries++
+					budget, _ := req.Config.MaxOutputTokens()
+					prompt := req.Messages[0].Text
+					if budget < 64 || strings.Contains(prompt, "@message(rolling_summary)") {
+						t.Errorf("invalid summary request: budget=%d", budget)
+					}
+					switch {
+					case strings.Contains(prompt, strings.Repeat("a", 100)):
+						text = first + strings.Repeat("k", 1000-len(first))
+					case strings.Contains(prompt, strings.Repeat("b", 100)):
+						text = second
+					default:
+						if !strings.Contains(prompt, first) || !strings.Contains(prompt, second) {
+							t.Error("merge lost a source or its citation")
+						}
+						text = first + " " + second
+					}
+				} else {
+					replies++
+					messages, _ := json.Marshal(req.Messages)
+					for _, want := range []string{first, second, "continue this task"} {
+						if !strings.Contains(string(messages), want) {
+							t.Errorf("handoff lost %q", want)
+						}
+					}
+				}
+				return compactChunks(provider.Chunk{Delta: text, Done: true, Finish: provider.FinishStop}), nil
+			}))
+			if _, err := eng.Submit(ctx, SubmitInput{SessionID: sid, ClientMessageID: "native", Text: "continue this task"}); err != nil {
+				t.Fatal(err)
+			}
+			eng.Wait()
+			turn, err := findTurn(db, sid, "native")
+			if err != nil || turn.Status != store.TurnCompleted || summaries != 3 || replies != 1 {
+				t.Fatalf("handoff: turn=%v err=%v summaries=%d replies=%d", turn, err, summaries, replies)
+			}
+		})
+	}
+}
+
 func TestExternalMCPHistoryCooledInUsageAndCompact(t *testing.T) {
 	eng, ms, _, sid := newTestEngine(t)
 	defer eng.Stop()
@@ -550,6 +624,10 @@ func TestExternalMCPHistoryCooledInUsageAndCompact(t *testing.T) {
 		{Name: tool.FileRead, Capability: store.ModeCode},
 		{Name: tool.HistoryGetMessage, Capability: store.ModeChat},
 	}}
+	mode, lease := store.ModeCode, store.ModeLeaseSession
+	if _, err := ms.UpdateSession(ctx, sid, store.SessionUpdate{ActiveMode: &mode, ModeLease: &lease}); err != nil {
+		t.Fatal(err)
+	}
 	for i := 0; i < 4; i++ {
 		turnID := fmt.Sprintf("ext-%d", i)
 		if _, err := ms.BeginTurn(ctx, store.BeginTurnInput{
@@ -561,18 +639,20 @@ func TestExternalMCPHistoryCooledInUsageAndCompact(t *testing.T) {
 		}); err != nil {
 			t.Fatal(err)
 		}
-		big := fmt.Sprintf("RAW_EXTERNAL_OUTPUT_%d\n%s", i, strings.Repeat("line ", 1400))
-		if _, err := ms.AppendTurnOutput(ctx, store.AppendTurnOutputInput{
-			TurnID: turnID,
-			Parts: []store.ContentPart{
-				{Type: store.ContentPartToolUse, CallID: "c-" + turnID, Name: tool.FileRead, Args: json.RawMessage(`{}`)},
-				{Type: store.ContentPartToolResult, CallID: "c-" + turnID, Name: tool.FileRead, Ok: true, Content: big},
-				{Type: store.ContentPartText, Text: fmt.Sprintf("FINAL_EXTERNAL_SUMMARY_%d", i)},
-			},
-		}); err != nil {
+		big := fmt.Sprintf("RAW_EXTERNAL_OUTPUT_%d\n%s", i, strings.Repeat("line ", 4000))
+		parts := []store.ContentPart{
+			{Type: store.ContentPartToolUse, CallID: "c-" + turnID, Name: tool.FileRead, Args: json.RawMessage(`{}`)},
+			{Type: store.ContentPartToolResult, CallID: "c-" + turnID, Name: tool.FileRead, Ok: true, Content: big},
+		}
+		status := store.TurnCancelled
+		if i > 0 {
+			status = store.TurnCompleted
+			parts = append(parts, store.ContentPart{Type: store.ContentPartText, Text: fmt.Sprintf("FINAL_EXTERNAL_SUMMARY_%d", i)})
+		}
+		if _, err := ms.AppendTurnOutput(ctx, store.AppendTurnOutputInput{TurnID: turnID, Parts: parts}); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := ms.FinishTurn(ctx, store.FinishTurnInput{TurnID: turnID, Status: store.TurnCompleted, Mode: store.ModeCode}); err != nil {
+		if _, err := ms.FinishTurn(ctx, store.FinishTurnInput{TurnID: turnID, Status: status, Mode: store.ModeCode}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -580,7 +660,7 @@ func TestExternalMCPHistoryCooledInUsageAndCompact(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Four raw outputs exceed 28,000 chars (~7,000+ tokens) before fixed overhead;
+	// Four raw outputs exceed 80,000 chars before fixed overhead;
 	// cooling folds them to compact result_ref stubs.
 	if usage.MessageEstimatedTokens > 1500 {
 		t.Fatalf("external MCP history was not cooled in SessionUsage: %+v", usage)
@@ -589,13 +669,28 @@ func TestExternalMCPHistoryCooledInUsageAndCompact(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	history, err := compactHistoryText(all, all)
+	history, err := compactHistoryText(all, all, compactColdTurns(all, true))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(history, "RAW_EXTERNAL_OUTPUT_") || !strings.Contains(history, `"cold_only":true`) || !strings.Contains(history, "FINAL_EXTERNAL_SUMMARY_0") {
+	if strings.Contains(history, "RAW_EXTERNAL_OUTPUT_") || !strings.Contains(history, `"cold_only":true`) || !strings.Contains(history, "FINAL_EXTERNAL_SUMMARY_1") {
 		t.Fatalf("compactHistoryText did not cool external outputs cleanly: %s", history)
 	}
+	// A cancelled turn has no final text to hand off. Exercise the real
+	// compaction entry point with readback absent from the next model's tools.
+	eng.tools = &recordingToolRunner{defs: []provider.ToolDef{{Name: tool.FileRead, Capability: store.ModeCode}}}
+	var summaryInput string
+	eng.resolver = registry.Static(compactClientFunc(func(_ context.Context, req provider.Request) (<-chan provider.Chunk, error) {
+		summaryInput = req.Messages[0].Text
+		return compactChunks(provider.Chunk{Delta: "Earlier checks complete.", Done: true, Finish: provider.FinishStop}), nil
+	}))
+	if _, err := eng.Compact(ctx, CompactInput{SessionID: sid}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(summaryInput, "RAW_EXTERNAL_OUTPUT_0") || strings.Contains(summaryInput, strings.Repeat("line ", 4000)) || strings.Contains(summaryInput, `"cold_only":true`) {
+		t.Fatal("compaction without a reader must include bounded evidence from the interrupted turn")
+	}
+
 }
 
 func TestCompactRegressionSummaryRequestFitsContextWindow(t *testing.T) {

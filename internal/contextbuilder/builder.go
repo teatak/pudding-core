@@ -494,8 +494,7 @@ func isExternalColdToolImage(part store.ContentPart, cfg provider.ModelConfig, a
 	if !imageAttachmentsAllowed(cfg) || strings.TrimSpace(attachmentHome) == "" || part.AttachmentKey == "" {
 		return false
 	}
-	mime := strings.ToLower(strings.TrimSpace(part.MIME))
-	return strings.HasPrefix(mime, "image/") && mime != "image/svg+xml"
+	return tool.MediaReadSupportsImage(part.MIME)
 }
 
 func wrapSystemReminder(text string) string {

@@ -10,6 +10,7 @@ import (
 	"github.com/teatak/pudding-core/internal/provider"
 	"github.com/teatak/pudding-core/internal/provider/anthropic"
 	"github.com/teatak/pudding-core/internal/store"
+	"github.com/teatak/pudding-core/internal/tool"
 )
 
 // Input may use the window up to the last token, which must remain for output.
@@ -92,7 +93,7 @@ func (e *Engine) prepareContextRequest(ctx context.Context, sessionID, turnID st
 	soft := compactTrigger(req.Config, e.autoCompactThresholdPercent(ctx))
 	summaryPressure := false
 	if soft > 0 {
-		summaryPressure, err = e.cooledSummaryPressure(ctx, sessionID, resolved, factor)
+		summaryPressure, err = e.cooledSummaryPressure(ctx, sessionID, resolved, factor, tool.HasDefinition(req.Tools, tool.HistoryGetMessage))
 		if err != nil {
 			return false, err
 		}

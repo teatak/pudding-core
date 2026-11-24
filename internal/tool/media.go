@@ -206,6 +206,12 @@ func routedMediaResult(out Result, item store.Attachment, mediaType, purpose str
 	return out
 }
 
+// MediaReadSupportsImage reports whether media_read can return this image again.
+func MediaReadSupportsImage(rawMIME string) bool {
+	kind, ok := readableMediaKind(rawMIME)
+	return ok && kind == mediaTypeImage
+}
+
 func readableMediaKind(rawMIME string) (string, bool) {
 	mimeType := normalizedMediaMIME(rawMIME)
 	switch mimeType {

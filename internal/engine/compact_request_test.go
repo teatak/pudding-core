@@ -161,7 +161,7 @@ func TestCompactIncludesRetainedMessagesInOriginalOrder(t *testing.T) {
 		return compactChunks(provider.Chunk{Delta: "summary", Done: true, Finish: provider.FinishStop}), nil
 	})
 	r := &resolvedModel{model: "fixture", protocol: "openai-compatible", config: provider.ModelConfig{ContextWindow: 64000}}
-	if _, err := eng.summarizeCompactHistory(context.Background(), sid, r, client, messages, messages[1:2], "", 100); err != nil || calls != 1 {
+	if _, err := eng.summarizeCompactHistory(context.Background(), sid, r, client, messages, messages[1:2], "", 100, true); err != nil || calls != 1 {
 		t.Fatalf("calls=%d err=%v", calls, err)
 	}
 }

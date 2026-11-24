@@ -11,12 +11,16 @@ import (
 	"github.com/teatak/pudding-core/internal/store"
 )
 
+// Reserve room for a short handoff including its source references and open tasks.
+const compactMinOutputTokens = 64
+
 // Send the complete effective history once when it fits. If a multi-message
 // compaction exceeds the model window, fall back to rolling batches at
 // message/turn boundaries without truncating individual messages or splitting
 // single oversized items.
-func (e *Engine) summarizeCompactHistory(ctx context.Context, sessionID string, resolved *resolvedModel, client provider.Client, effective, source []*store.Message, hint string, target int) (string, error) {
-	history, err := compactHistoryText(effective, source)
+func (e *Engine) summarizeCompactHistory(ctx context.Context, sessionID string, resolved *resolvedModel, client provider.Client, effective, source []*store.Message, hint string, target int, canReadHistory bool) (string, error) {
+	coldTurns := compactColdTurns(effective, canReadHistory)
+	history, err := compactHistoryText(effective, source, coldTurns)
 	if err != nil {
 		return "", err
 	}
@@ -27,11 +31,17 @@ func (e *Engine) summarizeCompactHistory(ctx context.Context, sessionID string, 
 	if !errors.Is(err, ErrContextBudget) {
 		return "", err
 	}
-	return e.summarizeCompactBatches(ctx, sessionID, resolved, client, effective, source, hint, target, err)
+	return e.summarizeCompactBatches(ctx, sessionID, resolved, client, effective, source, hint, target, coldTurns, err)
 }
 
-func compactHistoryText(effective, source []*store.Message) (string, error) {
-	externalTurns := contextbuilder.ExternalMCPTurns(effective)
+func compactColdTurns(effective []*store.Message, canReadHistory bool) map[string]bool {
+	if canReadHistory {
+		return contextbuilder.ExternalMCPTurns(effective)
+	}
+	return nil // Keep the bounded result preview for a model without a history reader.
+}
+
+func compactHistoryText(effective, source []*store.Message, coldTurns map[string]bool) (string, error) {
 	sourceIDs := make(map[string]bool, len(source))
 	for _, message := range source {
 		sourceIDs[message.ID] = true
@@ -39,7 +49,7 @@ func compactHistoryText(effective, source []*store.Message) (string, error) {
 	var history strings.Builder
 	hasSource := false
 	for _, message := range effective {
-		text := compactMessageTextFor(message, externalTurns[message.TurnID])
+		text := compactMessageTextFor(message, coldTurns[message.TurnID])
 		if strings.TrimSpace(text) == "" {
 			continue
 		}
@@ -63,12 +73,12 @@ func (e *Engine) summarizeCompactBatches(
 	effective, source []*store.Message,
 	hint string,
 	target int,
+	coldTurns map[string]bool,
 	singleErr error,
 ) (string, error) {
-	externalTurns := contextbuilder.ExternalMCPTurns(effective)
 	nonEmptySource := make([]*store.Message, 0, len(source))
 	for _, message := range source {
-		if text := compactMessageTextFor(message, externalTurns[message.TurnID]); strings.TrimSpace(text) != "" {
+		if text := compactMessageTextFor(message, coldTurns[message.TurnID]); strings.TrimSpace(text) != "" {
 			nonEmptySource = append(nonEmptySource, message)
 		}
 	}
@@ -77,7 +87,7 @@ func (e *Engine) summarizeCompactBatches(
 	}
 	// Fail before calling the provider if any single message cannot fit alone.
 	for _, message := range nonEmptySource {
-		text := compactMessageTextFor(message, externalTurns[message.TurnID])
+		text := compactMessageTextFor(message, coldTurns[message.TurnID])
 		if _, err := compactSummaryRequest(resolved, compactMessageRecord(message, text, "summarize"), hint, target); err != nil {
 			return "", err
 		}
@@ -91,7 +101,7 @@ func (e *Engine) summarizeCompactBatches(
 		if sourceIDs[message.ID] {
 			continue
 		}
-		if strings.TrimSpace(compactMessageTextFor(message, externalTurns[message.TurnID])) != "" {
+		if strings.TrimSpace(compactMessageTextFor(message, coldTurns[message.TurnID])) != "" {
 			hasRetain = true
 			break
 		}
@@ -120,7 +130,7 @@ func (e *Engine) summarizeCompactBatches(
 		lo, hi, best := 1, len(msgs), 0
 		for lo <= hi {
 			mid := (lo + hi) / 2
-			text := rollingBatchHistory(rolling, msgs[:mid], effective, sourceIDs, false, externalTurns)
+			text := rollingBatchHistory(rolling, msgs[:mid], effective, sourceIDs, false, coldTurns)
 			if _, ok := fitRequest(text, intermediateTarget, minOut); ok {
 				best = mid
 				lo = mid + 1
@@ -131,61 +141,77 @@ func (e *Engine) summarizeCompactBatches(
 		return best
 	}
 
+	// rolling contains partial-summary records, never canonical message IDs.
+	generate := func(history string, budget int) (string, error) {
+		req, err := compactSummaryRequest(resolved, history, hint, budget)
+		if err != nil {
+			return "", err
+		}
+		return e.generateCompactSummary(ctx, sessionID, resolved, client, req)
+	}
 	remaining := nonEmptySource
 	rolling := ""
 	probeTokens := min(compactSummaryMaxTokens, max(1, intermediateTarget))
-	for step := 0; len(remaining) > 0 && step < len(nonEmptySource)+2; step++ {
-		if req, ok := fitRequest(rollingBatchHistory(rolling, remaining, effective, sourceIDs, hasRetain, externalTurns), target, 2); ok {
+	for {
+		if err := ctx.Err(); err != nil {
+			return "", err
+		}
+		full := rollingBatchHistory(rolling, remaining, effective, sourceIDs, hasRetain, coldTurns)
+		if req, ok := fitRequest(full, target, compactMinOutputTokens); ok {
 			return e.generateCompactSummary(ctx, sessionID, resolved, client, req)
+		}
+		if len(remaining) == 0 {
+			return generate(rolling, target) // Retained messages already survive verbatim.
 		}
 		end := largestFitting(rolling, remaining, minIntermediateOut)
 		if end == 0 {
-			end = largestFitting(rolling, remaining, 2)
+			end = largestFitting(rolling, remaining, compactMinOutputTokens)
 		}
 		if end == 0 {
-			return "", singleErr
-		}
-		if end < len(remaining) {
-			if aligned := alignChunkToTurnBoundary(remaining, end); aligned > 0 {
-				end = aligned
-			}
-		} else if hasRetain && len(remaining) > 1 {
-			probe := rollingBatchHistory(strings.Repeat("x ", probeTokens*2), nil, effective, sourceIDs, true, externalTurns)
-			if _, ok := fitRequest(probe, target, 2); ok {
-				half := max(1, len(remaining)/2)
-				if aligned := alignChunkToTurnBoundary(remaining, half); aligned > 0 {
-					end = aligned
-				} else {
-					end = half
-				}
-			} else {
-				req, err := compactSummaryRequest(resolved, rollingBatchHistory(rolling, remaining, effective, sourceIDs, false, externalTurns), hint, target)
-				if err != nil {
-					return "", err
-				}
-				return e.generateCompactSummary(ctx, sessionID, resolved, client, req)
-			}
-		} else {
-			req, err := compactSummaryRequest(resolved, rollingBatchHistory(rolling, remaining, effective, sourceIDs, false, externalTurns), hint, target)
+			// Preflight established that this message fits alone. Summarize it
+			// independently, then merge both partials in chronological order.
+			current, err := generate(rollingBatchHistory("", remaining[:1], effective, sourceIDs, false, coldTurns), intermediateTarget)
 			if err != nil {
 				return "", err
 			}
-			return e.generateCompactSummary(ctx, sessionID, resolved, client, req)
+			rolling += partialSummaryRecord(current)
+			remaining = remaining[1:]
+			if len(remaining) > 0 {
+				merged, err := generate(rolling, intermediateTarget)
+				if err != nil {
+					return "", err
+				}
+				rolling = partialSummaryRecord(merged)
+			}
+			continue
 		}
-		req, err := compactSummaryRequest(resolved, rollingBatchHistory(rolling, remaining[:end], effective, sourceIDs, false, externalTurns), hint, intermediateTarget)
+		if end == len(remaining) && hasRetain && end > 1 {
+			// Split once more if carrying a short summary would make room for
+			// retained corrections in the final request.
+			probe := rollingBatchHistory(partialSummaryRecord(strings.Repeat("x ", probeTokens*2)), nil, effective, sourceIDs, true, coldTurns)
+			if _, ok := fitRequest(probe, target, compactMinOutputTokens); ok {
+				end = max(1, end/2)
+			}
+		}
+		if end == len(remaining) {
+			return generate(rollingBatchHistory(rolling, remaining, effective, sourceIDs, false, coldTurns), target)
+		}
+		if aligned := alignChunkToTurnBoundary(remaining, end); aligned > 0 {
+			end = aligned
+		}
+		summary, err := generate(rollingBatchHistory(rolling, remaining[:end], effective, sourceIDs, false, coldTurns), intermediateTarget)
 		if err != nil {
 			return "", err
 		}
-		rolling, err = e.generateCompactSummary(ctx, sessionID, resolved, client, req)
-		if err != nil {
-			return "", err
-		}
+		rolling = partialSummaryRecord(summary)
 		remaining = remaining[end:]
 	}
-	if len(remaining) > 0 {
-		return "", singleErr
-	}
-	return rolling, nil
+}
+
+// A partial is an input to the next batch. Only the original references
+// inside its body point to messages that history_get_message can retrieve.
+func partialSummaryRecord(summary string) string {
+	return "<partial_summary>\n" + summary + "\n</partial_summary>\n"
 }
 
 func alignChunkToTurnBoundary(msgs []*store.Message, end int) int {
@@ -200,20 +226,19 @@ func alignChunkToTurnBoundary(msgs []*store.Message, end int) int {
 	return 0
 }
 
-func rollingBatchHistory(rolling string, chunk, effective []*store.Message, sourceIDs map[string]bool, includeRetain bool, externalTurns map[string]bool) string {
+func rollingBatchHistory(rolling string, chunk, effective []*store.Message, sourceIDs map[string]bool, includeRetain bool, coldTurns map[string]bool) string {
 	var b strings.Builder
-	hasRolling := strings.TrimSpace(rolling) != ""
 	wroteRolling := false
 	writeRolling := func() {
-		if hasRolling && !wroteRolling {
-			b.WriteString(compactMessageRecord(&store.Message{ID: "rolling_summary", Role: store.RoleSummary}, rolling, "summarize"))
+		if !wroteRolling {
+			b.WriteString(rolling)
 			wroteRolling = true
 		}
 	}
 	if !includeRetain {
 		writeRolling()
 		for _, message := range chunk {
-			text := compactMessageTextFor(message, externalTurns[message.TurnID])
+			text := compactMessageTextFor(message, coldTurns[message.TurnID])
 			if strings.TrimSpace(text) == "" {
 				continue
 			}
@@ -231,14 +256,14 @@ func rollingBatchHistory(rolling string, chunk, effective []*store.Message, sour
 			if !chunkIDs[message.ID] {
 				continue
 			}
-			text := compactMessageTextFor(message, externalTurns[message.TurnID])
+			text := compactMessageTextFor(message, coldTurns[message.TurnID])
 			if strings.TrimSpace(text) == "" {
 				continue
 			}
 			b.WriteString(compactMessageRecord(message, text, "summarize"))
 			continue
 		}
-		text := compactMessageTextFor(message, externalTurns[message.TurnID])
+		text := compactMessageTextFor(message, coldTurns[message.TurnID])
 		if strings.TrimSpace(text) == "" {
 			continue
 		}
@@ -267,12 +292,12 @@ func compactSummaryRequest(resolved *resolvedModel, history, hint string, target
 			input := estimate.Total()
 			margin := compactInputMargin(input)
 			output = min(output, window-input-margin)
-			if output < 2 {
-				return provider.Request{}, fmt.Errorf("%w: estimated summary input %d + margin %d leaves no usable output space in window %d; use a larger-context model", ErrContextBudget, input, margin, window)
+			if output < compactMinOutputTokens {
+				return provider.Request{}, fmt.Errorf("%w: estimated summary input %d + margin %d leaves fewer than %d summary output tokens in window %d", ErrContextBudget, input, margin, compactMinOutputTokens, window)
 			}
 		}
-		if output < 2 {
-			return provider.Request{}, fmt.Errorf("%w: summary output limit %d is too small", ErrContextBudget, output)
+		if output < compactMinOutputTokens {
+			return provider.Request{}, fmt.Errorf("%w: summary requires at least %d output tokens; configured limit is %d", ErrContextBudget, compactMinOutputTokens, output)
 		}
 		// Changing the target changes the prompt. Re-estimate locally until it
 		// fits; this loop never sends a model request or removes any history.

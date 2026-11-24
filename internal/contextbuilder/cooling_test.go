@@ -3,6 +3,7 @@ package contextbuilder
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -87,6 +88,16 @@ func TestExternalMCPTurnsCoolToolResultsAndImagesByDefault(t *testing.T) {
 		t.Fatal(err)
 	}
 	extShot.Origin = attachment.OriginTool
+	// A one-pixel, 24-bit BMP.
+	data, err := hex.DecodeString("424d3a0000000000000036000000280000000100000001000000010018000000000004000000000000000000000000000000000000000000ff00")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bmp, err := service.StoreReader("s", "diagram.bmp", "image/bmp", bytes.NewReader(data))
+	if err != nil {
+		t.Fatal(err)
+	}
+	bmp.Origin = attachment.OriginTool
 	normShot, err := service.StoreReader("s", "norm-shot.png", "image/png", bytes.NewReader([]byte("norm-png")))
 	if err != nil {
 		t.Fatal(err)
@@ -117,6 +128,7 @@ func TestExternalMCPTurnsCoolToolResultsAndImagesByDefault(t *testing.T) {
 			{Type: store.ContentPartToolUse, CallID: "c_shot", Name: tool.BrowserScreenshot, Args: json.RawMessage(`{}`)},
 			{Type: store.ContentPartToolResult, CallID: "c_shot", Name: tool.BrowserScreenshot, Ok: true, Content: `{"ok":true}`},
 			store.AttachmentPart(extShot),
+			store.AttachmentPart(bmp),
 			{Type: store.ContentPartText, Text: "EXTERNAL_FINAL_SUMMARY"},
 		},
 	}); err != nil {
@@ -213,12 +225,15 @@ func TestExternalMCPTurnsCoolToolResultsAndImagesByDefault(t *testing.T) {
 		t.Fatalf("normal turn large result should remain hot: %s", wire)
 	}
 
-	var extImages, normImages int
+	var extImages, normImages, bmpImages int
 	var placeholderFound bool
 	for _, m := range req.Messages {
 		for _, p := range m.Parts {
 			if p.Type == provider.PartImage && p.ImageKey == extShot.AttachmentKey {
 				extImages++
+			}
+			if p.Type == provider.PartImage && p.ImageKey == bmp.AttachmentKey {
+				bmpImages++
 			}
 			if p.Type == provider.PartImage && p.ImageKey == normShot.AttachmentKey {
 				normImages++
@@ -227,6 +242,9 @@ func TestExternalMCPTurnsCoolToolResultsAndImagesByDefault(t *testing.T) {
 				placeholderFound = true
 			}
 		}
+	}
+	if bmpImages != 1 {
+		t.Fatal("BMP must retain its normal attachment projection because media_read cannot reload it")
 	}
 	if extImages != 0 || normImages != 1 || !placeholderFound {
 		t.Fatalf("unexpected image cooling: extImages=%d normImages=%d placeholder=%v", extImages, normImages, placeholderFound)

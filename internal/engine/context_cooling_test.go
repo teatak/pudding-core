@@ -247,7 +247,7 @@ func TestNotificationCoolingInsufficientGoesDirectlyToCompact(t *testing.T) {
 	if after >= requestInputTokens(req) {
 		t.Fatal("fixture must provide a real but insufficient cooling gain")
 	}
-	if pressure, err := summaryInputPressure(resolved, all, 1); err != nil || pressure {
+	if pressure, err := summaryInputPressure(resolved, all, 1, true); err != nil || pressure {
 		t.Fatalf("fixture must reach the cooling trial: %v %v", pressure, err)
 	}
 	threshold := after * 100 / resolved.config.ContextWindow
@@ -400,7 +400,7 @@ func TestCoolingStillChecksCanonicalSummaryBudget(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	history, err := compactHistoryText(all, all)
+	history, err := compactHistoryText(all, all, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -418,7 +418,7 @@ func TestCoolingStillChecksCanonicalSummaryBudget(t *testing.T) {
 	if requestInputTokens(cooled) >= compactTrigger(cooled.Config, 80) {
 		t.Fatalf("fixture must fit ordinary request below threshold: input=%d threshold=%d", requestInputTokens(cooled), compactTrigger(cooled.Config, 80))
 	}
-	if pressure, err := summaryInputPressure(resolved, all, 1); err != nil || !pressure {
+	if pressure, err := summaryInputPressure(resolved, all, 1, true); err != nil || !pressure {
 		t.Fatalf("fixture must independently reach canonical summary pressure: pressure=%v error=%v", pressure, err)
 	}
 	changed, err := e.prepareContextRequest(ctx, "sess_1", "current", resolved, store.ModeCode, &cooled, false)

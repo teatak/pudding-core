@@ -34,7 +34,7 @@ func (e *Engine) tryCoolContext(ctx context.Context, sessionID, turnID string, r
 	if next.ThroughTurnID == "" || next == previous {
 		return false, nil
 	}
-	pressure, err := summaryInputPressure(resolved, all, factor)
+	pressure, err := summaryInputPressure(resolved, all, factor, true)
 	if err != nil || pressure {
 		return false, err
 	}
@@ -78,7 +78,7 @@ func (e *Engine) tryCoolContext(ctx context.Context, sessionID, turnID string, r
 	return true, nil
 }
 
-func (e *Engine) cooledSummaryPressure(ctx context.Context, sessionID string, resolved *resolvedModel, factor float64) (bool, error) {
+func (e *Engine) cooledSummaryPressure(ctx context.Context, sessionID string, resolved *resolvedModel, factor float64, canReadHistory bool) (bool, error) {
 	settings, err := e.config.Settings(ctx)
 	if err != nil {
 		return false, err
@@ -94,14 +94,14 @@ func (e *Engine) cooledSummaryPressure(ctx context.Context, sessionID string, re
 	if err != nil {
 		return false, err
 	}
-	return summaryInputPressure(resolved, all, factor)
+	return summaryInputPressure(resolved, all, factor, canReadHistory)
 }
 
 // Compact still reads the L1 history. Keep 10% of the window available so
 // delaying Compact through cooling cannot silently exhaust its summary input.
-func summaryInputPressure(resolved *resolvedModel, all []*store.Message, factor float64) (bool, error) {
+func summaryInputPressure(resolved *resolvedModel, all []*store.Message, factor float64, canReadHistory bool) (bool, error) {
 	effective := contextbuilder.EffectiveMessages(all)
-	history, err := compactHistoryText(effective, effective)
+	history, err := compactHistoryText(effective, effective, compactColdTurns(effective, canReadHistory))
 	if errors.Is(err, ErrCompactEmpty) {
 		return false, nil
 	}
