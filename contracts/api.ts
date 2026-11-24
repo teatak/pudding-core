@@ -466,6 +466,18 @@ export const listBrowserHistoryResponse = z.object({
 // provider profile 的设置视图:apiKey 来自本地配置,编辑时可回显;apiKeySet 用于列表状态。
 export const providerProtocol = z.enum(["openai-compatible", "openai-responses", "google", "anthropic"]);
 
+export const localAgentModel = z.object({
+  id: z.string(), displayName: z.string(),
+  reasoningOptions: z.array(z.object({ value: z.string(), name: z.string() })),
+  defaultReasoning: z.string(),
+});
+export const localAgentCatalog = z.object({
+  status: z.enum(["ready", "not_installed"]), models: z.array(localAgentModel),
+  image: z.boolean(), audio: z.boolean(), embeddedContext: z.boolean(),
+});
+export type LocalAgentModel = z.infer<typeof localAgentModel>;
+export type LocalAgentCatalog = z.infer<typeof localAgentCatalog>;
+
 export const providerModelLimits = z.object({
   maxOutputTokens: z.number().optional(),
   maxToolLoops: z.number().optional(),
@@ -772,6 +784,7 @@ export type QueuedInput = z.infer<typeof queuedInput>;
 
 export const submitRequest = z
   .object({
+    localAgentHandoff: z.string().optional(),
     clientMessageID: z.string().min(1),
     kind: z.enum(["user", "system"]).optional(),
     reasoningEffort: z.string().optional(),

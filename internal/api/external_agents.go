@@ -232,54 +232,11 @@ func (s *Server) agentCommand(c *cart.Context) error {
 		if err != nil {
 			return s.failAgent(c, err)
 		}
-		result := reply.Result
-		if ref, ok := tool.ReferencedSkill(result.Name, result.Ok, result.Content); ok {
-			sess, err = s.store.GetSession(ctx, b.SessionID)
-			if err != nil {
-				return s.failAgent(c, err)
-			}
-			result, err = s.engine.ExternalSkillResult(ctx, sess.ID, reply.Mode, result)
-			if err != nil {
-				return s.failAgent(c, err)
-			}
-			// The primary result already carries this guide. SkillRefs is a per-reply copy.
-			delete(reply.SkillRefs, ref.Key())
-		}
-		out, err := s.externalMCPToolResult(b.SessionID, result)
+		out, err := s.agentToolReply(ctx, sess, in.TurnID, reply)
 		if err != nil {
 			return s.failAgent(c, err)
 		}
-		for _, message := range reply.UserMessages {
-			out.Content = append(out.Content, map[string]any{"type": "text", "text": "User in Pudding: " + message})
-		}
-		var projectInstructions *string
-		if reply.RefreshProjectRules {
-			sess.ActiveMode = reply.Mode
-			rules, err := s.engine.ExternalProjectRules(ctx, sess, in.TurnID)
-			if err != nil {
-				out.Content = append(out.Content, map[string]any{"type": "text", "text": "Could not read project instructions: " + err.Error()})
-			} else {
-				projectInstructions = &rules
-			}
-		}
-		var guides map[string]json.RawMessage
-		if reply.PluginID != "" || len(reply.SkillRefs) > 0 {
-			var plugins []string
-			if reply.PluginID != "" {
-				plugins = []string{reply.PluginID}
-			}
-			sess.ActiveMode = reply.Mode
-			guides, err = s.engine.ExternalGuides(ctx, sess, plugins, reply.SkillRefs, true)
-			if err != nil {
-				// The tool may have already made changes. Preserve its outcome.
-				out.Content = append(out.Content, map[string]any{"type": "text", "text": "Could not refresh skill instructions: " + err.Error()})
-			}
-		}
-		c.JSON(200, struct {
-			debugMCPResult
-			Instructions        map[string]json.RawMessage `json:"instructions,omitempty"`
-			ProjectInstructions *string                    `json:"projectInstructions,omitempty"`
-		}{out, guides, projectInstructions})
+		c.JSON(200, out)
 	case "end":
 		if in.Status == "" {
 			in.Status = store.TurnCompleted
@@ -297,8 +254,64 @@ func (s *Server) agentCommand(c *cart.Context) error {
 	return nil
 }
 
+func (s *Server) agentToolReply(ctx context.Context, sess *store.Session, turnID string, reply engine.ExternalToolReply) (any, error) {
+	var err error
+	result := reply.Result
+	if ref, ok := tool.ReferencedSkill(result.Name, result.Ok, result.Content); ok {
+		sess, err = s.store.GetSession(ctx, sess.ID)
+		if err != nil {
+			return nil, err
+		}
+		result, err = s.engine.ExternalSkillResult(ctx, sess.ID, reply.Mode, result)
+		if err != nil {
+			return nil, err
+		}
+		// The primary result already carries this guide. SkillRefs is a per-reply copy.
+		delete(reply.SkillRefs, ref.Key())
+	}
+	out, err := s.externalMCPToolResult(sess.ID, result)
+	if err != nil {
+		return nil, err
+	}
+	for _, message := range reply.UserMessages {
+		out.Content = append(out.Content, map[string]any{"type": "text", "text": "User in Pudding: " + message})
+	}
+	var projectInstructions *string
+	if reply.RefreshProjectRules {
+		sess.ActiveMode = reply.Mode
+		rules, err := s.engine.ExternalProjectRules(ctx, sess, turnID)
+		if err != nil {
+			out.Content = append(out.Content, map[string]any{"type": "text", "text": "Could not read project instructions: " + err.Error()})
+		} else {
+			projectInstructions = &rules
+		}
+	}
+	var guides map[string]json.RawMessage
+	if reply.PluginID != "" || len(reply.SkillRefs) > 0 {
+		var plugins []string
+		if reply.PluginID != "" {
+			plugins = []string{reply.PluginID}
+		}
+		sess.ActiveMode = reply.Mode
+		guides, err = s.engine.ExternalGuides(ctx, sess, plugins, reply.SkillRefs, true)
+		if err != nil {
+			// The tool may have already made changes. Preserve its outcome.
+			out.Content = append(out.Content, map[string]any{"type": "text", "text": "Could not refresh skill instructions: " + err.Error()})
+		}
+	}
+	return struct {
+		debugMCPResult
+		Instructions        map[string]json.RawMessage `json:"instructions,omitempty"`
+		ProjectInstructions *string                    `json:"projectInstructions,omitempty"`
+	}{out, guides, projectInstructions}, nil
+}
+
 func (s *Server) agentCatalog(ctx context.Context, sess *store.Session, b *store.ExternalAgentBinding, query string, namesOnly bool) (map[string]any, error) {
 	turnID, mode := s.engine.ExternalTurnContext(b, sess.ActiveMode)
+	return s.sessionToolCatalog(ctx, sess, turnID, mode, query, namesOnly)
+}
+
+func (s *Server) sessionToolCatalog(ctx context.Context, sess *store.Session, turnID string, mode store.AgentMode, query string, namesOnly bool) (map[string]any, error) {
 	sess.ActiveMode = mode
 	defs, err := s.engine.ToolDefinitions(ctx, sess.ID, mode)
 	if err != nil {

@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/teatak/pudding-core/internal/acp"
 	"github.com/teatak/pudding-core/internal/attachment"
 	"github.com/teatak/pudding-core/internal/config"
 	"github.com/teatak/pudding-core/internal/contextbuilder"
@@ -88,6 +89,11 @@ func (emptyConfig) GetProviderProfile(context.Context, string) (*store.ProviderP
 }
 
 type Engine struct {
+	localMu             sync.Mutex
+	localAgents         map[string]*localAgentRuntime
+	localAgentPaths     []string
+	localHostEndpoint   string
+	localHosts          map[string]*localAgentHost
 	widgetRuns          widgetRuns
 	scheduleMu          sync.Mutex
 	scheduleStart       sync.Once
@@ -133,10 +139,11 @@ type Engine struct {
 }
 
 type activeTurn struct {
-	external *externalTurn
-	turnID   string
-	cancel   context.CancelFunc
-	done     chan struct{}
+	localAgent bool
+	external   *externalTurn
+	turnID     string
+	cancel     context.CancelFunc
+	done       chan struct{}
 
 	mu              sync.Mutex
 	acceptingSteers bool
@@ -269,6 +276,14 @@ func New(s store.Store, hub *event.Hub, resolver Resolver, cfg ConfigSource, opt
 // 让 best-effort 后台任务(自动标题等)优雅退出时立即收手。
 func (e *Engine) Stop() {
 	e.auxCancel()
+	e.mu.Lock()
+	for _, active := range e.running {
+		if active.localAgent {
+			active.cancel()
+		}
+	}
+	e.mu.Unlock()
+	e.closeLocalAgents("")
 	e.widgetRuns.Lock()
 	for _, run := range e.widgetRuns.entries {
 		e.cancelWidgetRunLocked(run)
@@ -286,6 +301,7 @@ func (e *Engine) Stop() {
 
 func (e *Engine) ReleaseSessionResources(sessionID string) {
 	sessionID = strings.TrimSpace(sessionID)
+	e.closeLocalAgents(sessionID)
 	e.RevokeCommandApprovals(sessionID)
 	e.mu.Lock()
 	delete(e.scheduledRuntimeIDs, sessionID)
@@ -331,13 +347,14 @@ func (e *Engine) StopBackgroundProcess(sessionID, processID string) (tool.Backgr
 }
 
 type SubmitInput struct {
-	retryOfTurnID   string
-	SessionID       string
-	ClientMessageID string
-	Text            string
-	Parts           []store.ContentPart
-	Kind            string
-	ReasoningEffort string
+	LocalAgentHandoff *string
+	retryOfTurnID     string
+	SessionID         string
+	ClientMessageID   string
+	Text              string
+	Parts             []store.ContentPart
+	Kind              string
+	ReasoningEffort   string
 }
 
 type SubmitResult struct {
@@ -446,15 +463,24 @@ func (e *Engine) Submit(ctx context.Context, in SubmitInput) (*SubmitResult, err
 		return nil, err
 	}
 	resolved.mode = initialMode(sess)
-	if err := resolved.applyReasoningEffort(activeReasoningEffort(in.ReasoningEffort, sess, resolved)); err != nil {
-		return nil, err
-	}
-	if err := resolved.normalizeReasoningOptions(); err != nil {
-		return nil, err
-	}
-	client, err := e.resolver.Resolve(ctx, resolved.providerName)
-	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrProviderConfig, err)
+	var client provider.Client
+	if acp.IsProvider(resolved.providerName) {
+		unlock, out, err := e.preflightLocal(ctx, &in, sess, resolved)
+		if err != nil || out != nil {
+			return out, err
+		}
+		defer unlock()
+	} else {
+		if err := resolved.applyReasoningEffort(activeReasoningEffort(in.ReasoningEffort, sess, resolved)); err != nil {
+			return nil, err
+		}
+		if err := resolved.normalizeReasoningOptions(); err != nil {
+			return nil, err
+		}
+		client, err = e.resolver.Resolve(ctx, resolved.providerName)
+		if err != nil {
+			return nil, fmt.Errorf("%w: %v", ErrProviderConfig, err)
+		}
 	}
 	switch kind {
 	case "", "user":
@@ -515,6 +541,10 @@ func (e *Engine) Submit(ctx context.Context, in SubmitInput) (*SubmitResult, err
 	// 长于 HTTP 请求，不继承请求 ctx；取消只走 Cancel()。
 	turnCtx, cancel := context.WithCancel(plugin.WithRuntimeID(context.Background(), plugin.RuntimeIDFromContext(ctx)))
 	active := newActiveTurn(res.Turn.ID, cancel)
+	if acp.IsProvider(resolved.providerName) {
+		active.localAgent = true
+		active.stopAcceptingSteers()
+	}
 	e.running[in.SessionID] = active
 	e.mu.Unlock()
 
@@ -576,6 +606,10 @@ func (e *Engine) submitSystem(ctx context.Context, in SubmitInput, resolved *res
 	}
 	turnCtx, cancel := context.WithCancel(plugin.WithRuntimeID(context.Background(), plugin.RuntimeIDFromContext(ctx)))
 	active := newActiveTurn(res.Turn.ID, cancel)
+	if acp.IsProvider(resolved.providerName) {
+		active.localAgent = true
+		active.stopAcceptingSteers()
+	}
 	e.running[in.SessionID] = active
 	e.mu.Unlock()
 
@@ -593,6 +627,9 @@ func (e *Engine) SessionUsage(ctx context.Context, sessionID string) (*SessionUs
 	resolved, err := e.resolveModel(ctx, sess)
 	if err != nil {
 		return nil, err
+	}
+	if acp.IsProvider(resolved.providerName) {
+		return e.localUsage(ctx, sessionID)
 	}
 	mode := initialMode(sess)
 	var defs []provider.ToolDef
@@ -761,6 +798,22 @@ func (e *Engine) takeQueuedRuntimeLocked(sessionID, clientMessageID string) stri
 }
 
 func (e *Engine) resolveModel(ctx context.Context, sess *store.Session) (result *resolvedModel, resolveErr error) {
+	if acp.IsProvider(sess.Provider) {
+		if sess.Provider != acp.Provider || sess.Model == "" {
+			return nil, fmt.Errorf("%w: unsupported local agent/model", ErrLocalAgent)
+		}
+		cfg := provider.ModelConfig{}
+		state, err := e.store.GetLocalAgentState(ctx, sess.ID)
+		if err != nil && !errors.Is(err, store.ErrNotFound) {
+			return nil, err
+		}
+		if state != nil {
+			cfg.Capabilities = &provider.ModelCapabilities{Image: state.Image, Audio: state.Audio}
+			cfg.ContextWindow = state.ContextSize
+		}
+		return resolvedModelFromParts(sess.Provider, "Antigravity", "acp", sess.Model, cfg)
+	}
+
 	settings, err := e.config.Settings(ctx)
 	if err != nil {
 		return nil, err
@@ -1254,7 +1307,14 @@ func (e *Engine) runTurn(ctx context.Context, sessionID, turnID string, resolved
 	defer e.wg.Done()
 
 	var parts turnPartAccumulator
-	status, errMsg, mode := e.streamTurn(ctx, sessionID, turnID, resolved, client, &parts, active)
+	var status store.TurnStatus
+	var errMsg string
+	var mode store.AgentMode
+	if acp.IsProvider(resolved.providerName) {
+		status, errMsg, mode = e.streamLocalTurn(ctx, sessionID, turnID, resolved, &parts, active)
+	} else {
+		status, errMsg, mode = e.streamTurn(ctx, sessionID, turnID, resolved, client, &parts, active)
+	}
 	active.stopAcceptingSteers()
 	interruptedOutputCommitted := false
 	if steers := active.consumeSteers(); len(steers) > 0 {
@@ -1382,6 +1442,14 @@ func (e *Engine) TryDrainQueued(sessionID string) {
 			e.finishTurn(sessionID, res.Turn.ID, res.Turn.Mode, store.TurnFailed, fmt.Sprintf("model config: %v", err), nil)
 			return
 		}
+	}
+	if acp.IsProvider(res.Input.Provider) {
+		resolved := &resolvedModel{providerName: res.Input.Provider, model: res.Input.Model, mode: res.Input.Mode, protocol: "acp", config: cfg, configJSON: res.Input.ModelConfig}
+		active.localAgent = true
+		active.stopAcceptingSteers()
+		e.wg.Add(1)
+		go e.runTurn(turnCtx, sessionID, res.Turn.ID, resolved, nil, active)
+		return
 	}
 	client, err := e.resolver.Resolve(turnCtx, res.Input.Provider)
 	if err != nil {

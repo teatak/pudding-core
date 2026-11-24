@@ -31,6 +31,9 @@ func (s *Server) retryTurn(c *cart.Context) error {
 	case errors.Is(err, engine.ErrNoModel), errors.Is(err, engine.ErrProviderConfig):
 		return badRequest(c, "provider_config")
 	case err != nil:
+		if isLocalAgentFailure(err) {
+			return localAgentFailure(c, err)
+		}
 		return s.fail(c, err)
 	}
 	status := http.StatusAccepted

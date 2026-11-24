@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/teatak/cart/v3"
+	"github.com/teatak/pudding-core/internal/engine"
 	"github.com/teatak/pudding-core/internal/projectgit"
 )
 
@@ -248,6 +249,10 @@ func (s *Server) generateProjectGitCommitMessage(c *cart.Context) error {
 	}
 
 	message, err := s.engine.GenerateCommitMessage(c.Request.Context(), sessionID, diffText, req.Language)
+	if errors.Is(err, engine.ErrNoModel) {
+		c.JSON(http.StatusBadRequest, map[string]string{"error": "no_model", "detail": err.Error()})
+		return nil
+	}
 	if err != nil {
 		return s.fail(c, err)
 	}

@@ -175,20 +175,24 @@ loop:
 }
 
 func (e *Engine) executeExternalRequest(ctx context.Context, sid string, active *activeTurn, parts *turnPartAccumulator, req externalRequest, mode store.AgentMode) (ExternalToolReply, store.AgentMode, error) {
+	return e.executeSessionTool(ctx, sid, active, active.external, parts, req, mode)
+}
+
+func (e *Engine) executeSessionTool(ctx context.Context, sid string, active *activeTurn, state *externalTurn, parts *turnPartAccumulator, req externalRequest, mode store.AgentMode) (ExternalToolReply, store.AgentMode, error) {
 	var reply ExternalToolReply
 	current, err := e.store.GetSession(ctx, sid)
 	if err != nil {
 		return reply, mode, err
 	}
 	e.mu.Lock()
-	mode = active.external.effectiveMode(current.ActiveMode)
+	mode = state.effectiveMode(current.ActiveMode)
 	e.mu.Unlock()
 	defs, err := e.toolDefinitions(ctx, sid, mode)
 	if err != nil {
 		return reply, mode, err
 	}
-	if active.external.skillRefs == nil {
-		active.external.skillRefs, err = e.externalSkillRefs(ctx, sid)
+	if state.skillRefs == nil {
+		state.skillRefs, err = e.externalSkillRefs(ctx, sid)
 		if err != nil {
 			return reply, mode, err
 		}
@@ -213,14 +217,14 @@ func (e *Engine) executeExternalRequest(ctx context.Context, sid string, active 
 	reply.Mode = mode
 	reply.RefreshProjectRules = mode == store.ModeCode && (isCodeTool || mode != previousMode || (req.name == tool.RequestCapability && reply.Result.Ok))
 	if ref, ok := tool.ReferencedSkill(reply.Result.Name, reply.Result.Ok, reply.Result.Content); ok {
-		active.external.skillRefs[ref.Key()] = ref
+		state.skillRefs[ref.Key()] = ref
 	}
-	reply.SkillRefs = maps.Clone(active.external.skillRefs)
+	reply.SkillRefs = maps.Clone(state.skillRefs)
 	// Loading a plugin can also obtain a capability approval for this turn.
 	if mode != previousMode {
 		e.mu.Lock()
-		active.external.baseMode = current.ActiveMode
-		active.external.mode = mode
+		state.baseMode = current.ActiveMode
+		state.mode = mode
 		e.mu.Unlock()
 	}
 	if err != nil {

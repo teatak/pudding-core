@@ -192,6 +192,7 @@ func Start(opts Options) (*Daemon, error) {
 		pluginMCP,
 	)
 	eng := engine.New(st, hub, resolver, cfg, engine.WithPromptSource(prompt.NewLoaderWithPlugins(dir, plugins, cfg)), engine.WithAttachmentHome(dir), engine.WithTools(tools), engine.WithPlugins(plugins), engine.WithSkills(skills))
+	eng.SetLocalHostEndpoint("http://" + ln.Addr().String() + "/local-agent-mcp")
 	voiceService, audioRuntime := newVoiceRuntime(dir, cfg, audioCfg, eng, hub)
 	if err := eng.Recover(context.Background()); err != nil {
 		_ = languageServers.Close(context.Background())

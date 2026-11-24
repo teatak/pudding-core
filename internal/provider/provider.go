@@ -35,7 +35,15 @@ type Request struct {
 
 // ModelConfig 是 provider-neutral 的 resolved model 配置快照。各 provider
 // 只读取自己命名空间下支持的字段;未知字段保留在 snapshot 中供后续能力使用。
+type LocalAgentConfig struct {
+	NewContext      bool   `json:"newContext,omitempty"`
+	Source          string `json:"source"`
+	ReasoningEffort string `json:"reasoningEffort,omitempty"`
+	CWD             string `json:"cwd"`
+}
+
 type ModelConfig struct {
+	LocalAgent            *LocalAgentConfig     `json:"localAgent,omitempty"`
 	ToolOutputTextEnabled bool                  `json:"toolOutputTextEnabled,omitempty"`
 	ContextWindow         int                   `json:"contextWindow,omitempty"`
 	Capabilities          *ModelCapabilities    `json:"capabilities,omitempty"`

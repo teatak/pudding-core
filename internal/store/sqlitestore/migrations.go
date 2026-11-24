@@ -19,7 +19,7 @@ import (
 const (
 	baselineSchemaVersion      = 1
 	currentSchemaLayoutVersion = 8
-	currentSchemaVersion       = 67
+	currentSchemaVersion       = 68
 )
 
 var (
@@ -35,6 +35,7 @@ type schemaMigration func(*sql.Tx) error
 // Unpublished Studio migrations 27–29 are consolidated into destination 30.
 // Unpublished Studio migrations 33–46 are consolidated into destination 47.
 var schemaMigrations = map[int]schemaMigration{
+	68: func(tx *sql.Tx) error { _, err := tx.Exec(store.LocalAgentSchema); return err },
 	// v66 was an unpublished experiment that classified conversations by source.
 	67: func(tx *sql.Tx) error {
 		exists, err := tableColumnExists(tx, "sessions", "kind")
@@ -1068,6 +1069,7 @@ var schemaV63Contract = func() schemaContract {
 
 var currentSchemaContract = func() schemaContract {
 	out := extendSchemaContract(schemaV63Contract, map[string][]string{
+		"local_agent_sessions":    {"session_id", "state"},
 		"external_agent_bindings": {"id", "session_id", "runtime_id", "agent_name", "agent_title", "agent_icon", "invite_hash", "expires_at", "credential_hash"},
 	}, "external_agent_session")
 	out.forbiddenTables = schemaV63Contract.forbiddenTables

@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/teatak/pudding-core/internal/acp"
 	"github.com/teatak/pudding-core/internal/home"
 )
 
@@ -22,12 +23,16 @@ import (
 // widget identities and the session router. Only the local STDIO stream is forwarded.
 func runMCP(args []string, stdin io.Reader, stdout io.Writer) error {
 	flags := flag.NewFlagSet("puddingd mcp", flag.ContinueOnError)
+	host := flags.Bool("host", false, "ACP host-owned connection")
 	homeDir := flags.String("home", "", "Pudding data directory")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
 	if flags.NArg() != 0 {
 		return errors.New("usage: puddingd mcp [--home directory]")
+	}
+	if *host {
+		return acp.ForwardHostMCP(os.Getenv("PUDDING_MCP_HOST_URL"), os.Getenv("PUDDING_MCP_HOST_TOKEN"), stdin, stdout)
 	}
 	dir, err := home.Resolve(*homeDir)
 	if err != nil {

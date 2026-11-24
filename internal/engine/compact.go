@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/teatak/pudding-core/internal/acp"
 	"github.com/teatak/pudding-core/internal/config"
 	"github.com/teatak/pudding-core/internal/contextbuilder"
 	"github.com/teatak/pudding-core/internal/provider"
@@ -61,6 +62,9 @@ func (e *Engine) compactIdle(ctx context.Context, in CompactInput, automatic boo
 	resolved, err := e.resolveModel(ctx, sess)
 	if err != nil {
 		return nil, err
+	}
+	if acp.IsProvider(resolved.providerName) {
+		return nil, fmt.Errorf("%w: Antigravity manages its own context compaction", ErrLocalAgent)
 	}
 	resolved.mode = initialMode(sess)
 	// Session-level reasoning may be the only indication that this model uses

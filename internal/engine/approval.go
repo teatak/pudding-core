@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/teatak/pudding-core/internal/acp"
 	"github.com/teatak/pudding-core/internal/event"
 	"github.com/teatak/pudding-core/internal/store"
 	"github.com/teatak/pudding-core/internal/tool"
@@ -46,6 +47,7 @@ type ApprovalRequest struct {
 }
 
 type approvalDecision struct {
+	optionID    string
 	approved    bool
 	scope       ApprovalScope
 	reason      string
@@ -59,6 +61,7 @@ type ProjectAccessGrant struct {
 }
 
 type pendingApproval struct {
+	agentOptions    []acp.PermissionOption
 	projectAccess   *projectAccessState
 	req             ApprovalRequest
 	ch              chan approvalDecision

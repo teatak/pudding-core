@@ -11,4 +11,7 @@ var baseSchemaSQL string
 //go:embed external_agent_schema.sql
 var ExternalAgentSchema string
 
-var SchemaSQL = baseSchemaSQL + "\n" + ExternalAgentSchema
+//go:embed local_agent_schema.sql
+var LocalAgentSchema string
+
+var SchemaSQL = baseSchemaSQL + "\n" + ExternalAgentSchema + "\n" + LocalAgentSchema

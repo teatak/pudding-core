@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/teatak/cart/v3"
+	"github.com/teatak/pudding-core/internal/acp"
 	"github.com/teatak/pudding-core/internal/attachment"
 	"github.com/teatak/pudding-core/internal/audio/runtimeassets"
 	"github.com/teatak/pudding-core/internal/audio/voice"
@@ -363,6 +364,7 @@ func (s *Server) Handler(token string, static http.Handler) http.Handler {
 	app.Route("/tools/command-shell").GET(s.getCommandShell)
 	app.Route("/tools/web").GET(s.getWebTools).PATCH(s.patchWebTools).PUT(s.patchWebTools)
 	app.Route("/desktop/about").GET(s.desktopAbout)
+	app.Route("/desktop/local-agent-catalog").GET(s.localAgentCatalog)
 	app.Route("/desktop/save-file").POST(s.desktopSaveFile)
 	app.Route("/desktop/reveal-file").POST(s.desktopRevealFile)
 	app.Route("/mcp/browser-sessions").GET(s.listBrowserMCPSessions)
@@ -397,6 +399,10 @@ func (s *Server) Handler(token string, static http.Handler) http.Handler {
 		mcpAuthed = withAuth(token, s.browserMCP)
 	}
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/local-agent-mcp" {
+			s.serveLocalAgentMCP(w, r)
+			return
+		}
 		if r.URL.Path == "/mcp" {
 			debugMCPAuthed.ServeHTTP(w, r)
 			return
@@ -431,6 +437,11 @@ func (s *Server) Handler(token string, static http.Handler) http.Handler {
 func withAuth(token string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if validBearerToken(r, token) {
+			source := "desktop"
+			if r.Header.Get(engine.RequestSourceHeader) != "" {
+				source = "remote"
+			}
+			r = r.WithContext(engine.WithRequestSource(r.Context(), source))
 			runtimeID := strings.TrimSpace(r.Header.Get(plugin.RuntimeIDHeader))
 			if runtimeID != "" {
 				r = r.WithContext(plugin.WithRuntimeID(r.Context(), runtimeID))
@@ -483,6 +494,9 @@ func (s *Server) createSession(c *cart.Context) error {
 		return badRequest(c, "invalid json body")
 	}
 	req.Provider = strings.TrimSpace(req.Provider)
+	if acp.IsProvider(req.Provider) && !engine.IsDesktopRequest(c.Request.Context()) {
+		return localAgentFailure(c, engine.ErrLocalAgentDesktop)
+	}
 	req.Model = strings.TrimSpace(req.Model)
 	req.ProjectID = strings.TrimSpace(req.ProjectID)
 	if req.ExternalAgent && (req.Provider != "" || req.Model != "") {
@@ -755,6 +769,9 @@ func (s *Server) patchSession(c *cart.Context) error {
 		if provider == "" {
 			return badRequest(c, "provider is required")
 		}
+		if acp.IsProvider(provider) && !engine.IsDesktopRequest(c.Request.Context()) {
+			return localAgentFailure(c, engine.ErrLocalAgentDesktop)
+		}
 		upd.Provider = &provider
 	}
 	if upd.Model != nil {
@@ -1003,11 +1020,12 @@ func (s *Server) purgeExpiredSessionArchives(ctx context.Context, now time.Time)
 }
 
 type submitReq struct {
-	ClientMessageID string              `json:"clientMessageID"`
-	Text            string              `json:"text"`
-	Parts           []store.ContentPart `json:"parts,omitempty"`
-	Kind            string              `json:"kind,omitempty"`
-	ReasoningEffort string              `json:"reasoningEffort,omitempty"`
+	LocalAgentHandoff *string             `json:"localAgentHandoff,omitempty"`
+	ClientMessageID   string              `json:"clientMessageID"`
+	Text              string              `json:"text"`
+	Parts             []store.ContentPart `json:"parts,omitempty"`
+	Kind              string              `json:"kind,omitempty"`
+	ReasoningEffort   string              `json:"reasoningEffort,omitempty"`
 }
 
 func (s *Server) submit(c *cart.Context) error {
@@ -1033,12 +1051,13 @@ func (s *Server) submit(c *cart.Context) error {
 		parts = store.UserInputPartsWithAttachments(req.Text, parts, attachments)
 	}
 	res, err := s.engine.Submit(c.Request.Context(), engine.SubmitInput{
-		SessionID:       id,
-		ClientMessageID: req.ClientMessageID,
-		Text:            req.Text,
-		Parts:           parts,
-		Kind:            req.Kind,
-		ReasoningEffort: req.ReasoningEffort,
+		LocalAgentHandoff: req.LocalAgentHandoff,
+		SessionID:         id,
+		ClientMessageID:   req.ClientMessageID,
+		Text:              req.Text,
+		Parts:             parts,
+		Kind:              req.Kind,
+		ReasoningEffort:   req.ReasoningEffort,
 	})
 	switch {
 	case errors.Is(err, engine.ErrEmptyInput):
@@ -1053,6 +1072,9 @@ func (s *Server) submit(c *cart.Context) error {
 		c.JSON(http.StatusBadRequest, map[string]string{"error": "provider_config"})
 		return nil
 	case err != nil:
+		if isLocalAgentFailure(err) {
+			return localAgentFailure(c, err)
+		}
 		return s.fail(c, err)
 	}
 	if res.Duplicate {
@@ -1126,6 +1148,16 @@ type patchQueuedInputReq struct {
 func (s *Server) patchQueuedInput(c *cart.Context) error {
 	id, _ := c.Param("id")
 	clientMessageID, _ := c.Param("clientMessageID")
+	if !engine.IsDesktopRequest(c.Request.Context()) {
+		_, queued, err := s.store.LookupSubmission(c.Request.Context(), id, clientMessageID)
+		if err != nil {
+			return s.fail(c, err)
+		}
+		if queued != nil && acp.IsProvider(queued.Provider) {
+			return localAgentFailure(c, engine.ErrLocalAgentDesktop)
+		}
+	}
+
 	var req patchQueuedInputReq
 	if err := decode(c, &req); err != nil {
 		return badRequest(c, "invalid json body")
@@ -1281,6 +1313,9 @@ func (s *Server) compactSession(c *cart.Context) error {
 		c.JSON(http.StatusBadRequest, map[string]string{"error": "provider_config"})
 		return nil
 	case err != nil:
+		if isLocalAgentFailure(err) {
+			return localAgentFailure(c, err)
+		}
 		return s.fail(c, err)
 	}
 	c.JSON(http.StatusAccepted, res)
@@ -1288,6 +1323,7 @@ func (s *Server) compactSession(c *cart.Context) error {
 }
 
 type approveApprovalReq struct {
+	OptionID    string   `json:"optionID"`
 	Scope       string   `json:"scope"`
 	ProjectDirs []string `json:"projectDirs"`
 }
@@ -1383,7 +1419,13 @@ func (s *Server) approveApproval(c *cart.Context) error {
 	if scope != engine.ApprovalScopeTurn && scope != engine.ApprovalScopeSession {
 		return badRequest(c, "invalid approval scope")
 	}
-	sess, err := s.engine.ApproveApprovalWithSession(c.Request.Context(), id, approvalID, scope, req.ProjectDirs)
+	var sess *store.Session
+	var err error
+	if req.OptionID != "" {
+		sess, err = s.engine.ResolveLocalPermission(c.Request.Context(), id, approvalID, req.OptionID)
+	} else {
+		sess, err = s.engine.ApproveApprovalWithSession(c.Request.Context(), id, approvalID, scope, req.ProjectDirs)
+	}
 	if err != nil {
 		if errors.Is(err, engine.ErrApprovalScopeUnsupported) {
 			c.JSON(http.StatusBadRequest, map[string]string{"error": "approval_scope_unsupported"})

@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/teatak/pudding-core/internal/acp"
 	"github.com/teatak/pudding-core/internal/contextbuilder"
 	"github.com/teatak/pudding-core/internal/provider"
 )
@@ -66,6 +67,12 @@ func (e *Engine) GenerateCommitMessage(ctx context.Context, sessionID, diffText,
 	resolved, err := e.resolveModel(ctx, sess)
 	if err != nil {
 		return "", err
+	}
+	if acp.IsProvider(resolved.providerName) {
+		resolved, err = e.auxiliaryModel(ctx)
+		if err != nil {
+			return "", fmt.Errorf("%w: configure an API model to generate a commit message, or write it manually", err)
+		}
 	}
 	client, err := e.resolver.Resolve(ctx, resolved.providerName)
 	if err != nil {

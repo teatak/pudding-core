@@ -14,11 +14,13 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
 	"time"
 
+	"github.com/teatak/pudding-core/internal/acp"
 	"github.com/teatak/pudding-core/internal/contextbuilder"
 	"github.com/teatak/pudding-core/internal/event"
 	"github.com/teatak/pudding-core/internal/provider"
@@ -76,6 +78,17 @@ func (e *Engine) autoTitle(sessionID, providerName, model, protocol string, mode
 	}
 	e.hub.Publish(event.Event{SessionID: sessionID, Kind: event.SessionTitled, Title: provisional})
 
+	if acp.IsProvider(providerName) {
+		resolved, err := e.auxiliaryModel(ctx)
+		if errors.Is(err, ErrNoModel) {
+			return
+		}
+		if err != nil {
+			slog.Warn("titler: resolve auxiliary model", "err", err)
+			return
+		}
+		providerName, model, protocol, modelConfig = resolved.providerName, resolved.model, resolved.protocol, resolved.config
+	}
 	e.wg.Add(1)
 	go func() {
 		defer e.wg.Done()
