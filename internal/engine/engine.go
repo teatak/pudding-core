@@ -92,6 +92,7 @@ type Engine struct {
 	localMu             sync.Mutex
 	localAgents         map[string]*localAgentRuntime
 	localAgentPaths     []string
+	localQuota          localAgentQuotaCache
 	localHostEndpoint   string
 	localHosts          map[string]*localAgentHost
 	widgetRuns          widgetRuns

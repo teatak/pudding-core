@@ -365,6 +365,7 @@ func (s *Server) Handler(token string, static http.Handler) http.Handler {
 	app.Route("/tools/web").GET(s.getWebTools).PATCH(s.patchWebTools).PUT(s.patchWebTools)
 	app.Route("/desktop/about").GET(s.desktopAbout)
 	app.Route("/desktop/local-agent-catalog").GET(s.localAgentCatalog)
+	app.Route("/desktop/local-agent-quota").GET(s.localAgentQuota)
 	app.Route("/desktop/save-file").POST(s.desktopSaveFile)
 	app.Route("/desktop/reveal-file").POST(s.desktopRevealFile)
 	app.Route("/mcp/browser-sessions").GET(s.listBrowserMCPSessions)

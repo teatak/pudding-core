@@ -478,6 +478,17 @@ export const localAgentCatalog = z.object({
 export type LocalAgentModel = z.infer<typeof localAgentModel>;
 export type LocalAgentCatalog = z.infer<typeof localAgentCatalog>;
 
+export const localAgentQuota = z.object({
+  groups: z.array(z.object({
+    name: z.string(),
+    windows: z.array(z.object({
+      window: z.enum(["5h", "weekly"]),
+      remainingFraction: z.number().min(0).max(1),
+      resetAt: z.iso.datetime({ offset: true }).optional(),
+    })),
+  })),
+});
+
 export const providerModelLimits = z.object({
   maxOutputTokens: z.number().optional(),
   maxToolLoops: z.number().optional(),
