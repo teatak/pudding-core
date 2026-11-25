@@ -35,21 +35,21 @@ const (
 	managedScopeProject = "project"
 	managedScopeWidget  = "widget"
 
-	defaultFileReadMaxChars       = 20000
-	maxFileReadChars              = 100000
-	maxFileReadWholeBytes         = 128 * 1024
-	defaultFileListMax            = 200
-	defaultFileSliceLines         = 100
-	maxFileSliceLines             = 500
-	maxFileSliceSkip              = 5000
-	maxFileSlicePayload           = 64 * 1024
-	maxFileSearchBytes            = 1 << 20
-	maxFileSearchDirectBytes      = 16 << 20
-	maxFileSearchLineChars        = 200
-	maxFileSearchExcerptLineChars = 400
-	defaultFileSearchMax          = 100
-	maxFileSearchMax              = 500
-	maxFileSearchContextLines     = 5
+	defaultFileReadMaxChars         = 20000
+	maxFileReadChars                = 100000
+	maxFileReadWholeBytes           = 128 * 1024
+	defaultFileListMax              = 200
+	defaultFileSliceLines           = 100
+	maxFileSliceLines               = 500
+	maxFileSliceSkip                = 5000
+	maxFileSlicePayload             = 64 * 1024
+	maxFileSearchBytes              = 1 << 20
+	maxFileSearchDirectBytes        = 16 << 20
+	maxFileSearchLineChars          = 200
+	maxFileSearchExcerptLineChars   = 400
+	defaultFileSearchMax            = 100
+	maxFileSearchMax                = 500
+	maxFileSearchContextLines       = 5
 	maxFileSearchGlobs              = 32
 	maxFileSearchGlobChars          = 256
 	maxFileSearchFiles              = 20000
@@ -325,7 +325,7 @@ func (r *BuiltinRunner) fileSearch(ctx context.Context, call Call) Result {
 	}
 	items := make([]map[string]any, 0, len(result.Matches))
 	for _, match := range result.Matches {
-		path := formatSearchResultPath(resolved.root, resolved.project, match.Path)
+		path := resolved.searchResultPath(match.Path)
 		if args.Scope == managedScopeWidget && !widgetVisiblePath(path, false) {
 			continue
 		}
@@ -359,7 +359,7 @@ func (r *BuiltinRunner) fileSearch(ctx context.Context, call Call) Result {
 		"outputMode":     result.OutputMode,
 		"includeIgnored": result.IncludeIgnored,
 	})
-	if skippedFiles := visibleSearchSkippedFiles(args.Scope, resolved.root, resolved.project, result.SkippedFiles); len(skippedFiles) > 0 {
+	if skippedFiles := visibleSearchSkippedFiles(args.Scope, resolved, result.SkippedFiles); len(skippedFiles) > 0 {
 		payload["skippedFiles"] = skippedFiles
 	}
 	if result.OutputMode == "files" {
@@ -377,16 +377,18 @@ func (r *BuiltinRunner) fileSearch(ctx context.Context, call Call) Result {
 	return out
 }
 
-func formatSearchResultPath(root string, project bool, filePath string) string {
-	if !project {
-		if rel, err := filepath.Rel(root, filePath); err == nil {
-			return filepath.ToSlash(rel)
+func (p resolvedFilePath) searchResultPath(filePath string) string {
+	if !p.project {
+		// The search target is canonical, while the configured scope root may
+		// contain a symlink. Use the already resolved path within that scope.
+		if rel, err := filepath.Rel(p.target, filePath); err == nil {
+			return filepath.ToSlash(filepath.Join(filepath.FromSlash(p.rel), rel))
 		}
 	}
 	return filePath
 }
 
-func visibleSearchSkippedFiles(scope, root string, project bool, raw map[string][]string) map[string][]string {
+func visibleSearchSkippedFiles(scope string, resolved resolvedFilePath, raw map[string][]string) map[string][]string {
 	if len(raw) == 0 {
 		return nil
 	}
@@ -394,7 +396,7 @@ func visibleSearchSkippedFiles(scope, root string, project bool, raw map[string]
 	for reason, paths := range raw {
 		visible := make([]string, 0, len(paths))
 		for _, skippedPath := range paths {
-			displayPath := formatSearchResultPath(root, project, skippedPath)
+			displayPath := resolved.searchResultPath(skippedPath)
 			if scope == managedScopeWidget && !widgetVisiblePath(displayPath, false) {
 				continue
 			}

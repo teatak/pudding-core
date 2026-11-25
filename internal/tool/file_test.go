@@ -1394,15 +1394,20 @@ func TestBuiltinFileSearchPayloadIncludesSkippedFiles(t *testing.T) {
 	}
 	projSkipped, _ := projPayload["skippedFiles"].(map[string]any)
 	projLarge, _ := projSkipped["file_too_large"].([]any)
-	wantProjLarge := filepath.Join(projPayload["root"].(string), "large.txt")
+	// Project search results use canonical paths, even when the configured root is an alias.
+	wantProjLarge, err := filepath.EvalSymlinks(filepath.Join(proj, "large.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !reflect.DeepEqual(projLarge, []any{wantProjLarge}) {
 		t.Fatalf("expected project skippedFiles %q, got %+v", wantProjLarge, projPayload["skippedFiles"])
 	}
 
 	writePatchTestFile(t, filepath.Join(home, "temp", "sub", "large.txt"), largeContent)
+	writePatchTestFile(t, filepath.Join(home, "temp", "sub", "ok.txt"), "needle\n")
 	tempRes := runner.Call(context.Background(), Call{
 		Name: FileSearch,
-		Args: resultJSON(map[string]any{"scope": "temp", "path": ".", "query": "needle"}),
+		Args: resultJSON(map[string]any{"scope": "temp", "path": "sub", "query": "needle"}),
 	})
 	tempPayload := decodeToolResult(t, tempRes)
 	if !tempRes.Ok || tempPayload["complete"] != false {
@@ -1412,5 +1417,9 @@ func TestBuiltinFileSearchPayloadIncludesSkippedFiles(t *testing.T) {
 	tempLarge, _ := tempSkipped["file_too_large"].([]any)
 	if !reflect.DeepEqual(tempLarge, []any{"sub/large.txt"}) {
 		t.Fatalf("expected relative temp skippedFiles [sub/large.txt], got %+v", tempPayload["skippedFiles"])
+	}
+	tempMatches, _ := tempPayload["matches"].([]any)
+	if len(tempMatches) != 1 || tempMatches[0].(map[string]any)["path"] != "sub/ok.txt" {
+		t.Fatalf("expected relative temp match sub/ok.txt, got %+v", tempMatches)
 	}
 }

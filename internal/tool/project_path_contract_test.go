@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -249,12 +250,14 @@ func TestProjectPathContractManagedCommandOperandsDoNotSelectCWD(t *testing.T) {
 	if commandExecutableAllowedForAuto(artifact, root, []string{root}) {
 		t.Fatal("artifact operand authorization also authorized an executable")
 	}
+	// Approval reports both the directory change and the executable it resolves.
+	wantPaths := []string{artifacts, filepath.Join(artifacts, "run.sh")}
 	for _, operation := range []string{"cd", "pushd"} {
 		command := joinShellCommand([]string{operation, artifacts}) + " && ./run.sh"
 		call := projectContractCall(CommandRun, []string{root}, map[string]any{"scope": "project", "command": command})
 		risk, ok := ClassifyToolCallForProject(call.Name, call.Args, call.ProjectDirs, artifacts)
-		if !ok || risk.LowRisk || len(risk.requiredProjectPaths) != 1 || risk.requiredProjectPaths[0] != artifacts {
-			t.Fatalf("%s artifact directory was accepted as cwd: %+v", operation, risk)
+		if !ok || risk.LowRisk || !slices.Equal(risk.requiredProjectPaths, wantPaths) {
+			t.Fatalf("%s artifact cwd and executable should require approval: %+v", operation, risk)
 		}
 	}
 	if err := os.Symlink(artifacts, filepath.Join(root, "artifact-link")); err != nil {
