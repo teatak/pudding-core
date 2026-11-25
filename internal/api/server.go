@@ -1021,12 +1021,11 @@ func (s *Server) purgeExpiredSessionArchives(ctx context.Context, now time.Time)
 }
 
 type submitReq struct {
-	LocalAgentHandoff *string             `json:"localAgentHandoff,omitempty"`
-	ClientMessageID   string              `json:"clientMessageID"`
-	Text              string              `json:"text"`
-	Parts             []store.ContentPart `json:"parts,omitempty"`
-	Kind              string              `json:"kind,omitempty"`
-	ReasoningEffort   string              `json:"reasoningEffort,omitempty"`
+	ClientMessageID string              `json:"clientMessageID"`
+	Text            string              `json:"text"`
+	Parts           []store.ContentPart `json:"parts,omitempty"`
+	Kind            string              `json:"kind,omitempty"`
+	ReasoningEffort string              `json:"reasoningEffort,omitempty"`
 }
 
 func (s *Server) submit(c *cart.Context) error {
@@ -1052,13 +1051,12 @@ func (s *Server) submit(c *cart.Context) error {
 		parts = store.UserInputPartsWithAttachments(req.Text, parts, attachments)
 	}
 	res, err := s.engine.Submit(c.Request.Context(), engine.SubmitInput{
-		LocalAgentHandoff: req.LocalAgentHandoff,
-		SessionID:         id,
-		ClientMessageID:   req.ClientMessageID,
-		Text:              req.Text,
-		Parts:             parts,
-		Kind:              req.Kind,
-		ReasoningEffort:   req.ReasoningEffort,
+		SessionID:       id,
+		ClientMessageID: req.ClientMessageID,
+		Text:            req.Text,
+		Parts:           parts,
+		Kind:            req.Kind,
+		ReasoningEffort: req.ReasoningEffort,
 	})
 	switch {
 	case errors.Is(err, engine.ErrEmptyInput):

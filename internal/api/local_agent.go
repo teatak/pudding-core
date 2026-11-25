@@ -39,15 +39,9 @@ func (s *Server) localAgentQuota(c *cart.Context) error {
 }
 
 func isLocalAgentFailure(err error) bool {
-	var handoff *engine.LocalAgentHandoffRequired
-	return errors.Is(err, engine.ErrLocalAgent) || errors.Is(err, engine.ErrLocalAgentDesktop) || errors.Is(err, acp.ErrSteerBlocked) || errors.As(err, &handoff)
+	return errors.Is(err, engine.ErrLocalAgent) || errors.Is(err, engine.ErrLocalAgentDesktop) || errors.Is(err, acp.ErrSteerBlocked)
 }
 func localAgentFailure(c *cart.Context, err error) error {
-	var handoff *engine.LocalAgentHandoffRequired
-	if errors.As(err, &handoff) {
-		c.JSON(http.StatusConflict, map[string]any{"error": "local_agent_handoff_required", "detail": err.Error(), "handoff": handoff.Text})
-		return nil
-	}
 	code, status := "local_agent_unavailable", http.StatusBadRequest
 	if errors.Is(err, engine.ErrLocalAgentDesktop) {
 		code, status = "local_agent_desktop_required", http.StatusForbidden

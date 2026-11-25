@@ -99,7 +99,10 @@ direct runner 都按该合并值解析可执行文件,因此从 Finder 启动 El
   绕过 TLS 校验。
 - Go 等使用 macOS 原生证书验证的客户端可连接 `com.apple.trustd.agent` 做系统信任评估;
   不因此开放 `securityd` 或用户私人钥匙串文件。`GOCACHE` / `GOMODCACHE` 仍是稳定的
-  沙箱私有可写缓存,不强制更改 `GOPROXY` / `GOSUMDB` / `GOFLAGS`。
+  沙箱私有可写缓存。默认通过本地 file proxy 优先读取宿主 `~/go/pkg/mod/cache/download`
+  中的模块下载包,缺失时使用标准 Go proxy。显式 `GOPROXY` 和 `GOENV` 配置优先。
+  已完整安装的宿主 Go 工具链以版本名加入私有 PATH 末尾,供 Go 自动版本选择复用。
+  版本由 Go 和项目配置选择,模块校验仍由 Go 执行。
 - npm global prefix、pnpm home、Yarn global、Corepack cache 和 Node REPL history
   写入 Pudding 管理的隔离状态;不读取用户 npm 配置。
 - 系统运行库、已解析的工具链目录:只读。
@@ -250,3 +253,13 @@ PUDDING_SANDBOX_NETWORK_TEST=1 go test -tags 'sqlite_fts5 webrtcaec' ./internal/
 本次环境的 `sum.golang.org` 在 host 上也有独立的 TLS 连接失败;联网验收显式设置
 `GOSUMDB=sum.golang.google.cn`,使用 Go 支持的官方别名和同一签名校验身份后通过。
 该设置只用于测试,不改变产品默认网络配置,也不是失败后的自动切换。
+
+### 编程工具回归入口
+
+在项目沙箱内可运行 `make test-code-unit`，覆盖命令参数、日志预览、尾部读取和缓存路径逻辑。
+它是快速回归子集，运行原生进程、PTY 和 Seatbelt 的集成用例使用宿主环境中的
+`make test-code-host`。两者可通过 `TESTARGS='-count=1 -v'` 追加测试参数。
+全仓验证使用 `make test`。
+
+在 Pudding 沙箱内再运行依赖 `sandbox-exec` 或分配 PTY 的测试，会受到外层权限限制。
+这类失败应在宿主入口复测，并保留测试断言。

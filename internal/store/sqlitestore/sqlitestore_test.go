@@ -2249,6 +2249,47 @@ func TestTurnModelConfigPersists(t *testing.T) {
 	if turns.Turns[0].Provider != "default" || turns.Turns[0].Model != "m1" {
 		t.Fatalf("conversation turn model snapshot wrong: provider=%q model=%q", turns.Turns[0].Provider, turns.Turns[0].Model)
 	}
+	// Adding an ACP notice must preserve configuration, publish after commit,
+	// and remain available from the canonical turn after reopening the store.
+	var published []event.Event
+	reopened.SetEventPublisher(func(ev event.Event) { published = append(published, ev) })
+	notice := store.LocalAgentContext{Reason: "directory_changed"}
+	if err := reopened.RecordLocalAgentContext(context.Background(), "sess_1", "turn_1", notice); err != nil {
+		t.Fatal(err)
+	}
+	if len(published) != 1 || published[0].Kind != event.TurnLocalAgentContext || string(published[0].Payload) != `{"reason":"directory_changed"}` {
+		t.Fatalf("notice event: %+v", published)
+	}
+	updated, err := reopened.RunningTurn(context.Background(), "sess_1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var config map[string]json.RawMessage
+	if err := json.Unmarshal(updated.ModelConfig, &config); err != nil {
+		t.Fatal(err)
+	}
+	delete(config, "localAgentContext")
+	preserved, err := json.Marshal(config)
+	if err != nil || string(preserved) != string(cfg) {
+		t.Fatalf("notice overwrote model config: %s", updated.ModelConfig)
+	}
+	if err := reopened.Close(); err != nil {
+		t.Fatal(err)
+	}
+	again, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer again.Close()
+	canonical, err := again.GetConversationTurn(context.Background(), "sess_1", "turn_1")
+	if err != nil || canonical.LocalAgentContext == nil || *canonical.LocalAgentContext != notice {
+		t.Fatalf("notice lost across restart: %+v %v", canonical, err)
+	}
+	events, err := again.EventsAfter(context.Background(), "sess_1", published[0].Seq-1, 0)
+	if err != nil || len(events) != 1 || events[0].Kind != event.TurnLocalAgentContext {
+		t.Fatalf("notice missing from SSE replay: %+v %v", events, err)
+	}
+
 }
 
 func TestDeleteSessionCascades(t *testing.T) {

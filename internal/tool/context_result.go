@@ -85,14 +85,10 @@ func modelResultJSON(name string, ok bool, content, turnID, callID string, canRe
 		_ = json.Unmarshal([]byte(content), &fields)
 	}
 	copyResultMetadata(preview, fields)
-	if name == CommandRun && fields["stdout"] != nil && fields["stderr"] != nil {
-		for _, key := range []string{"stdout", "stderr"} {
-			var value string
-			if json.Unmarshal(fields[key], &value) == nil {
-				preview[key] = modelCommandOutputPreview(value)
-			}
+	if name == CommandRun || name == CommandSession {
+		if result, hasOutput := modelCommandResultPreview(name, content, ok, ref, false); hasOutput {
+			return result
 		}
-		return jsonString(preview)
 	}
 	if (name == FilePatch || name == CodeRename) && ok {
 		for _, key := range []string{"status", "fileCount", "additions", "deletions", "destructive", "warnings", "widgetID", "draftHash"} {
@@ -189,16 +185,6 @@ func modelPatchFilePreviewsWithinBudget(files []patchFileView, maxChars int) []m
 		shown = candidate
 	}
 	return shown
-}
-
-func modelCommandOutputPreview(value string) map[string]any {
-	runes := []rune(value)
-	headChars := modelCommandExcerptChars(runes, modelResultHeadChars/2, false)
-	tailChars := modelCommandExcerptChars(runes[headChars:], modelResultTailChars/2, true)
-	return map[string]any{
-		"head": string(runes[:headChars]), "tail": string(runes[len(runes)-tailChars:]),
-		"chars": len(runes), "omitted_chars": len(runes) - headChars - tailChars,
-	}
 }
 
 // Budget the serialized strings as well as decoded text: quotes, backslashes,
@@ -303,7 +289,7 @@ func copyResultMetadata(out map[string]any, fields map[string]json.RawMessage) {
 	}
 	for _, key := range []string{
 		"scope", "path", "root", "projectRoot", "relativePath", "cwd", "start", "end", "lines", "origin", "order",
-		"complete", "skipped", "mutationPaths", "contentHash", "processID", "running", "status", "yielded", "nextOffset", "oldestOffset", "hasMore", "background",
+		"complete", "skipped", "mutationPaths", "contentHash", "processID", "running", "status", "yielded", "nextOffset", "oldestOffset", "tailOffset", "hasMore", "background",
 		"outputMode", "includeIgnored", "recursive", "returnedCount", "fileCount", "diagnosticsTruncated", "testFailureCount", "testFailuresTruncated", "testExecutionStatus", "contextLines", "summaryOnly",
 		"reason", "error", "detail", "hint", "errorKind", "field", "expected", "allowedFields", "offset", "receivedBytes", "metric", "actual", "limit", "unit", "count", "allowedScopes", "projectRoots",
 		"command", "exitCode", "signal", "timedOut", "cancelled", "execution", "sandboxKind", "sandboxDenied", "shell", "durationMs", "truncated", "stdoutTruncated", "stderrTruncated", "verificationKind", "verificationStatus", "verificationWarning", "diagnosticCount", "matchCount", "resultsCapped", "shown_matches",

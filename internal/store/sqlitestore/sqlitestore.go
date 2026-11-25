@@ -2956,6 +2956,7 @@ func conversationTurnFromSQL(turn *store.Turn, messages []*store.Message, fileCh
 		}
 	}
 	return &store.ConversationTurn{
+		LocalAgentContext:  turn.LocalAgentContext,
 		RetryOfTurnID:      turn.RetryOfTurnID,
 		ID:                 turn.ID,
 		SessionID:          turn.SessionID,
@@ -3099,6 +3100,13 @@ func scanTurn(row messageScanner) (*store.Turn, error) {
 		return nil, err
 	}
 	turn.ModelConfig = normalizeJSON(json.RawMessage(modelConfig))
+	var metadata struct {
+		LocalAgentContext *store.LocalAgentContext `json:"localAgentContext"`
+	}
+	if err := json.Unmarshal(turn.ModelConfig, &metadata); err != nil {
+		return nil, err
+	}
+	turn.LocalAgentContext = metadata.LocalAgentContext
 	turn.Mode = store.NormalizeAgentMode(turn.Mode)
 	if turn.Mode == "" {
 		turn.Mode = store.ModeChat

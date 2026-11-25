@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"github.com/teatak/pudding-core/internal/acp"
 	"github.com/teatak/pudding-core/internal/attachment"
 	"github.com/teatak/pudding-core/internal/event"
@@ -343,63 +344,198 @@ func TestLocalAgentConversation(t *testing.T) {
 	if text := assistantText(configRecovery.TurnID); !strings.Contains(text, "CONFIG_HISTORY_926") {
 		t.Fatalf("failed configuration input missing from follow-up context: %s", text)
 	}
-	// CWD changes require an explicit, editable handoff before creating context.
+	// Switching through an API provider keeps the original ACP context and
+	// bridges only the intervening turns, without modifying canonical user text.
+	apiProvider, apiModel := "mock", "mock"
+	if err = ms.PutProviderProfile(ctx, &store.ProviderProfile{ID: apiProvider, DisplayName: "Mock", Protocol: "openai-compatible", Models: []store.ProviderModel{{ID: apiModel}}}); err != nil {
+		t.Fatal(err)
+	}
+	_, _ = ms.UpdateSession(ctx, "acp", store.SessionUpdate{Provider: &apiProvider, Model: &apiModel})
+	apiTurn := submit("api-interlude", "API_INTERLUDE_573")
+	e.Wait()
+	checkTurn(apiTurn.TurnID, store.TurnCompleted, "API_INTERLUDE_573")
+	acpProvider := acp.Provider
+	_, _ = ms.UpdateSession(ctx, "acp", store.SessionUpdate{Provider: &acpProvider, Model: &good})
+	back := submit("back-to-acp", "continue here")
+	e.Wait()
+	checkTurn(back.TurnID, store.TurnCompleted, "continue here")
+	backTurn, _ := ms.GetConversationTurn(ctx, "acp", back.TurnID)
+	state, _ = ms.GetLocalAgentState(ctx, "acp")
+	if state.AgentSessionID != originalID || backTurn.LocalAgentContext != nil || !strings.Contains(assistantText(back.TurnID), "API_INTERLUDE_573") || store.TextFromParts(backTurn.Messages[0].Parts) != "continue here" {
+		t.Fatalf("API return replaced context or lost history: %+v", state)
+	}
+	ack := submit("after-api-bridge", "only this latest request")
+	e.Wait()
+	if strings.Contains(assistantText(ack.TurnID), "API_INTERLUDE_573") {
+		t.Fatal("acknowledged history sent again")
+	}
+
+	// Queued sends snapshot CWD/model, but decide context reuse when executed.
+	// First queued turn creates the context and fails configuration; the second
+	// must restore that same context and still carry both old and failed history.
+	held = submit("before-directory-change", "hold")
 	project := &store.Project{ID: "other", Name: "Other", RootDirs: []string{t.TempDir()}}
 	if err = ms.CreateProject(ctx, project); err != nil {
 		t.Fatal(err)
 	}
-	_, _ = ms.UpdateSession(ctx, "acp", store.SessionUpdate{Model: &good, ProjectID: &project.ID})
-	_, err = e.Submit(ctx, SubmitInput{SessionID: "acp", ClientMessageID: "handoff", Text: "continue"})
-	var handoff *LocalAgentHandoffRequired
-	if !errors.As(err, &handoff) || handoff.Text == "" {
-		t.Fatalf("missing handoff: %v", err)
-	}
-	edited := "Keep only this reviewed context"
-	_, _ = ms.UpdateSession(ctx, "acp", store.SessionUpdate{Model: &bad})
-	failedHandoff, err := e.Submit(ctx, SubmitInput{SessionID: "acp", ClientMessageID: "handoff", Text: "continue", LocalAgentHandoff: &edited})
-	if err != nil {
-		t.Fatal(err)
-	}
-	e.Wait()
-	checkTurn(failedHandoff.TurnID, store.TurnFailed, edited)
+	_, _ = ms.UpdateSession(ctx, "acp", store.SessionUpdate{Model: &bad, ProjectID: &project.ID})
+	failedHandoff := submit("new-directory-bad-config", "Remember DIRECTORY_HISTORY_842")
 	_, _ = ms.UpdateSession(ctx, "acp", store.SessionUpdate{Model: &good})
-	confirmed, err := e.Submit(ctx, SubmitInput{SessionID: "acp", ClientMessageID: "after-handoff", Text: "continue"})
-	if err != nil {
+	confirmed := submit("new-directory-followup", "continue from recent history")
+	if !failedHandoff.Queued || !confirmed.Queued {
+		t.Fatal("directory changes must queue normally")
+	}
+	if err = e.Cancel("acp"); err != nil {
 		t.Fatal(err)
 	}
 	e.Wait()
-	checkTurn(confirmed.TurnID, store.TurnCompleted, edited)
-	if text := assistantText(confirmed.TurnID); strings.Contains(text, "STARTUP_HISTORY_481") || !strings.Contains(text, edited) {
-		t.Fatalf("reviewed handoff lost or omitted history reintroduced: %s", text)
+	failedTurn, _, _ := ms.LookupSubmission(ctx, "acp", "new-directory-bad-config")
+	confirmedTurn, _, _ := ms.LookupSubmission(ctx, "acp", "new-directory-followup")
+	if failedTurn == nil || confirmedTurn == nil {
+		t.Fatal("queued directory sends not promoted")
+	}
+	checkTurn(failedTurn.ID, store.TurnFailed, "DIRECTORY_HISTORY_842")
+	checkTurn(confirmedTurn.ID, store.TurnCompleted, "continue from recent history")
+	if !strings.Contains(assistantText(confirmedTurn.ID), "DIRECTORY_HISTORY_842") || !strings.Contains(assistantText(confirmedTurn.ID), "only this latest request") {
+		t.Fatal("new context configuration failure lost earlier history")
 	}
 	state, _ = ms.GetLocalAgentState(ctx, "acp")
-	if state.AgentSessionID == originalID || state.CWD != project.RootDirs[0] {
-		t.Fatalf("handoff state: %+v", state)
+	if state.AgentSessionID == originalID || state.CWD != project.RootDirs[0] || state.LastTurnID != confirmedTurn.ID {
+		t.Fatalf("new directory state: %+v", state)
 	}
+	log, _ := os.ReadFile(filepath.Join(state.CWD, "rpc.log"))
+	if strings.Count(string(log), `"method":"session/new"`) != 1 {
+		t.Fatal("queued messages created multiple contexts")
+	}
+	assertNotice := func(id, reason, userText string) {
+		t.Helper()
+		turn, err := ms.GetConversationTurn(ctx, "acp", id)
+		if err != nil || turn.LocalAgentContext == nil || turn.LocalAgentContext.Reason != reason {
+			t.Fatalf("missing persisted notice: %+v, %v", turn, err)
+		}
+		if store.TextFromParts(turn.Messages[0].Parts) != userText {
+			t.Fatal("handoff changed canonical user text")
+		}
+		events, err := ms.EventsAfter(ctx, "acp", 0, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, ev := range events {
+			if ev.TurnID == id && ev.Kind == event.TurnLocalAgentContext && strings.Contains(string(ev.Payload), reason) {
+				return
+			}
+		}
+		t.Fatal("missing durable context event")
+	}
+	assertNotice(failedTurn.ID, "directory_changed", "Remember DIRECTORY_HISTORY_842")
+	continuedTurn, _ := ms.GetConversationTurn(ctx, "acp", confirmedTurn.ID)
+	if continuedTurn.LocalAgentContext != nil {
+		t.Fatal("restoring the new context repeated the creation notice")
+	}
+
+	// agy 1.5.17 can require load after resume fails to read the saved session.
+	// Try loading the same context before deciding it is missing.
 	e.closeLocalAgents("acp")
-	if err = os.WriteFile(filepath.Join(state.CWD, "restore-fails"), []byte{}, 0600); err != nil {
+	if err = os.WriteFile(filepath.Join(state.CWD, "resume-needs-load"), nil, 0600); err != nil {
 		t.Fatal(err)
 	}
-	restoreFailure := submit("restore-failed", "continue")
+	beforeLoad, _ := os.ReadFile(filepath.Join(state.CWD, "rpc.log"))
+	loaded := submit("restore-load", "continue the saved context")
 	e.Wait()
-	checkTurn(restoreFailure.TurnID, store.TurnFailed, "continue")
-	// The next send can review a new context, even after restarting Pudding.
+	checkTurn(loaded.TurnID, store.TurnCompleted, "continue the saved context")
+	loadedState, _ := ms.GetLocalAgentState(ctx, "acp")
+	loadedTurn, _ := ms.GetConversationTurn(ctx, "acp", loaded.TurnID)
+	if loadedState.AgentSessionID != state.AgentSessionID || loadedTurn.LocalAgentContext != nil || strings.Contains(assistantText(loaded.TurnID), "OLD REPLAY") {
+		t.Fatal("loading replaced context or replayed old messages")
+	}
+	afterLoad, _ := os.ReadFile(filepath.Join(state.CWD, "rpc.log"))
+	loadCalls := string(afterLoad[len(beforeLoad):])
+	if strings.Count(loadCalls, `"method":"session/resume"`) != 1 || strings.Count(loadCalls, `"method":"session/load"`) != 1 || strings.Contains(loadCalls, `"method":"session/new"`) {
+		t.Fatalf("unexpected restore sequence: %s", loadCalls)
+	}
+
+	// An explicit missing session after load falls back once in this turn.
+	e.closeLocalAgents("acp")
+	if err = os.WriteFile(filepath.Join(state.CWD, "restore-fails"), nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	priorAgentID := state.AgentSessionID
+	rebuilt := submit("restore-missing", "continue after expired context")
+	e.Wait()
+	checkTurn(rebuilt.TurnID, store.TurnCompleted, "continue after expired context")
+	assertNotice(rebuilt.TurnID, "session_unavailable", "continue after expired context")
+	state, _ = ms.GetLocalAgentState(ctx, "acp")
+	if state.AgentSessionID == priorAgentID {
+		t.Fatal("missing context was not recreated")
+	}
+	if !strings.Contains(assistantText(rebuilt.TurnID), "DIRECTORY_HISTORY_842") {
+		t.Fatal("recreated context missing bridge")
+	}
+	if err = os.Remove(filepath.Join(state.CWD, "restore-fails")); err != nil {
+		t.Fatal(err)
+	}
+	if err = os.Remove(filepath.Join(state.CWD, "resume-needs-load")); err != nil {
+		t.Fatal(err)
+	}
+
+	// Authentication failure is not evidence that context disappeared. Retain
+	// the mapping and failed user message, then resume it after authentication.
+	e.closeLocalAgents("acp")
+	priorAgentID = state.AgentSessionID
+	if err = os.WriteFile(filepath.Join(state.CWD, "restore-auth-fails"), nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	authFailure := submit("restore-auth", "AUTH_PENDING_132")
+	e.Wait()
+	checkTurn(authFailure.TurnID, store.TurnFailed, "AUTH_PENDING_132")
+	state, _ = ms.GetLocalAgentState(ctx, "acp")
+	if state.AgentSessionID != priorAgentID {
+		t.Fatal("authentication failure replaced context")
+	}
+	if err = os.Remove(filepath.Join(state.CWD, "restore-auth-fails")); err != nil {
+		t.Fatal(err)
+	}
 	e.Stop()
 	e.Wait()
 	e = makeEngine()
-	_, err = e.Submit(ctx, SubmitInput{SessionID: "acp", ClientMessageID: "fresh-reset", Text: "continue"})
-	if !errors.As(err, &handoff) {
-		t.Fatalf("restore failure must offer reviewed handoff: %v", err)
+	assertNotice(rebuilt.TurnID, "session_unavailable", "continue after expired context")
+	recovered := submit("restore-auth-recovered", "continue after login")
+	e.Wait()
+	checkTurn(recovered.TurnID, store.TurnCompleted, "continue after login")
+	state, _ = ms.GetLocalAgentState(ctx, "acp")
+	if state.AgentSessionID != priorAgentID || !strings.Contains(assistantText(recovered.TurnID), "AUTH_PENDING_132") {
+		t.Fatal("authentication recovery lost context or pending history")
 	}
-	empty := ""
-	reset, err := e.Submit(ctx, SubmitInput{SessionID: "acp", ClientMessageID: "fresh-reset", Text: "fresh context", LocalAgentHandoff: &empty})
+	if err := ms.CreateSession(ctx, &store.Session{ID: "api-first", Provider: apiProvider, Model: apiModel}); err != nil {
+		t.Fatal(err)
+	}
+	apiFirst, err := e.Submit(ctx, SubmitInput{SessionID: "api-first", ClientMessageID: "api", Text: "API_FIRST_HISTORY_943"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	e.Wait()
-	checkTurn(reset.TurnID, store.TurnCompleted, "fresh context")
-	if text := assistantText(reset.TurnID); strings.Contains(text, edited) || strings.Contains(text, "Earlier Pudding conversation history") {
-		t.Fatalf("explicit fresh context included previous history: %s", text)
+	_, _ = ms.UpdateSession(ctx, "api-first", store.SessionUpdate{Provider: &acpProvider, Model: &good})
+	acpFirst, err := e.Submit(ctx, SubmitInput{SessionID: "api-first", ClientMessageID: "first-acp", Text: "use earlier history"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.Wait()
+	firstBridge, err := ms.GetConversationTurn(ctx, "api-first", acpFirst.TurnID)
+	if err != nil || firstBridge.Status != store.TurnCompleted || firstBridge.LocalAgentContext == nil || firstBridge.LocalAgentContext.Reason != "first_use" || store.TextFromParts(firstBridge.Messages[0].Parts) != "use earlier history" {
+		t.Fatalf("first API to ACP handoff: %+v, %v", firstBridge, err)
+	}
+	var firstBridgeOutput strings.Builder
+	for _, message := range firstBridge.Messages {
+		if message.Role == store.RoleAssistant {
+			firstBridgeOutput.WriteString(store.TextFromParts(message.Parts))
+		}
+	}
+	if !strings.Contains(firstBridgeOutput.String(), "API_FIRST_HISTORY_943") {
+		t.Fatal("first ACP prompt missed API history")
+	}
+	apiBefore, _ := ms.GetConversationTurn(ctx, "api-first", apiFirst.TurnID)
+	if store.TextFromParts(apiBefore.Messages[0].Parts) != "API_FIRST_HISTORY_943" {
+		t.Fatal("bridge mutated earlier API message")
 	}
 	// Even the very first message survives failure before an ACP session exists.
 	if err := ms.CreateSession(ctx, &store.Session{ID: "first-failure", Provider: acp.Provider, Model: "flash"}); err != nil {
@@ -1076,5 +1212,71 @@ func TestLocalAgentSteering(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestLocalAgentRestoreClassification(t *testing.T) {
+	for _, tc := range []struct {
+		err      error
+		recreate bool
+	}{
+		{acp.ErrSessionNotRestorable, true},
+		{&acp.RPCError{Code: -32603, Message: "session not found"}, true},
+		{&acp.RPCError{Code: -32602, Message: "session expired"}, true},
+		{&acp.RPCError{Code: -32002, Message: "Session not found: saved-session-id"}, true},
+		{&acp.RPCError{Code: -32002, Message: "Session not found: "}, false},
+		{&acp.RPCError{Code: -32002, Message: "authentication required"}, false},
+		{&acp.RPCError{Code: -32603, Message: "Failed to read session saved-session-id; retry, or load it with session/load"}, false},
+		{&acp.RPCError{Code: -32000, Message: "authentication required"}, false},
+		{&acp.RPCError{Code: -32603, Message: "internal error"}, false},
+		{errors.New("session not found"), false},
+		{context.Canceled, false}, {context.DeadlineExceeded, false}, {nil, false},
+	} {
+		if got := acp.IsSessionNotRestorable(tc.err); got != tc.recreate {
+			t.Errorf("%v: recreate=%v", tc.err, got)
+		}
+	}
+}
+
+func TestLocalAgentPendingHistoryBounds(t *testing.T) {
+	ctx := context.Background()
+	ms := storetest.New(t)
+	e := &Engine{store: ms}
+	if err := ms.CreateSession(ctx, &store.Session{ID: "bounded"}); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 15; i++ {
+		id := fmt.Sprintf("turn-%02d", i)
+		provider := "mock"
+		if i%2 == 0 {
+			provider = acp.Provider
+		}
+		_, err := ms.BeginTurn(ctx, store.BeginTurnInput{SessionID: "bounded", TurnID: id, UserMessageID: "user-" + id, ClientMessageID: id, Provider: provider, UserText: fmt.Sprintf("marker-%02d ", i) + strings.Repeat("长", 5000)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = ms.FinishTurn(ctx, store.FinishTurnInput{TurnID: id, Status: store.TurnCompleted, AssistantParts: []store.ContentPart{{Type: store.ContentPartThought, Text: "PRIVATE_THOUGHT"}, {Type: store.ContentPartText, Text: strings.Repeat("output", 1000)}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	history, err := e.localPendingHistory(ctx, "bounded", "", "")
+	if err != nil || len(history) != 1 {
+		t.Fatalf("history: %v, %v", history, err)
+	}
+	text := history[0].Text
+	if len([]rune(text)) > 25000 || !strings.Contains(text, "marker-14") || strings.Contains(text, "marker-00") || strings.Contains(text, "PRIVATE_THOUGHT") || !strings.Contains(text, "builtin_history_get_message") {
+		t.Fatalf("unbounded/incomplete bridge: length=%d", len([]rune(text)))
+	}
+	if strings.Index(text, "marker-13") > strings.Index(text, "marker-14") {
+		t.Fatal("history is not chronological")
+	}
+	history, err = e.localPendingHistory(ctx, "bounded", "", "turn-13")
+	if err != nil || len(history) != 1 || strings.Contains(history[0].Text, "marker-13") || !strings.Contains(history[0].Text, "marker-14") {
+		t.Fatal("acknowledgement boundary ignored")
+	}
+	history, err = e.localPendingHistory(ctx, "bounded", "", "turn-14")
+	if err != nil || len(history) != 0 {
+		t.Fatal("already acknowledged history was replayed")
 	}
 }

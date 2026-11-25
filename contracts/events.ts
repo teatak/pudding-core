@@ -3,7 +3,7 @@
 // 本目录在轨道 E 脚手架落地后由前端直接 import。
 import { z } from "zod";
 
-import { attachment, backgroundProcess, contentPart } from "./api";
+import { attachment, backgroundProcess, contentPart, localAgentContext } from "./api";
 
 export const widgetNoticeEvent = z.object({
   kind: z.literal("widget.notice"),
@@ -12,6 +12,14 @@ export const widgetNoticeEvent = z.object({
   turnID: z.string(),
   userMessageID: z.string(),
   clientMessageID: z.string(),
+});
+
+export const turnLocalAgentContextEvent = z.object({
+  kind: z.literal("turn.local_agent_context"),
+  seq: z.number().int().positive(),
+  sessionID: z.string(),
+  turnID: z.string(),
+  payload: localAgentContext,
 });
 
 export const turnStartedEvent = z.object({
@@ -219,6 +227,7 @@ export const sessionEvent = z.discriminatedUnion("kind", [
   turnToolEvent,
   turnCompletedEvent,
   turnCompactedEvent,
+  turnLocalAgentContextEvent,
   turnFailedEvent,
   turnCancelledEvent,
   inputQueuedEvent,

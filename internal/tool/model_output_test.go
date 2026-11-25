@@ -125,3 +125,93 @@ func TestPresentationFailureAndMetadataStayWithinBudget(t *testing.T) {
 		t.Fatal("root text lost its reference or exceeded budget")
 	}
 }
+
+func TestCommandPreviewPreservesTailAcrossOutputChunks(t *testing.T) {
+	var output backgroundProcessOutputBuffer
+	for i := 0; i < 239; i++ {
+		output.Append("stdout", []byte("INFO "+strings.Repeat("字\\\"", 80)+"\n"))
+	}
+	output.Append("stderr", []byte("--- FAIL: TestTail (0.00s)\nlast failure detail\n"))
+	chunks, next, _, _ := output.Read(0, backgroundProcessPollMax)
+	payload := map[string]any{"ok": true, "processID": "process-1", "running": false, "exitCode": 1, "output": chunks, "nextOffset": next, "tailOffset": next, "hasMore": false}
+	canonical := jsonString(payload)
+	for _, name := range []string{CommandRun, CommandSession} {
+		for _, expanded := range []bool{false, true} {
+			view := ModelResultContent(name, true, canonical, "turn", "call", true, OutputPresentation{Enabled: expanded, Spec: builtinModelOutput(name)})
+			for _, want := range []string{"TestTail", "last failure detail", `"exitCode":1`, `"tailOffset":`, `"nextOffset":`, `"result_ref":`, "stderr"} {
+				if !strings.Contains(view, want) {
+					t.Fatalf("%s expanded=%v missing %s: %s", name, expanded, want, view)
+				}
+			}
+			if utf8.RuneCountInString(view) > modelResultMaxChars {
+				t.Fatal("preview exceeded budget")
+			}
+			if !expanded && !json.Valid([]byte(view)) {
+				t.Fatal("JSON preview is invalid")
+			}
+		}
+	}
+	if jsonString(payload) != canonical {
+		t.Fatal("preview mutated original output")
+	}
+	full := ModelResultContent(CommandSession, true, canonical, "turn", "call", false, OutputPresentation{Enabled: true, Spec: builtinModelOutput(CommandSession)})
+	if strings.Contains(full, "text omitted") || !strings.Contains(full, "/output/239/content") {
+		t.Fatal("result without readback was shortened")
+	}
+}
+
+func TestCompletedPollPreviewKeepsStreamsAndFailureMetadata(t *testing.T) {
+	payload := map[string]any{"ok": true, "processID": "process-1", "running": false, "exitCode": 1, "stdout": strings.Repeat("ordinary log\n", 3000) + "--- FAIL: TestValue (0.00s)\n", "stderr": "linker detail\n", "tailOffset": 123456, "nextOffset": 65536, "hasMore": true, "testFailures": []map[string]any{{"name": "TestValue", "message": "actual mismatch", "excerpt": strings.Repeat("assertion detail\n", 2000)}}}
+	for _, expanded := range []bool{false, true} {
+		view := ModelResultContent(CommandSession, true, jsonString(payload), "turn", "poll", true, OutputPresentation{Enabled: expanded, Spec: builtinModelOutput(CommandSession)})
+		for _, want := range []string{"--- FAIL: TestValue", "linker detail", "actual mismatch", `"tailOffset":123456`, `"hasMore":true`} {
+			if !strings.Contains(view, want) {
+				t.Fatalf("missing %s: %s", want, view)
+			}
+		}
+		if utf8.RuneCountInString(view) > modelResultMaxChars {
+			t.Fatal("completed preview exceeded budget")
+		}
+	}
+}
+
+func TestCompletedPollPreviewKeepsRequestedPage(t *testing.T) {
+	log := "first capture line\n" + strings.Repeat("x", 20000-len("first capture line\n")) + "requested middle line\n" + strings.Repeat("y", 22000) + "last capture line\n"
+	process := &backgroundProcess{id: "paged", foreground: &foregroundCommand{}, finalResult: &Result{Content: jsonString(map[string]any{"stdout": log, "stderr": "", "exitCode": 7})}}
+	process.output.Append("stdout", []byte(log))
+	for _, offset := range []int64{0, 20000, int64(len(log))} {
+		payload := process.pollPayload(offset, 2048, 0)
+		canonical := jsonString(payload)
+		for _, expanded := range []bool{false, true} {
+			view := ModelResultContent(CommandSession, true, canonical, "turn", "poll", true, OutputPresentation{Enabled: expanded, Spec: builtinModelOutput(CommandSession)})
+			for _, key := range []string{"nextOffset", "tailOffset", "hasMore", "exitCode"} {
+				if !strings.Contains(view, `"`+key+`":`+jsonString(payload[key])) {
+					t.Fatalf("offset=%d: lost %s", offset, key)
+				}
+			}
+			if offset == 0 {
+				if !strings.Contains(view, "first capture line") || !strings.Contains(view, "last capture line") {
+					t.Fatal("initial poll lost completion summary")
+				}
+			} else {
+				if strings.Contains(view, "first capture line") || strings.Contains(view, "last capture line") {
+					t.Fatalf("offset=%d: replayed full capture instead of requested page", offset)
+				}
+				if offset == 20000 && !strings.Contains(view, "requested middle line") {
+					t.Fatal("missing requested middle page")
+				}
+			}
+			if utf8.RuneCountInString(view) > modelResultMaxChars {
+				t.Fatal("page preview exceeded budget")
+			}
+			// The direct command adapter still needs the final captured streams.
+			commandView := ModelResultContent(CommandRun, true, canonical, "turn", "run", true, OutputPresentation{Enabled: expanded, Spec: builtinModelOutput(CommandRun)})
+			if !strings.Contains(commandView, "first capture line") || !strings.Contains(commandView, "last capture line") {
+				t.Fatal("direct command result lost completion summary")
+			}
+		}
+		if payload["stdout"] != log || jsonString(payload) != canonical {
+			t.Fatal("model preview changed the canonical completion result")
+		}
+	}
+}

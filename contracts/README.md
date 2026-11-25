@@ -35,6 +35,10 @@ The Go daemon embeds it through this package; desktop generates `web/contracts/`
 `api.ts` and `events.ts` are the TypeScript/Zod client validation definitions for the REST and SSE protocol.
 Server structs and lifecycle semantics remain owned by core; verify both sides when changing a wire field.
 
+Protocol 69 adds persisted `ConversationTurn.localAgentContext` and the
+`turn.local_agent_context` SSE event for automatic ACP context handoff.
+Submission no longer accepts `localAgentHandoff` or returns a handoff confirmation.
+
 Protocol 68 extends browser click with `button` (`left`/`right`), `clickCount`
 (1/2, double click is left-only), and keyboard `modifiers` including ControlOrMeta.
 Select accepts exactly one of label/value/labels/values; arrays replace the full
@@ -770,6 +774,17 @@ output. Otherwise `wait_ms` waits for newly readable stdout/stderr, completion,
 cancellation or the deadline; new output may still have `running=true`. Continue
 with `nextOffset` until the intended readiness evidence or final status arrives.
 Initial foreground `yield_ms` still waits for completion or its own deadline.
+For the latest log bytes, use `tail_bytes` (1024–262144) with `action=poll`,
+omitting `offset`, `max_bytes` and `wait_ms`. This reads immediately and returns
+`tailOffset` alongside the usual cursors. Tail reads omit duplicate full
+`stdout`/`stderr` captures while preserving completion status and output files.
+Large model previews retain these
+cursors and show stream head/tail excerpts, including for yielded commands.
+For `command_session` pages starting after byte zero, previews select the returned
+`output` page rather than replaying the complete foreground captures. Empty end
+pages likewise do not replay previous output. Canonical completion captures stay
+available to direct command callers.
+Canonical output chunks remain available through result readback.
 
 Verification extraction also recognizes a literal `cd directory && check`
 prefix, applying package-manager directory flags relative to that directory.

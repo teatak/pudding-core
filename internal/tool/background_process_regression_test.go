@@ -40,7 +40,7 @@ func TestBackgroundProcessPollWakesAllReadersOnNewOutput(t *testing.T) {
 			t.Fatal("poll did not wake on output from a still-running process")
 		}
 	}
-	snapshot := process.pollPayload(0, backgroundProcessPollDefault)
+	snapshot := process.pollPayload(0, backgroundProcessPollDefault, 0)
 	if snapshot["running"] != true || snapshot["nextOffset"] != int64(len(encoded)) {
 		t.Fatalf("output wake changed execution state or offsets: %+v", snapshot)
 	}
@@ -81,7 +81,7 @@ func TestBackgroundProcessPollReturnsUnreadAndInvalidCursorsImmediately(t *testi
 			t.Fatalf("poll waited for existing output or cursor correction: %d", offset)
 		}
 		cancel()
-		payload := process.pollPayload(offset, backgroundProcessPollDefault)
+		payload := process.pollPayload(offset, backgroundProcessPollDefault, 0)
 		if offset == 0 && payload["truncated"] != true {
 			t.Fatal("stale cursor lost truncation indicator")
 		}

@@ -418,6 +418,30 @@ type EnvVar struct {
 	Value string `json:"value"`
 }
 
+// ErrSessionNotRestorable means the client cannot restore a saved context.
+var ErrSessionNotRestorable = errors.New("Antigravity cannot resume this session")
+
+// IsSessionNotRestorable deliberately excludes generic RPC/transport errors.
+func IsSessionNotRestorable(err error) bool {
+	if errors.Is(err, ErrSessionNotRestorable) {
+		return true
+	}
+	var rpc *RPCError
+	if !errors.As(err, &rpc) {
+		return false
+	}
+	message := strings.ToLower(strings.TrimSpace(rpc.Message))
+	// agy session/load reports this code and includes the missing session ID.
+	if rpc.Code == -32002 && strings.HasPrefix(message, "session not found: ") {
+		return strings.TrimSpace(strings.TrimPrefix(message, "session not found: ")) != ""
+	}
+	switch message {
+	case "session not found", "unknown session", "session expired":
+		return rpc.Code == -32603 || rpc.Code == -32602
+	}
+	return false
+}
+
 func (c *Client) Session(ctx context.Context, cwd, id string, servers ...MCPServer) (SessionResult, error) {
 	method := "session/new"
 	if servers == nil {
@@ -431,11 +455,19 @@ func (c *Client) Session(ctx context.Context, cwd, id string, servers ...MCPServ
 		} else if c.Init.Capabilities.LoadSession {
 			method = "session/load"
 		} else {
-			return SessionResult{}, errors.New("Antigravity cannot resume this session")
+			return SessionResult{}, ErrSessionNotRestorable
 		}
 	}
 	var out SessionResult
 	err := c.Call(ctx, method, params, &out)
+	var rpc *RPCError
+	if method == "session/resume" && c.Init.Capabilities.LoadSession && ctx.Err() == nil &&
+		errors.As(err, &rpc) && rpc.Code == -32603 &&
+		rpc.Message == "Failed to read session "+id+"; retry, or load it with session/load" {
+		// A failed resume can still be loadable. Follow agy's explicit recovery
+		// instruction once; only the load result may confirm the context is gone.
+		err = c.Call(ctx, "session/load", params, &out)
+	}
 	if err == nil && out.SessionID == "" {
 		out.SessionID = id
 	}

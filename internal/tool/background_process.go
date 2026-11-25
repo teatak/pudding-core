@@ -95,6 +95,7 @@ type commandSessionArgs struct {
 	ProcessID string `json:"process_id"`
 	Offset    int64  `json:"offset,omitempty"`
 	MaxBytes  int    `json:"max_bytes,omitempty"`
+	TailBytes int    `json:"tail_bytes,omitempty"`
 	WaitMS    int    `json:"wait_ms,omitempty"`
 	Data      string `json:"data,omitempty"`
 }
@@ -246,7 +247,7 @@ func (r *BuiltinRunner) commandSession(ctx context.Context, call Call) Result {
 	switch args.Action {
 	case "poll":
 		process.waitForPoll(ctx, args.Offset, time.Duration(args.WaitMS)*time.Millisecond)
-		payload = process.pollPayload(args.Offset, args.MaxBytes)
+		payload = process.pollPayload(args.Offset, args.MaxBytes, args.TailBytes)
 		out.SummaryKind = SummaryReturnedItems
 		if chunks, ok := payload["output"].([]backgroundProcessOutputChunk); ok {
 			out.SummaryCount = len(chunks)
@@ -283,7 +284,7 @@ func decodeCommandSessionArgs(raw json.RawMessage) (commandSessionArgs, error) {
 	switch args.Action {
 	case "list":
 	case "poll":
-		allowedFields = append(allowedFields, "process_id", "offset", "max_bytes", "wait_ms")
+		allowedFields = append(allowedFields, "process_id", "offset", "max_bytes", "tail_bytes", "wait_ms")
 	case "write":
 		allowedFields = append(allowedFields, "process_id", "data")
 	case "stop":
@@ -295,7 +296,7 @@ func decodeCommandSessionArgs(raw json.RawMessage) (commandSessionArgs, error) {
 	if err := json.Unmarshal(raw, &fields); err != nil {
 		return args, err
 	}
-	for _, field := range []string{"process_id", "data", "offset", "max_bytes", "wait_ms"} {
+	for _, field := range []string{"process_id", "data", "offset", "max_bytes", "tail_bytes", "wait_ms"} {
 		if _, present := fields[field]; present && !slices.Contains(allowedFields, field) {
 			return args, &toolArgumentError{
 				kind: "invalid_field", field: field, receivedBytes: len(raw), allowedFields: allowedFields,
@@ -321,6 +322,16 @@ func decodeCommandSessionArgs(raw json.RawMessage) (commandSessionArgs, error) {
 	}
 	if args.Action == "stop" {
 		return args, nil
+	}
+	if args.TailBytes < 0 || args.TailBytes > backgroundProcessPollMax || (args.TailBytes > 0 && args.TailBytes < backgroundProcessPollMin) {
+		return args, errors.New("tail_bytes must be 0 or between 1024 and 262144")
+	}
+	if args.TailBytes > 0 {
+		for _, field := range []string{"offset", "max_bytes", "wait_ms"} {
+			if _, exists := fields[field]; exists {
+				return args, errors.New("tail_bytes reads the current tail immediately; omit offset, max_bytes and wait_ms")
+			}
+		}
 	}
 	if args.Offset < 0 {
 		return args, errors.New("offset must be non-negative")
@@ -885,11 +896,19 @@ func waitForCommandUpdate(ctx context.Context, wait time.Duration, done, changed
 	}
 }
 
-func (p *backgroundProcess) pollPayload(offset int64, maxBytes int) map[string]any {
+func (p *backgroundProcess) pollPayload(offset int64, maxBytes, tailBytes int) map[string]any {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	chunks, nextOffset, truncated, hasMore := p.output.Read(offset, maxBytes)
+	chunks, nextOffset, truncated, hasMore := p.readOutputLocked(offset, maxBytes, tailBytes)
 	payload := p.statePayloadLocked()
+	if tailBytes > 0 {
+		// The caller requested a bounded tail, so do not duplicate the full
+		// foreground captures alongside it. Outcome and artifacts stay available.
+		delete(payload, "stdout")
+		delete(payload, "stderr")
+		delete(payload, "stdoutTruncated")
+		delete(payload, "stderrTruncated")
+	}
 	payload["output"] = chunks
 	payload["oldestOffset"] = p.output.baseOffset
 	payload["nextOffset"] = nextOffset
@@ -902,14 +921,7 @@ func (p *backgroundProcess) pollPayload(offset int64, maxBytes int) map[string]a
 func (p *backgroundProcess) logSnapshot(offset int64, maxBytes, tailBytes int) BackgroundProcessLogSnapshot {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if tailBytes > 0 {
-		offset = p.output.nextOffset - int64(tailBytes)
-		if offset < 0 {
-			offset = 0
-		}
-		maxBytes = tailBytes
-	}
-	chunks, nextOffset, truncated, hasMore := p.output.Read(offset, maxBytes)
+	chunks, nextOffset, truncated, hasMore := p.readOutputLocked(offset, maxBytes, tailBytes)
 	return BackgroundProcessLogSnapshot{
 		Process:      p.snapshotLocked(),
 		Output:       chunks,
@@ -919,6 +931,15 @@ func (p *backgroundProcess) logSnapshot(offset int64, maxBytes, tailBytes int) B
 		Truncated:    truncated,
 		HasMore:      hasMore,
 	}
+}
+
+// Caller holds p.mu so tail selection and output cursors describe one snapshot.
+func (p *backgroundProcess) readOutputLocked(offset int64, maxBytes, tailBytes int) ([]backgroundProcessOutputChunk, int64, bool, bool) {
+	if tailBytes > 0 {
+		offset = max(0, p.output.nextOffset-int64(tailBytes))
+		maxBytes = tailBytes
+	}
+	return p.output.Read(offset, maxBytes)
 }
 
 func (p *backgroundProcess) statePayload() map[string]any {

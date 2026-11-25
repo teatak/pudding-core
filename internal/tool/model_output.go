@@ -90,6 +90,11 @@ func ModelResultContent(name string, ok bool, content, turnID, callID string, ca
 	if utf8.RuneCountInString(v.Render()) <= modelResultMaxChars {
 		return v.Render()
 	}
+	if name == CommandRun || name == CommandSession {
+		if result, hasOutput := modelCommandResultPreview(name, content, ok, ResultReference{TurnID: turnID, CallID: callID}, true); hasOutput {
+			return result
+		}
+	}
 	if _, ok := v.Root.(map[string]any); !ok {
 		v.Root = map[string]any{"value": v.Root}
 		for i := range v.Blocks {

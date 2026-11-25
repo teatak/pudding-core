@@ -1811,6 +1811,7 @@ type SteerQueuedInputResult struct {
 }
 
 type ConversationTurn struct {
+	LocalAgentContext  *LocalAgentContext  `json:"localAgentContext,omitempty"`
 	RetryOfTurnID      string              `json:"retryOfTurnID,omitempty"`
 	ID                 string              `json:"id"`
 	SessionID          string              `json:"sessionID"`
@@ -1860,11 +1861,12 @@ const (
 )
 
 type Turn struct {
-	RetryOfTurnID   string     `json:"retryOfTurnID,omitempty"`
-	ID              string     `json:"id"`
-	SessionID       string     `json:"sessionID"`
-	ClientMessageID string     `json:"clientMessageID"`
-	Status          TurnStatus `json:"status"`
+	LocalAgentContext *LocalAgentContext `json:"localAgentContext,omitempty"`
+	RetryOfTurnID     string             `json:"retryOfTurnID,omitempty"`
+	ID                string             `json:"id"`
+	SessionID         string             `json:"sessionID"`
+	ClientMessageID   string             `json:"clientMessageID"`
+	Status            TurnStatus         `json:"status"`
 	// Provider / Model / ModelConfig 是 BeginTurn 时刻的解析快照,审计与
 	// 进行中 turn 稳定性用;用户改 profile 不影响已开始的 turn。
 	Provider    string          `json:"provider,omitempty"`

@@ -9,17 +9,22 @@ type LocalAgentState struct {
 	AgentSessionID string `json:"agentSessionID"`
 	Executable     string `json:"executable"`
 	CWD            string `json:"cwd"`
-	// Last acknowledged prompt, or the history boundary of a reviewed reset.
-	LastTurnID string `json:"lastTurnID"`
-	// A failed restore must not silently replace the CLI-owned context.
-	NeedsHandoff    bool `json:"needsHandoff,omitempty"`
-	ContextUsed     int  `json:"contextUsed"`
-	ContextSize     int  `json:"contextSize"`
-	Image           bool `json:"image"`
-	Audio           bool `json:"audio"`
-	EmbeddedContext bool `json:"embeddedContext"`
+	// Last successfully acknowledged prompt in this agent context.
+	LastTurnID      string `json:"lastTurnID"`
+	ContextUsed     int    `json:"contextUsed"`
+	ContextSize     int    `json:"contextSize"`
+	Image           bool   `json:"image"`
+	Audio           bool   `json:"audio"`
+	EmbeddedContext bool   `json:"embeddedContext"`
 }
+
+// LocalAgentContext records why this turn uses a newly created ACP context.
+type LocalAgentContext struct {
+	Reason string `json:"reason"` // first_use, directory_changed, session_unavailable
+}
+
 type LocalAgentStore interface {
+	RecordLocalAgentContext(context.Context, string, string, LocalAgentContext) error
 	GetLocalAgentState(context.Context, string) (*LocalAgentState, error)
 	PutLocalAgentState(context.Context, *LocalAgentState) error
 	LookupSubmission(context.Context, string, string) (*Turn, *QueuedInput, error)

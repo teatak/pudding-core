@@ -3,7 +3,10 @@
 package tool
 
 import (
+	"archive/zip"
 	"bytes"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,6 +15,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -669,4 +673,158 @@ func mustCommandEnvironment(t *testing.T) []string {
 		t.Fatal(err)
 	}
 	return env
+}
+
+func TestSandboxGoDownloadReusePreservesConfiguration(t *testing.T) {
+	cache, state := t.TempDir(), t.TempDir()
+	if err := os.MkdirAll(filepath.Join(cache, "golang.org"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if env, err := prepareSandboxGoEnvironment([]string{"PATH=/existing/bin"}, state, cache); err != nil || sandboxEnvValue(env, "PATH") != "/existing/bin" {
+		t.Fatalf("cache without toolchains changed PATH: %v, %v", env, err)
+	}
+	archive := filepath.Join(cache, "cache", "download")
+	target := filepath.Join(cache, "golang.org", "toolchain@v0.0.1-go1.26.6."+runtime.GOOS+"-"+runtime.GOARCH, "bin", "go")
+	for _, dir := range []string{archive, filepath.Dir(target)} {
+		if err := os.MkdirAll(dir, 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(target, []byte("toolchain fixture"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	for _, extra := range [][]string{nil, {"GOPROXY=off", "GOTOOLCHAIN=local"}, {"GOPROXY=https://example.com/proxy"}, {"GOENV=/custom/go.env"}} {
+		input := append([]string{"PATH=/existing/bin"}, extra...)
+		env, err := prepareSandboxGoEnvironment(input, state, cache)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.HasPrefix(sandboxEnvValue(env, "PATH"), "/existing/bin:") {
+			t.Fatal("changed executable precedence")
+		}
+		link := filepath.Join(state, "go", "toolchains", "go1.26.6")
+		if got, err := os.Readlink(link); err != nil || got != target {
+			t.Fatalf("toolchain link: %q %v", got, err)
+		}
+		if len(extra) == 0 {
+			if got := sandboxEnvValue(env, "GOPROXY"); !strings.HasPrefix(got, "file://") || !strings.HasSuffix(got, ",https://proxy.golang.org,direct") {
+				t.Fatalf("missing cache fallback: %s", got)
+			}
+		} else {
+			for _, item := range extra {
+				key, value, _ := strings.Cut(item, "=")
+				if sandboxEnvValue(env, key) != value {
+					t.Fatalf("overrode explicit %s", key)
+				}
+			}
+			if sandboxEnvValue(input, "GOENV") != "" && sandboxEnvValue(env, "GOPROXY") != "" {
+				t.Fatal("overrode custom Go configuration")
+			}
+		}
+	}
+}
+
+func TestMacOSCommandSandboxReusesGoModuleArchives(t *testing.T) {
+	project, home, cache := t.TempDir(), t.TempDir(), t.TempDir()
+	const module = "example.com/sandboxcache"
+	const moduleVersion = "v1.0.0"
+	const mod = "module example.com/sandboxcache\n\ngo 1.26\n"
+	archiveDir := filepath.Join(cache, "cache", "download", "example.com", "sandboxcache", "@v")
+	if err := os.MkdirAll(archiveDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	writePatchTestFile(t, filepath.Join(archiveDir, moduleVersion+".mod"), mod)
+	writePatchTestFile(t, filepath.Join(archiveDir, moduleVersion+".info"), `{"Version":"v1.0.0","Time":"2026-01-01T00:00:00Z"}`)
+	zipPath := filepath.Join(archiveDir, moduleVersion+".zip")
+	file, err := os.Create(zipPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writer := zip.NewWriter(file)
+	entry, err := writer.Create(module + "@" + moduleVersion + "/go.mod")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = io.WriteString(entry, mod); err != nil {
+		t.Fatal(err)
+	}
+	if err = writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err = file.Close(); err != nil {
+		t.Fatal(err)
+	}
+	contentSum := sha256.Sum256([]byte(mod))
+	checksum := func(name string) string {
+		hash := sha256.Sum256([]byte(fmt.Sprintf("%x  %s\n", contentSum, name)))
+		return "h1:" + base64.StdEncoding.EncodeToString(hash[:])
+	}
+	zipSum := checksum(module + "@" + moduleVersion + "/go.mod")
+	modSum := checksum("go.mod")
+	writePatchTestFile(t, filepath.Join(project, "go.mod"), "module example.com/consumer\n\ngo 1.26\n\nrequire "+module+" "+moduleVersion+"\n")
+	writePatchTestFile(t, filepath.Join(project, "go.sum"), module+" "+moduleVersion+" "+zipSum+"\n"+module+" "+moduleVersion+"/go.mod "+modSum+"\n")
+	env, err := prepareSandboxGoEnvironment(mustCommandEnvironment(t), t.TempDir(), cache)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The fixture has complete go.sum entries. A cache miss must fail offline.
+	env = sandboxSetEnv(env, "GOPROXY", strings.Replace(sandboxEnvValue(env, "GOPROXY"), ",https://proxy.golang.org,direct", ",off", 1))
+	env = sandboxSetEnv(env, "GOTOOLCHAIN", "local")
+	if _, err := resolveExecutableFromEnv("go", project, env); err != nil {
+		t.Skip("requires Go on PATH")
+	}
+	runner := newPlatformCommandRunner(home)
+	for _, state := range []string{"project:first", "project:second"} {
+		t.Cleanup(func() {
+			clean := runMacOSSandboxTestCommand(t, runner, commandSpec{Executable: "/bin/sh", Args: []string{"-c", "go clean -modcache"}, CWD: project, Env: env, ProjectDirs: []string{project, cache}, StateKey: state})
+			if clean.exitCode != 0 {
+				t.Errorf("clean private cache: %+v", clean)
+			}
+		})
+		result := runMacOSSandboxTestCommand(t, runner, commandSpec{Executable: "/bin/sh", Args: []string{"-c", "go mod download -json " + module + "@" + moduleVersion}, CWD: project, Env: env, ProjectDirs: []string{project, cache}, StateKey: state})
+		var download struct{ Dir, Sum string }
+		if result.exitCode != 0 || json.Unmarshal([]byte(result.stdout), &download) != nil || download.Sum != zipSum {
+			t.Fatalf("offline cache reuse failed: %+v", result)
+		}
+		resolvedHome, _ := filepath.EvalSymlinks(home)
+		if !pathInsideRoot(download.Dir, resolvedHome) {
+			t.Fatalf("module was not extracted privately: %s", download.Dir)
+		}
+	}
+}
+
+func TestMacOSCommandSandboxReusesInstalledGoToolchain(t *testing.T) {
+	hostHome, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	home, project := t.TempDir(), t.TempDir()
+	state, err := (&macOSCommandRunner{homeDir: home}).prepareStateRoot("cached-toolchain", []string{project})
+	if err != nil {
+		t.Fatal(err)
+	}
+	env, err := prepareSandboxGoEnvironment(mustCommandEnvironment(t), state, filepath.Join(hostHome, "go", "pkg", "mod"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries, err := os.ReadDir(filepath.Join(state, "go", "toolchains"))
+	if os.IsNotExist(err) {
+		t.Skip("requires a host-cached Go toolchain")
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) == 0 {
+		t.Skip("requires a host-cached Go toolchain")
+	}
+	name := entries[0].Name()
+	env = sandboxSetEnv(env, "GOTOOLCHAIN", name+"+path")
+	env = sandboxSetEnv(env, "GOPROXY", "off")
+	if _, err := resolveExecutableFromEnv("go", project, env); err != nil {
+		t.Skip("requires Go on PATH")
+	}
+	result := runMacOSSandboxTestCommand(t, newPlatformCommandRunner(home), commandSpec{Executable: "/bin/sh", Args: []string{"-c", name + " version"}, CWD: project, Env: env, ProjectDirs: []string{project}, StateKey: "cached-toolchain"})
+	if result.exitCode != 0 || !strings.Contains(result.stdout, "go version "+name+" ") {
+		t.Fatalf("cached toolchain failed: %+v", result)
+	}
 }

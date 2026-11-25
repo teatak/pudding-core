@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 type backgroundProcessPayload struct {
@@ -696,4 +697,42 @@ func backgroundOutputText(chunks []backgroundProcessOutputChunk) string {
 		out.WriteString(chunk.Content)
 	}
 	return out.String()
+}
+
+func TestCommandSessionReadsTailWithoutReexecuting(t *testing.T) {
+	runner := NewBuiltinRunner()
+	defer runner.Close()
+	process := &backgroundProcess{id: "tail-test", sessionID: "tail-session", foreground: &foregroundCommand{}, finalResult: &Result{Content: jsonString(map[string]any{"stdout": strings.Repeat("full capture", 10000), "stderr": "final error", "exitCode": 1})}}
+	process.output.Append("stdout", []byte(strings.Repeat("old log\n", 10000)))
+	process.output.Append("stderr", []byte(strings.Repeat("尾", 400)+"\nFAIL: final error\n"))
+	runner.processes.processes[process.id] = process
+	defer delete(runner.processes.processes, process.id)
+	result := runner.Call(context.Background(), Call{Name: CommandSession, SessionID: process.sessionID, Args: resultJSON(map[string]any{"action": "poll", "process_id": process.id, "tail_bytes": 1024})})
+	got := decodeBackgroundProcessPayload(t, result)
+	fields := decodeToolResult(t, result)
+	if fields["stdout"] != nil || fields["stderr"] != nil || fields["exitCode"] != float64(1) {
+		t.Fatal("tail request duplicated captures or lost outcome")
+	}
+	text := backgroundOutputText(got.Output)
+	if !result.Ok || got.HasMore || got.NextOffset != process.output.nextOffset || got.TailOffset != got.NextOffset || len(text) > 1024 || !utf8.ValidString(text) || !strings.HasSuffix(text, "FAIL: final error\n") {
+		t.Fatalf("invalid tail read: %s", result.Content)
+	}
+	snapshot := process.logSnapshot(0, backgroundProcessPollDefault, 1024)
+	if !reflect.DeepEqual(snapshot.Output, got.Output) || snapshot.NextOffset != got.NextOffset {
+		t.Fatal("tool and process API tails differ")
+	}
+	for _, raw := range []string{
+		`{"action":"poll","process_id":"x","tail_bytes":1000}`,
+		`{"action":"poll","process_id":"x","tail_bytes":-1}`,
+		`{"action":"poll","process_id":"x","tail_bytes":262145}`,
+		`{"action":"poll","process_id":"x","tail_bytes":1024,"offset":0}`,
+		`{"action":"poll","process_id":"x","tail_bytes":1024,"max_bytes":1024}`,
+		`{"action":"poll","process_id":"x","tail_bytes":1024,"wait_ms":0}`,
+		`{"action":"write","process_id":"x","data":"x","tail_bytes":1024}`,
+		`{"action":"poll","process_id":"x","tail_bytes":null}`,
+	} {
+		if _, err := decodeCommandSessionArgs(json.RawMessage(raw)); err == nil {
+			t.Fatalf("invalid arguments accepted: %s", raw)
+		}
+	}
 }

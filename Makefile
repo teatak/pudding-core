@@ -6,7 +6,7 @@ SDKROOT ?= $(shell xcrun --sdk macosx --show-sdk-path 2>/dev/null)
 export SDKROOT
 endif
 
-.PHONY: daemon daemon-dev daemon-release test schema-check tidy clean language-servers language-servers-ready prompt tools-report tools-eval agent-eval runtime
+.PHONY: daemon daemon-dev daemon-release test test-code-unit test-code-host schema-check tidy clean language-servers language-servers-ready prompt tools-report tools-eval agent-eval runtime
 
 daemon:
 	go build -tags "$(BUILDTAGS)" -o "$(DAEMON_OUT)" ./cmd/puddingd
@@ -41,6 +41,14 @@ agent-eval: daemon
 
 test:
 	go test -tags "$(BUILDTAGS)" ./...
+
+# Pure command/result regression subset, suitable inside a project sandbox.
+test-code-unit:
+	go test -tags "$(BUILDTAGS)" ./internal/tool ./internal/modeloutput -run '^(Test(CommandPreview|CompletedPollPreview|CommandSession|CommandProcessOutputText|LargeCommandPreview|BackgroundProcessOutputRing|SandboxGoDownload|MacOSCommandSandboxState|MacOSCommandSandboxMigrates|ExactText|InvalidDeclarations|WholeText|PresentationContract))' $(TESTARGS)
+
+# Native command execution, PTY and Seatbelt integration require a host runner.
+test-code-host:
+	go test -tags "$(BUILDTAGS)" ./internal/tool ./internal/engine $(TESTARGS)
 
 schema-check:
 	go test -tags "$(BUILDTAGS)" ./internal/store/sqlitestore -run '^TestSchemaReleaseContract$$'

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 
+	"github.com/teatak/pudding-core/internal/event"
 	"github.com/teatak/pudding-core/internal/store"
 )
 
@@ -47,4 +48,40 @@ func (s *Store) LookupSubmission(ctx context.Context, sessionID, clientID string
 		return nil, nil, nil
 	}
 	return nil, queued, err
+}
+
+// Keep the notice with the canonical turn and publish it in the same commit.
+func (s *Store) RecordLocalAgentContext(ctx context.Context, sessionID, turnID string, notice store.LocalAgentContext) error {
+	return s.tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		turn, err := getTurnTx(ctx, tx, turnID)
+		if err != nil {
+			return err
+		}
+		if turn.SessionID != sessionID {
+			return store.ErrNotFound
+		}
+		if turn.Status != store.TurnRunning {
+			return errors.New("local agent context requires a running turn")
+		}
+		var config map[string]json.RawMessage
+		if err := json.Unmarshal(turn.ModelConfig, &config); err != nil {
+			return err
+		}
+		if config == nil {
+			config = make(map[string]json.RawMessage)
+		}
+		payload, err := json.Marshal(notice)
+		if err != nil {
+			return err
+		}
+		config["localAgentContext"] = payload
+		data, err := json.Marshal(config)
+		if err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE turns SET model_config=? WHERE id=?`, string(data), turnID); err != nil {
+			return err
+		}
+		return insertEventTx(ctx, tx, &event.Event{Kind: event.TurnLocalAgentContext, SessionID: sessionID, TurnID: turnID, Payload: payload})
+	})
 }

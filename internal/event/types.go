@@ -11,6 +11,7 @@ const (
 	SessionDirectoriesChanged Kind = "session.directories.changed"
 	WidgetNotice              Kind = "widget.notice"
 	CollaborationChanged      Kind = "collaboration.changed"
+	TurnLocalAgentContext     Kind = "turn.local_agent_context"
 	TurnStarted               Kind = "turn.started"
 	TurnDelta                 Kind = "turn.delta"
 	TurnTool                  Kind = "turn.tool"

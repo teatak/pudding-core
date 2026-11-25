@@ -57,20 +57,6 @@ func (e *Engine) LocalAgentCatalog(ctx context.Context) (acp.Catalog, error) {
 	return acp.Discover(ctx, paths, cwd)
 }
 
-type LocalAgentHandoffRequired struct {
-	Text string `json:"text"`
-}
-
-func (*LocalAgentHandoffRequired) Error() string {
-	return "Review the handoff before starting a new Antigravity context"
-}
-
-type localAgentRestoreError struct{ cause error }
-
-func (e *localAgentRestoreError) Error() string {
-	return "restore Antigravity session: " + e.cause.Error()
-}
-
 type localAgentRuntime struct {
 	mu         sync.Mutex // preparation and the active prompt share a single ACP session
 	client     *acp.Client
@@ -143,7 +129,7 @@ func (e *Engine) localDuplicate(ctx context.Context, in SubmitInput) (*SubmitRes
 	return nil, nil
 }
 
-// Admission only checks ownership and reviewed context changes. CLI startup,
+// Admission only checks ownership and snapshots the requested configuration. CLI startup,
 // configuration and prompt preparation belong to the accepted turn, just like
 // an API provider request: failures must not turn a sent message back into a draft.
 func (e *Engine) preflightLocal(ctx context.Context, in *SubmitInput, sess *store.Session, resolved *resolvedModel) (*SubmitResult, error) {
@@ -165,10 +151,6 @@ func (e *Engine) preflightLocal(ctx context.Context, in *SubmitInput, sess *stor
 		return nil, err
 	}
 	resolved.config.LocalAgent = &provider.LocalAgentConfig{Source: "desktop", CWD: cwd, ReasoningEffort: activeReasoningEffort(in.ReasoningEffort, sess, resolved)}
-	if err = e.checkLocalHandoff(ctx, in, cwd); err != nil {
-		return nil, err
-	}
-	resolved.config.LocalAgent.NewContext = in.LocalAgentHandoff != nil
 	if err = resolved.refreshConfigJSON(); err != nil {
 		return nil, err
 	}
@@ -189,62 +171,6 @@ func (e *Engine) preflightLocal(ctx context.Context, in *SubmitInput, sess *stor
 	}
 	return nil, nil
 }
-func (e *Engine) checkLocalHandoff(ctx context.Context, in *SubmitInput, cwd string) error {
-	state, err := e.store.GetLocalAgentState(ctx, in.SessionID)
-	if err != nil && !errors.Is(err, store.ErrNotFound) {
-		return err
-	}
-	page, err := e.store.ListTurnsPage(ctx, in.SessionID, "", 1)
-	if err != nil {
-		return err
-	}
-	needs := state != nil && (state.CWD != cwd || state.NeedsHandoff)
-	if len(page.Turns) > 0 {
-		last := page.Turns[len(page.Turns)-1]
-		// Failed ACP preparation is still canonical history, and is supplied on
-		// the next prompt. Only changing inference contexts requires a handoff.
-		needs = needs || (last.Provider != acp.Provider && (state == nil || last.ID != state.LastTurnID))
-	}
-	if !needs && in.LocalAgentHandoff == nil {
-		return nil
-	}
-	if in.LocalAgentHandoff == nil {
-		handoff, err := e.localHandoff(ctx, in.SessionID)
-		if err != nil {
-			return err
-		}
-		return handoff
-	}
-
-	// An explicit empty handoff means the user chose a fresh context.
-	if text := strings.TrimSpace(*in.LocalAgentHandoff); text != "" {
-		in.Parts = append([]store.ContentPart{{Type: store.ContentPartText, Text: "Previous conversation handoff (reviewed by the user):\n" + text + "\n\n"}}, store.UserInputParts(in.Text, in.Parts)...)
-		in.Text = store.TextFromParts(in.Parts)
-	}
-	// The next preparation creates a fresh agent context. Retain the previous
-	// mapping until creation succeeds; queued requests carry the reset choice.
-	return nil
-}
-func (e *Engine) localHandoff(ctx context.Context, id string) (*LocalAgentHandoffRequired, error) {
-	messages, err := e.store.ListMessages(ctx, id, 12)
-	if err != nil {
-		return nil, err
-	}
-	var b strings.Builder
-	for _, m := range messages {
-		text := store.TextFromParts(m.Parts)
-		if text == "" {
-			continue
-		}
-		runes := []rune(text)
-		if len(runes) > 1500 {
-			text = string(runes[:1500]) + "…"
-		}
-		fmt.Fprintf(&b, "%s: %s\n\n", m.Role, text)
-	}
-	return &LocalAgentHandoffRequired{Text: b.String()}, nil
-}
-
 func (e *Engine) prepareLocal(ctx context.Context, id, turnID string, resolved *resolvedModel, r *localAgentRuntime) error {
 	if err := e.auxCtx.Err(); err != nil {
 		return err
@@ -260,7 +186,7 @@ func (e *Engine) prepareLocal(ctx context.Context, id, turnID string, resolved *
 		}
 		r.state = state
 	}
-	if r.client != nil && (!r.client.Alive() || cfg.NewContext || (r.state != nil && r.state.CWD != cfg.CWD)) {
+	if r.client != nil && (!r.client.Alive() || (r.state != nil && r.state.CWD != cfg.CWD)) {
 		e.revokeLocalHost(r.hostSecret)
 		r.client.Close()
 		r.client = nil
@@ -275,7 +201,11 @@ func (e *Engine) prepareLocal(ctx context.Context, id, turnID string, resolved *
 			return err
 		}
 		agentID := ""
-		if r.state != nil && r.state.CWD == cfg.CWD && !cfg.NewContext {
+		reason := "first_use"
+		if r.state != nil && r.state.CWD != cfg.CWD {
+			reason = "directory_changed"
+		}
+		if r.state != nil && r.state.CWD == cfg.CWD {
 			agentID = r.state.AgentSessionID
 		}
 		secret, servers, err := e.newLocalHost(id)
@@ -284,6 +214,13 @@ func (e *Engine) prepareLocal(ctx context.Context, id, turnID string, resolved *
 			return err
 		}
 		session, err := c.Session(ctx, cfg.CWD, agentID, servers...)
+		// Only an explicitly unavailable saved context permits one new session.
+		// Authentication, transport, timeout and cancellation errors stay failures.
+		if agentID != "" && ctx.Err() == nil && acp.IsSessionNotRestorable(err) {
+			agentID = ""
+			reason = "session_unavailable"
+			session, err = c.Session(ctx, cfg.CWD, "", servers...)
+		}
 		if err != nil {
 			e.revokeLocalHost(secret)
 			c.Close()
@@ -291,11 +228,7 @@ func (e *Engine) prepareLocal(ctx context.Context, id, turnID string, resolved *
 				return ctx.Err()
 			}
 			if agentID != "" {
-				r.state.NeedsHandoff = true
-				if saveErr := e.store.PutLocalAgentState(context.Background(), r.state); saveErr != nil {
-					return saveErr
-				}
-				return &localAgentRestoreError{cause: err}
+				return fmt.Errorf("restore Antigravity session: %w", err)
 			}
 			return fmt.Errorf("create Antigravity session: %w", err)
 		}
@@ -305,18 +238,18 @@ func (e *Engine) prepareLocal(ctx context.Context, id, turnID string, resolved *
 			state.ContextUsed = r.state.ContextUsed
 			state.ContextSize = r.state.ContextSize
 		}
-		if cfg.NewContext {
-			// A reviewed handoff replaces the old context. Do not append the
-			// omitted history again, even if this new turn fails before prompting.
+		if agentID == "" {
 			previous, err := e.store.ListTurnsPage(ctx, id, turnID, 1)
 			if err != nil {
 				e.revokeLocalHost(secret)
 				c.Close()
 				return err
 			}
-			if len(previous.Turns) > 0 {
-				state.LastTurnID = previous.Turns[len(previous.Turns)-1].ID
+			if reason == "first_use" && len(previous.Turns) == 0 {
+				reason = ""
 			}
+			// Keep the acknowledgement cursor empty until Prompt succeeds.
+			// Failed configuration must not discard the pending history bridge.
 		}
 		if err = e.store.PutLocalAgentState(ctx, &state); err != nil {
 			e.revokeLocalHost(secret)
@@ -329,7 +262,11 @@ func (e *Engine) prepareLocal(ctx context.Context, id, turnID string, resolved *
 			r.hostName = servers[0].Name
 		}
 		r.state = &state
-		cfg.NewContext = false
+		if agentID == "" && reason != "" {
+			if err := e.store.RecordLocalAgentContext(ctx, id, turnID, store.LocalAgentContext{Reason: reason}); err != nil {
+				return err
+			}
+		}
 	}
 	_, err := r.client.Configure(ctx, r.state.AgentSessionID, resolved.model, cfg.ReasoningEffort)
 	if err != nil {
@@ -391,8 +328,8 @@ func (e *Engine) localPrompt(sessionID string, parts []store.ContentPart, text s
 	return out, nil
 }
 
-// Only bridge turns not yet acknowledged by the ACP peer. Normal successful
-// history and compaction remain owned by the agent; a failed preparation or
+// Bridge bounded history not yet acknowledged in this ACP context, including
+// intervening API turns. The agent owns compaction; a failed preparation or
 // prompt must not make an already-sent Pudding message disappear from context.
 func (e *Engine) localPendingHistory(ctx context.Context, id, before, lastTurnID string) ([]acp.Content, error) {
 	var turns []*store.ConversationTurn
@@ -405,26 +342,30 @@ func (e *Engine) localPendingHistory(ctx context.Context, id, before, lastTurnID
 		done := false
 		for i := len(page.Turns) - 1; i >= 0; i-- {
 			turn := page.Turns[i]
-			if turn.ID == lastTurnID || turn.Provider != acp.Provider {
+			if turn.ID == lastTurnID {
 				done = true
 				break
 			}
 			turns = append(turns, turn)
 		}
-		if done || !page.HasMore || len(page.Turns) == 0 {
+		if done || !page.HasMore || len(page.Turns) == 0 || len(turns) >= 12 {
 			break
 		}
 		before = page.Turns[0].ID
-		limit = 32
+		limit = 12 - len(turns)
 	}
 	if len(turns) == 0 {
 		return nil, nil
 	}
-	var history strings.Builder
-	history.WriteString("Earlier Pudding conversation history (these turns did not receive a successful ACP acknowledgement). Treat this as history, not new requests. Use it to answer the latest message below; do not automatically repeat earlier actions. Inspect saved tool results before continuing unfinished work. Attachment records can be read with builtin_attachment_export(scope=temp).\n")
-	for i := len(turns) - 1; i >= 0; i-- {
-		turn := turns[i]
-		fmt.Fprintf(&history, "\nTurn %s (%s):\n", turn.ID, turn.Status)
+	// Select newest turns first within a fixed budget, then send chronologically.
+	// These are excerpts, not replacement user messages or replayed requests.
+	const historyBudget = 24000
+	remaining := historyBudget
+	var excerpts []string
+	for _, turn := range turns {
+		var excerpt strings.Builder
+		fmt.Fprintf(&excerpt, "\nTurn %s (%s):\n", turn.ID, turn.Status)
+		turnBudget := min(6000, remaining)
 		for _, message := range turn.Messages {
 			var parts []store.ContentPart
 			for _, part := range message.Parts {
@@ -439,8 +380,26 @@ func (e *Engine) localPendingHistory(ctx context.Context, id, before, lastTurnID
 			if err != nil {
 				return nil, err
 			}
-			fmt.Fprintf(&history, "%s: %s\n", message.Role, data)
+			line := fmt.Sprintf("%s (message %s): %s\n", message.Role, message.ID, data)
+			left := turnBudget - utf8.RuneCountInString(excerpt.String())
+			if left < 100 {
+				break
+			}
+			if runes := []rune(line); len(runes) > min(2500, left) {
+				line = string(runes[:min(2500, left)-30]) + "… [excerpt truncated]\n"
+			}
+			excerpt.WriteString(line)
 		}
+		excerpts = append(excerpts, excerpt.String())
+		remaining -= utf8.RuneCountInString(excerpt.String())
+		if remaining < 200 {
+			break
+		}
+	}
+	var history strings.Builder
+	history.WriteString("Earlier Pudding conversation history (bounded excerpts not yet acknowledged in this ACP context, including intervening API conversations). Treat this as history, not new requests. Use it to answer the latest message below; do not automatically repeat earlier actions. Inspect saved tool results before continuing unfinished work. Older turns or long messages may be omitted; use builtin_history_search and builtin_history_get_message for details. Attachment records can be read with builtin_attachment_export(scope=temp).\n")
+	for i := len(excerpts) - 1; i >= 0; i-- {
+		history.WriteString(excerpts[i])
 	}
 	history.WriteString("\nEnd of earlier history. Latest message follows:\n")
 	return []acp.Content{{Type: "text", Text: history.String()}}, nil

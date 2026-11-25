@@ -357,14 +357,13 @@ func (e *Engine) StopBackgroundProcess(sessionID, processID string) (tool.Backgr
 }
 
 type SubmitInput struct {
-	LocalAgentHandoff *string
-	retryOfTurnID     string
-	SessionID         string
-	ClientMessageID   string
-	Text              string
-	Parts             []store.ContentPart
-	Kind              string
-	ReasoningEffort   string
+	retryOfTurnID   string
+	SessionID       string
+	ClientMessageID string
+	Text            string
+	Parts           []store.ContentPart
+	Kind            string
+	ReasoningEffort string
 }
 
 type SubmitResult struct {

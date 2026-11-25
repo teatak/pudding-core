@@ -735,7 +735,13 @@ export const searchMessagesInSessionRequest = z.object({
 
 export const searchMessagesInSessionResponse = searchSessionMessagesResponse;
 
+export const localAgentContext = z.object({
+  reason: z.enum(["first_use", "directory_changed", "session_unavailable"]),
+});
+export type LocalAgentContext = z.infer<typeof localAgentContext>;
+
 export const conversationTurn = z.object({
+  localAgentContext: localAgentContext.optional(),
   retryOfTurnID: z.string().optional(),
   id: z.string(),
   sessionID: z.string(),
@@ -795,7 +801,6 @@ export type QueuedInput = z.infer<typeof queuedInput>;
 
 export const submitRequest = z
   .object({
-    localAgentHandoff: z.string().optional(),
     clientMessageID: z.string().min(1),
     kind: z.enum(["user", "system"]).optional(),
     reasoningEffort: z.string().optional(),

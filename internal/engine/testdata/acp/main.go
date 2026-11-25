@@ -32,6 +32,7 @@ func main() {
 	var pending any
 	failedToolOnCancel := false
 	scanner := bufio.NewScanner(os.Stdin)
+	scanner.Buffer(make([]byte, 4096), 2<<20)
 	for scanner.Scan() {
 		var m struct {
 			ID     any
@@ -64,8 +65,16 @@ func main() {
 				hostName = p.MCPServers[0].Name
 			}
 			if m.Method != "session/new" {
+				if _, err := os.Stat("restore-auth-fails"); err == nil {
+					_ = enc.Encode(map[string]any{"jsonrpc": "2.0", "id": m.ID, "error": map[string]any{"code": -32000, "message": "authentication required"}})
+					continue
+				}
+				if _, err := os.Stat("resume-needs-load"); err == nil && m.Method == "session/resume" {
+					_ = enc.Encode(map[string]any{"jsonrpc": "2.0", "id": m.ID, "error": map[string]any{"code": -32603, "message": "Failed to read session " + p.SessionID + "; retry, or load it with session/load"}})
+					continue
+				}
 				if _, err := os.Stat("restore-fails"); err == nil {
-					_ = enc.Encode(map[string]any{"jsonrpc": "2.0", "id": m.ID, "error": map[string]any{"code": -32603, "message": "session not found"}})
+					_ = enc.Encode(map[string]any{"jsonrpc": "2.0", "id": m.ID, "error": map[string]any{"code": -32002, "message": "Session not found: " + p.SessionID}})
 					continue
 				}
 			}

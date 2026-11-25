@@ -130,7 +130,7 @@ messages（包括工具结果、已交付的提问回答和中断输出）继续
 | `builtin_plugin_load` | `chat` | `{plugin_id, skill_id?}` | `{ok, pluginID, skillID, reference, newlyLoaded, alreadyLoaded}`;显式加载插件，失败不修改 session |
 | `builtin_plugin_save` | `code` | `{operation:create|update,plugin_id,version,files[]}` | 完整文本包经隔离校验后替换已安装插件；失败保留旧版本；不接受凭据 |
 | `builtin_command_run` | `code` | `{scope:"project", command:string, cwd?, env?, timeout_ms?, background?, tty?}` | 前台返回 `{ok, command, shell, cwd, exitCode, stdout, stderr, ...}`;`background:true` 返回 `{ok, processID, status, running, command, tty, ...}` |
-| `builtin_command_session` | `code` | `{action:"poll"|"write"|"stop", process_id, offset?, max_bytes?, wait_ms?, data?}` | poll 返回有界输出与 offset;write 返回 `bytesWritten`;stop 返回终态 |
+| `builtin_command_session` | `code` | `{action:"poll"|"write"|"stop", process_id, offset?, max_bytes?, tail_bytes?, wait_ms?, data?}` | poll 返回有界输出与 offset;write 返回 `bytesWritten`;stop 返回终态 |
 | `builtin_browser_select` | `browser` 插件 | `{tabID?,selector,label?\|value?}`；label/value 必须且只能选一个，允许空选项值 | 原生单选下拉按精确标签/值选择，返回读回的值；歧义、禁用和不支持的控件明确报错 |
 | `builtin_set_turn_topic` | `chat` | `{title}` | 当前轮主题打点；后续未设置新主题的轮次继承；当前主题上下文含 `startMessageID` 和 `startedAt` 供历史查询 |
 | `builtin_git_status` | `code` | `{scope:"project", cwd?}` | `{ok, cwd, repoRoot, head, branch, upstream, detached, ahead, behind, clean, files, fileCount, stagedCount, unstagedCount, untrackedCount, conflictedCount}` |
@@ -323,3 +323,9 @@ Opening `/studio/items/:id/draft` for a downloaded original requires `clientRequ
 - Widget 页面固定版本：协议 21 / schema 36；`widget_page_pins` 是内容页面源码事实源。`pages/select` 解析/显式切换本页版本，`pages/authorize` 校验 target 与 pin。升级默认版本不撤销旧页面；明确关闭/切换撤销旧执行。storage 和插件 action 传宿主 targetID，历史预览不获写权限；长期数据格式兼容由作者负责。
 
 - Widget 会话连接：协议 22 / schema 37。`PUT /widget-runs/:runID/participants` 支持增删连接、稳定保留成员身份及定向取消；宿主不保存业务 roles。SDK 候选默认只用于初选，组件自行选边、准备及通知。数据迁移只删除旧 interaction.roles，保留 state 和身份；旧 start API 的调用方需迁移。
+
+## Protocol 69 · ACP automatic context handoff
+
+- `ConversationTurn.localAgentContext.reason`: `first_use`, `directory_changed`, or `session_unavailable`.
+- Persistent `turn.local_agent_context` carries the same object in `payload`; snapshots retain it after refresh.
+- Remove `localAgentHandoff` submit parameter and `local_agent_handoff_required` rejection. User parts remain unchanged.

@@ -97,6 +97,14 @@ func (r *macOSCommandRunner) Prepare(spec commandSpec) (*commandExecution, error
 	cmd := exec.Command(macOSCommandSandboxExecutable, args...)
 	cmd.Dir = spec.CWD
 	cmd.Env = sandboxEnvironment(spec.Env, stateRoot)
+	hostHome, err := os.UserHomeDir()
+	if err != nil {
+		return nil, err
+	}
+	cmd.Env, err = prepareSandboxGoEnvironment(cmd.Env, stateRoot, filepath.Join(hostHome, "go", "pkg", "mod"))
+	if err != nil {
+		return nil, fmt.Errorf("prepare sandbox Go cache: %w", err)
+	}
 	configureCommandProcess(cmd)
 	return &commandExecution{
 		Cmd:         cmd,
