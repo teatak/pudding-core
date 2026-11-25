@@ -205,7 +205,7 @@ func (e *Engine) executeDirectToolCall(ctx context.Context, mode store.AgentMode
 	}
 	e.hub.Publish(event.Event{
 		SessionID: call.SessionID, Kind: event.TurnTool, TurnID: call.TurnID,
-		CallID: call.CallID, Name: call.Name, Phase: "running",
+		CallID: call.CallID, Name: call.Name, Phase: "running", ArgsText: string(call.Args),
 	})
 	result, nextMode, _ := e.dispatchToolCall(ctx, call.SessionID, call.TurnID, mode, allowed, call)
 	if result.CallID == "" {

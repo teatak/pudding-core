@@ -327,8 +327,8 @@ func classifyCommandCall(raw json.RawMessage, projectDirs []string, managedDirs 
 		return ToolRisk{}, false
 	}
 	operation := "shell"
-	if len(analysis.Commands) == 1 && analysis.Commands[0][0] != unknownPolicyWord {
-		operation = commandOperation(analysis.Commands[0][0])
+	if len(analysis.Commands) == 1 && len(analysis.Commands[0].Argv) > 0 && analysis.Commands[0].Argv[0] != unknownPolicyWord {
+		operation = commandOperation(analysis.Commands[0].Argv[0])
 	}
 	risk := ToolRisk{
 		Class:     RiskClassCommand,
@@ -353,31 +353,38 @@ func classifyCommandCall(raw json.RawMessage, projectDirs []string, managedDirs 
 	// Session artifacts are approved command operands, not project roots:
 	// they never select cwd or authorize launching an executable.
 	operandDirs := normalizeProjectDirs(append(append([]string(nil), projectDirs...), managedDirs...))
-	for _, rawArgv := range append(analysis.Commands, analysis.wrappers...) {
-		argv := unwrapCommand(rawArgv)
+	commandArgvs := policyCommandArgvs(analysis.Commands)
+	for _, cmd := range append(analysis.Commands, analysis.wrappers...) {
+		argv := unwrapCommand(cmd.Argv)
 		if len(argv) == 0 || argv[0] == unknownPolicyWord {
 			continue
 		}
 		if argv[0] == "env_print" || argv[0] == "command_query" {
 			continue
 		}
+		effectiveCWD := resolvePolicyCWD(args.CWD, cmd.CWD)
 		commandOperation := commandOperation(argv[0])
-		executableAllowed := commandExecutableAllowedForAuto(argv[0], args.CWD, projectDirs)
+		executableAllowed := commandExecutableAllowedForAuto(argv[0], effectiveCWD, projectDirs)
 		pathDirs := operandDirs
 		if commandOperation == "cd" || commandOperation == "pushd" {
 			// Directory changes select a working directory, not a data operand.
 			pathDirs = projectDirs
 		}
-		outsidePaths := commandPathArgsOutsideProject(argv, args.CWD, pathDirs)
+		outsidePaths := commandPathArgsOutsideProject(argv, effectiveCWD, pathDirs)
 		if (commandOperation == "cd" || commandOperation == "pushd") && len(normalizeProjectDirs(projectDirs)) > 0 {
+			roots := normalizeProjectDirs(projectDirs)
+			cdBase := effectiveCWD
+			if _, resolved, _, err := resolveProjectPath(roots, effectiveCWD, true, true); err == nil {
+				cdBase = resolved
+			}
 			for _, path := range commandPathArgs(argv) {
-				if path != unknownPolicyWord && !sandboxManagedPath(path) && !commandPathInsideProject(path, args.CWD, projectDirs) {
-					outsidePaths = append(outsidePaths, path)
+				if path != unknownPolicyWord && !sandboxManagedPath(path) && !commandPathInsideProject(path, cdBase, roots) {
+					outsidePaths = append(outsidePaths, resolveOutsideProjectPath(path, cdBase))
 				}
 			}
 		}
 		if !executableAllowed && !isBareCommand(argv[0]) {
-			outsidePaths = append(outsidePaths, commandPathsOutsideProject([]string{argv[0]}, args.CWD, projectDirs)...)
+			outsidePaths = append(outsidePaths, commandPathsOutsideProject([]string{argv[0]}, effectiveCWD, projectDirs)...)
 		}
 		commandLowRisk := executableAllowed && !commandRequiresApproval(argv) &&
 			len(outsidePaths) == 0 &&
@@ -389,7 +396,7 @@ func classifyCommandCall(raw json.RawMessage, projectDirs []string, managedDirs 
 		}
 		// A download exemption never approves a compound download-and-execute
 		// workflow. Review the complete command rather than only its HTTP segment.
-		if (commandOperation == "curl" || commandOperation == "wget") && !downloadCompanionsAreNonExecuting(analysis.Commands) {
+		if (commandOperation == "curl" || commandOperation == "wget") && !downloadCompanionsAreNonExecuting(commandArgvs) {
 			risk.LowRisk = false
 			risk.ApprovalReasons = append(risk.ApprovalReasons, "download_and_execute")
 		}
@@ -404,21 +411,28 @@ func classifyCommandCall(raw json.RawMessage, projectDirs []string, managedDirs 
 		if commandReadsSandboxSystemPaths(commandOperation) || commandOperation == "test" || commandOperation == "[" {
 			for _, path := range commandPathArgs(argv) {
 				if path != unknownPolicyWord && !sandboxManagedPath(path) {
-					analysis.Redirections = append(analysis.Redirections, shellRedirection{Path: path})
+					analysis.Redirections = append(analysis.Redirections, shellPolicyRedirection{
+						Redirection: shellRedirection{Path: path},
+						CWD:         cmd.CWD,
+					})
 				}
 			}
 		}
 	}
-	if outsidePaths := commandRedirectionsOutsideProject(analysis.Redirections, args.CWD, operandDirs); len(outsidePaths) > 0 {
-		risk.LowRisk = false
-		risk.requiredProjectPaths = append(risk.requiredProjectPaths, outsidePaths...)
+	for _, redir := range analysis.Redirections {
+		effectiveCWD := resolvePolicyCWD(args.CWD, redir.CWD)
+		if outsidePaths := commandRedirectionsOutsideProject([]shellRedirection{redir.Redirection}, effectiveCWD, operandDirs); len(outsidePaths) > 0 {
+			risk.LowRisk = false
+			risk.requiredProjectPaths = append(risk.requiredProjectPaths, outsidePaths...)
+		}
 	}
 	for _, environment := range analysis.Environments {
-		if commandEnvironmentRequiresApprovalForProject(environment, projectDirs) {
+		if commandEnvironmentRequiresApprovalForProject(environment.Env, projectDirs) {
 			risk.LowRisk = false
 			risk.ApprovalReasons = append(risk.ApprovalReasons, "custom_environment")
 		}
-		if paths := commandEnvironmentOutsideProjectPaths(environment, args.CWD, operandDirs); len(paths) > 0 {
+		effectiveCWD := resolvePolicyCWD(args.CWD, environment.CWD)
+		if paths := commandEnvironmentOutsideProjectPaths(environment.Env, effectiveCWD, operandDirs); len(paths) > 0 {
 			risk.LowRisk = false
 			risk.requiredProjectPaths = append(risk.requiredProjectPaths, paths...)
 		}
@@ -481,16 +495,26 @@ func compactShellCommand(command string) string {
 	return compactCommand([]string{strings.Join(strings.Fields(command), " ")})
 }
 
+func resolvePolicyCWDBoundary(roots []string, cwd string) (resolvedCWD string, cwdOutside bool, outsideBase string) {
+	if len(roots) == 0 {
+		return "", false, ""
+	}
+	_, resolved, _, err := resolveProjectPath(roots, cwd, true, true)
+	if err == nil {
+		return resolved, false, ""
+	}
+	if filepath.IsAbs(cwd) {
+		if evaluated, evalErr := filepath.EvalSymlinks(cwd); evalErr == nil {
+			return "", true, evaluated
+		}
+		return "", true, filepath.Clean(cwd)
+	}
+	return "", true, ""
+}
+
 func commandRedirectionsOutsideProject(redirections []shellRedirection, cwd string, projectDirs []string) []string {
 	roots := normalizeProjectDirs(projectDirs)
-	resolvedCWD := ""
-	if len(roots) > 0 {
-		_, resolved, _, err := resolveProjectPath(roots, cwd, true, false)
-		if err != nil {
-			return compactRiskPaths(cwd)
-		}
-		resolvedCWD = resolved
-	}
+	resolvedCWD, cwdOutside, outsideBase := resolvePolicyCWDBoundary(roots, cwd)
 	var outside []string
 	for _, redirection := range redirections {
 		path := strings.TrimSpace(redirection.Path)
@@ -509,9 +533,17 @@ func commandRedirectionsOutsideProject(redirections []shellRedirection, cwd stri
 			}
 			continue
 		}
+		if cwdOutside {
+			target := resolveOutsideProjectPath(path, outsideBase)
+			isInside := filepath.IsAbs(target) && commandPathInsideProject(target, "", roots)
+			if !isInside && (redirection.Writes || !commandPathReadableInSandbox(target)) {
+				outside = append(outside, target)
+			}
+			continue
+		}
 		if !commandPathInsideProject(path, resolvedCWD, roots) &&
 			(redirection.Writes || !commandPathReadableInSandbox(path)) {
-			outside = append(outside, path)
+			outside = append(outside, resolveOutsideProjectPath(path, resolvedCWD))
 		}
 	}
 	return compactRiskPaths(outside...)
@@ -554,10 +586,7 @@ func commandPathArgsOutsideProject(argv []string, cwd string, projectDirs []stri
 
 func commandPathsOutsideProject(paths []string, cwd string, projectDirs []string) []string {
 	roots := normalizeProjectDirs(projectDirs)
-	resolvedCWD := ""
-	if len(roots) > 0 {
-		_, resolvedCWD, _, _ = resolveProjectPath(roots, cwd, true, false)
-	}
+	resolvedCWD, cwdOutside, outsideBase := resolvePolicyCWDBoundary(roots, cwd)
 	var outside []string
 	for _, path := range paths {
 		candidate := strings.TrimSpace(path)
@@ -571,14 +600,56 @@ func commandPathsOutsideProject(paths []string, cwd string, projectDirs []string
 		if sandboxManagedPath(candidate) {
 			continue
 		}
+		if cwdOutside {
+			target := resolveOutsideProjectPath(candidate, outsideBase)
+			if !filepath.IsAbs(target) || !commandPathInsideProject(target, "", roots) {
+				outside = append(outside, target)
+			}
+			continue
+		}
 		cleaned := filepath.Clean(candidate)
 		if filepath.IsAbs(candidate) || cleaned == ".." || strings.HasPrefix(cleaned, ".."+string(filepath.Separator)) {
 			if resolvedCWD == "" || !commandPathInsideProject(candidate, resolvedCWD, roots) {
-				outside = append(outside, candidate)
+				outside = append(outside, resolveOutsideProjectPath(candidate, resolvedCWD))
 			}
 		}
 	}
 	return compactRiskPaths(outside...)
+}
+
+func resolvePolicyCWD(baseCWD, logicalCWD string) string {
+	if logicalCWD == "" {
+		return baseCWD
+	}
+	if filepath.IsAbs(logicalCWD) {
+		return filepath.Clean(logicalCWD)
+	}
+	if baseCWD == "" {
+		return filepath.Clean(logicalCWD)
+	}
+	return filepath.Clean(filepath.Join(baseCWD, logicalCWD))
+}
+
+func resolveOutsideProjectPath(rawPath, baseCWD string) string {
+	candidate := strings.TrimSpace(rawPath)
+	if candidate == "" {
+		return ""
+	}
+	if filepath.IsAbs(candidate) {
+		return filepath.Clean(candidate)
+	}
+	if baseCWD != "" && filepath.IsAbs(baseCWD) {
+		return filepath.Clean(filepath.Join(baseCWD, candidate))
+	}
+	return candidate
+}
+
+func policyCommandArgvs(cmds []shellPolicyCommand) [][]string {
+	argvs := make([][]string, len(cmds))
+	for i, cmd := range cmds {
+		argvs[i] = cmd.Argv
+	}
+	return argvs
 }
 
 func commandReadsSandboxSystemPaths(operation string) bool {
@@ -855,7 +926,7 @@ func commandExecutableAllowedForAuto(executable, cwd string, projectDirs []strin
 	}
 	roots := normalizeProjectDirs(projectDirs)
 	if len(roots) > 0 {
-		_, resolvedCWD, _, err := resolveProjectPath(roots, cwd, true, false)
+		_, resolvedCWD, _, err := resolveProjectPath(roots, cwd, true, true)
 		if err == nil && commandPathInsideProject(executable, resolvedCWD, roots) {
 			return true
 		}

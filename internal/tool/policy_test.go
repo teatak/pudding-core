@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"testing"
 )
 
@@ -563,5 +564,131 @@ func TestClassifyToolCallBackgroundCommandUsesSameRiskRules(t *testing.T) {
 func TestClassifyToolCallRejectsLegacyCommandScope(t *testing.T) {
 	if risk, ok := ClassifyToolCall(CommandRun, json.RawMessage(`{"scope":"workspace","command":"go test ./..."}`)); ok {
 		t.Fatalf("legacy command scope must be rejected: %+v", risk)
+	}
+}
+
+func TestClassifyCommandTracksLogicalCWDAndNormalizesOutsidePaths(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX project sandbox; Windows host approval is tested separately")
+	}
+
+	parent := t.TempDir()
+	root := filepath.Join(parent, "proj")
+	webDir := filepath.Join(root, "web")
+	scriptsDir := filepath.Join(root, "scripts")
+	outsideSub := filepath.Join(parent, "outside", "sub")
+	for _, dir := range []string{webDir, scriptsDir, outsideSub} {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	outsideLink := filepath.Join(root, "link_to_outside")
+	if err := os.Symlink(outsideSub, outsideLink); err != nil {
+		t.Fatal(err)
+	}
+	canonicalOutsideSub, err := filepath.EvalSymlinks(outsideSub)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, test := range []struct {
+		name           string
+		command        string
+		wantLowRisk    bool
+		wantCustomEnv  bool
+	}{
+		{
+			name:        "relative cd with sibling script",
+			command:     "cd web && node ../scripts/web-build.cjs --typecheck",
+			wantLowRisk: true,
+		},
+		{
+			name:        "sh -c tracks cd across &&",
+			command:     "sh -c 'cd web && node --test test/a.test.ts && node ../scripts/web-build.cjs --typecheck'",
+			wantLowRisk: true,
+		},
+		{
+			name:          "sh -c cd plus homebrew PATH assignment",
+			command:       `sh -c 'cd web && PATH="/opt/homebrew/bin:$PATH" node --test test/a.test.ts && node ../scripts/web-build.cjs --typecheck'`,
+			wantLowRisk:   false,
+			wantCustomEnv: true,
+		},
+		{
+			name:        "mkdir missing dir then cd and sibling script",
+			command:     "mkdir -p missing_web && cd missing_web && node ../scripts/web-build.cjs",
+			wantLowRisk: true,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			raw, _ := json.Marshal(map[string]any{"scope": "project", "command": test.command})
+			risk, ok := ClassifyToolCallForProject(CommandRun, raw, []string{root})
+			if !ok || risk.LowRisk != test.wantLowRisk || len(risk.requiredProjectPaths) != 0 {
+				t.Fatalf("unexpected classification for %q: %+v ok=%v", test.command, risk, ok)
+			}
+			if test.wantCustomEnv && !slices.Contains(risk.ApprovalReasons, "custom_environment") {
+				t.Fatalf("expected custom_environment approval reason: %+v", risk.ApprovalReasons)
+			}
+			if failure, failed := CommandBoundaryFailure(Call{Name: CommandRun, ProjectDirs: []string{root}, Args: raw}, risk); failed {
+				t.Fatalf("unexpected boundary failure: %s", failure.Content)
+			}
+		})
+	}
+
+	wantResolvedSymlinkTarget := filepath.Join(filepath.Dir(canonicalOutsideSub), "inside")
+	for _, test := range []struct {
+		name        string
+		command     string
+		wantContain string
+	}{
+		{name: "double parent from subdir", command: "cd web && node ../../outside.js"},
+		{name: "parent from root", command: "cat ../outside.txt"},
+		{name: "cd outside then relative file", command: "cd ../outside && cat file.txt"},
+		{name: "subshell cd does not leak", command: "(cd web && node ../scripts/web-build.cjs) && cat ../outside.txt"},
+		{name: "or-branch cd does not leak", command: "cd web || cat ../outside.txt"},
+		{name: "cd symlink resolves outside base", command: "cd link_to_outside && cat ../inside", wantContain: wantResolvedSymlinkTarget},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			raw, _ := json.Marshal(map[string]any{"scope": "project", "command": test.command})
+			risk, ok := ClassifyToolCallForProject(CommandRun, raw, []string{root})
+			if !ok || risk.LowRisk || len(risk.requiredProjectPaths) == 0 {
+				t.Fatalf("expected outside failure for %q: %+v ok=%v", test.command, risk, ok)
+			}
+			for _, p := range risk.requiredProjectPaths {
+				if !filepath.IsAbs(p) {
+					t.Fatalf("requiredProjectPaths must be absolute for %q, got %+v", test.command, risk.requiredProjectPaths)
+				}
+			}
+			if test.wantContain != "" && !slices.Contains(risk.requiredProjectPaths, test.wantContain) {
+				t.Fatalf("expected %q in requiredProjectPaths, got %+v", test.wantContain, risk.requiredProjectPaths)
+			}
+			failure, failed := CommandBoundaryFailure(Call{Name: CommandRun, ProjectDirs: []string{root}, Args: raw}, risk)
+			if !failed {
+				t.Fatalf("expected boundary failure for %q", test.command)
+			}
+			var payload struct {
+				Reason      string   `json:"reason"`
+				ProjectDirs []string `json:"projectDirs"`
+			}
+			if err := json.Unmarshal([]byte(failure.Content), &payload); err != nil {
+				t.Fatal(err)
+			}
+			if payload.Reason != "additional_project_access_required" || len(payload.ProjectDirs) == 0 {
+				t.Fatalf("expected non-empty projectDirs in boundary failure, got %s", failure.Content)
+			}
+		})
+	}
+
+	managedHome := filepath.Join(parent, "managed")
+	if err := os.MkdirAll(managedHome, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	managedRaw, _ := json.Marshal(map[string]any{"scope": "project", "command": "cat ../managed/secret"})
+	plan, _, err := PrepareCommandProjectAccess(
+		Call{Name: CommandRun, ProjectDirs: []string{root}, Args: managedRaw},
+		ToolRisk{requiredProjectPaths: []string{"../managed/secret"}},
+		managedHome,
+	)
+	if err != nil || plan != nil {
+		t.Fatalf("relative path into managedHome must not be promoted: plan=%+v err=%v", plan, err)
 	}
 }

@@ -101,6 +101,25 @@ func main() {
 			for _, part := range p.Prompt {
 				text += part.Text
 			}
+			if text == "steering-start" {
+				pending = m.ID
+				notify(sessionID, map[string]any{"sessionUpdate": "tool_call", "toolCallId": "steering-command", "name": "run_command", "status": "in_progress"})
+				notify(sessionID, map[string]any{"sessionUpdate": "agent_message_chunk", "content": map[string]string{"type": "text", "text": "STEERING_READY"}})
+				continue
+			}
+			if pending != nil && strings.HasPrefix(text, "steer-") {
+				// agy completes the previous RPC as soon as a running prompt is
+				// steered, before the existing command and new response finish.
+				reply(pending, map[string]any{"stopReason": "end_turn", "usage": map[string]int{"inputTokens": 10, "outputTokens": 2}})
+				pending = m.ID
+				notify(sessionID, map[string]any{"sessionUpdate": "agent_message_chunk", "content": map[string]string{"type": "text", "text": "ACCEPTED_" + text}})
+				if text == "steer-finish" {
+					notify(sessionID, map[string]any{"sessionUpdate": "tool_call_update", "toolCallId": "steering-command", "status": "completed"})
+					reply(pending, map[string]any{"stopReason": "end_turn", "usage": map[string]int{"inputTokens": 7, "outputTokens": 3}})
+					pending = nil
+				}
+				continue
+			}
 			if strings.Contains(text, "permission-test") || strings.HasSuffix(text, "host-permission-tools") || strings.HasSuffix(text, "host-permission-call") {
 				pending = m.ID
 				name := "pudding_fake_native"

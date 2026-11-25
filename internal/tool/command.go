@@ -16,7 +16,7 @@ import (
 
 const (
 	commandDefaultTimeout   = 10 * time.Minute
-	commandDefaultYield     = 10 * time.Second
+	commandDefaultYield     = 30 * time.Second
 	commandMaxTimeout       = 10 * time.Minute
 	commandMinTimeout       = 100 * time.Millisecond
 	commandOutputLimitBytes = 64 << 10

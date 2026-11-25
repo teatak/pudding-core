@@ -17,9 +17,11 @@ import (
 // A secret authorizes one owned ACP connection, never the daemon's general API.
 // Its active turn is replaced only after the previous prompt and tools finish.
 type localAgentHost struct {
-	sessionID string
-	name      string
-	turn      *LocalHostTurn // protected by Engine.localMu
+	sessionID        string
+	name             string
+	turn             *LocalHostTurn // protected by Engine.localMu
+	projectRulesSent bool           // protected by Engine.localMu
+	lastProjectRules string         // protected by Engine.localMu
 }
 type LocalHostTurn struct {
 	SessionID string
@@ -34,7 +36,7 @@ type LocalHostTurn struct {
 
 // Resolve live instructions before the model runs, so refreshing them does not
 // require a catalog round trip. Tool discovery and schemas remain on demand.
-func (e *Engine) localHostPrompt(ctx context.Context, sessionID, turnID, hostName string) (string, error) {
+func (e *Engine) localHostPrompt(ctx context.Context, sessionID, turnID, secret, hostName string) (string, error) {
 	sess, err := e.store.GetSession(ctx, sessionID)
 	if err != nil {
 		return "", err
@@ -47,13 +49,34 @@ func (e *Engine) localHostPrompt(ctx context.Context, sessionID, turnID, hostNam
 	if err != nil {
 		return "", err
 	}
-	current, err := json.Marshal(map[string]any{
-		"mode": sess.ActiveMode, "projectInstructions": rules, "instructions": guides,
-	})
+	contextPayload := map[string]any{
+		"mode":         sess.ActiveMode,
+		"instructions": guides,
+	}
+	if e.SyncLocalHostProjectRules(secret, rules) {
+		contextPayload["projectInstructions"] = rules
+	}
+	current, err := json.Marshal(contextPayload)
 	if err != nil {
 		return "", err
 	}
-	return fmt.Sprintf("You are running inside Pudding. Use the %s MCP server for file, command, browser, widget and plugin operations so changes, approvals and results appear in this conversation. The current project rules and selected Skill/plugin instructions are supplied below; they replace earlier snapshots, including any old instruction to call pudding_tools at the start of every turn. Do not call tools for greetings or other requests that need no tools. Use pudding_tools only when you need to discover a tool, plugin or Skill, or lack a tool's exact inputSchema (including after context compaction). Reuse schemas already in context across calls and turns; query again if a tool is unavailable or its arguments are rejected. Call pudding_call directly when you already know the required schema. Pudding manages connection and Turn IDs; do not connect/begin/end manually. Read refreshed instructions in tool results. Use native tools only when Pudding cannot provide the needed operation, and explain that fallback. Other configured MCP servers may expose older Pudding tools requiring binding IDs; do not use them for this conversation.\n\nCurrent Pudding context:\n%s", hostName, current), nil
+	return fmt.Sprintf("You are running inside Pudding. Use the %s MCP server for file, command, browser, widget and plugin operations so changes, approvals and results appear in this conversation. Current projectInstructions are supplied initially and whenever they change (omitted when unchanged); selected Skill/plugin instructions are supplied below and replace earlier snapshots, including any old instruction to call pudding_tools at the start of every turn. Do not call tools for greetings or other requests that need no tools. Use pudding_tools only when you need to discover a tool, plugin or Skill, or lack a tool's exact inputSchema; call pudding_tools with no query after context compaction to recover the catalog and latest rules. Reuse schemas already in context across calls and turns; query again if a tool is unavailable or its arguments are rejected. Call pudding_call directly when you already know the required schema. Pudding manages connection and Turn IDs; do not connect/begin/end manually. Read refreshed instructions in tool results. Use native tools only when Pudding cannot provide the needed operation, and explain that fallback. Other configured MCP servers may expose older Pudding tools requiring binding IDs; do not use them for this conversation.\n\nCurrent Pudding context:\n%s", hostName, current), nil
+}
+
+// SyncLocalHostProjectRules 记录本地宿主连接已下发的最新项目规则，并返回内容是否发生变化。
+func (e *Engine) SyncLocalHostProjectRules(secret, rules string) bool {
+	e.localMu.Lock()
+	defer e.localMu.Unlock()
+	host := e.localHosts[secret]
+	if host == nil {
+		return true
+	}
+	if host.projectRulesSent && host.lastProjectRules == rules {
+		return false
+	}
+	host.projectRulesSent = true
+	host.lastProjectRules = rules
+	return true
 }
 
 func (e *Engine) SetLocalHostEndpoint(endpoint string) { e.localHostEndpoint = endpoint }

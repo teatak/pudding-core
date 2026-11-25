@@ -316,20 +316,33 @@ func TestBuiltinFileSearchReportsIncompleteCoverage(t *testing.T) {
 	}
 	options := TextFileSearchOptions{Query: "needle", CaseSensitive: true}
 	result, err := SearchTextFiles(context.Background(), root, options)
-	if err != nil || result.Complete || result.ResultsCapped || len(result.Matches) != 0 || result.Skipped["file_too_large"] != 1 {
+	if err != nil || result.Complete || result.ResultsCapped || len(result.Matches) != 0 || result.Skipped["file_too_large"] != 1 || !reflect.DeepEqual(result.SkippedFiles["file_too_large"], []string{large}) {
 		t.Fatalf("missing omission metadata: %+v %v", result, err)
 	}
 	result, err = SearchTextFiles(context.Background(), large, options)
-	if err != nil || !result.Complete || len(result.Matches) != 1 {
+	if err != nil || !result.Complete || len(result.Matches) != 1 || len(result.SkippedFiles) != 0 {
 		t.Fatalf("explicit search failed: %+v %v", result, err)
 	}
 	if err := os.Symlink(large, filepath.Join(root, "linked.go")); err != nil {
 		t.Fatal(err)
 	}
 	result, err = SearchTextFiles(context.Background(), root, options)
-	if err != nil || result.Skipped["symlink"] != 1 {
+	if err != nil || result.Skipped["symlink"] != 1 || !reflect.DeepEqual(result.SkippedFiles["symlink"], []string{filepath.Join(root, "linked.go")}) {
 		t.Fatalf("symlink omission missing: %+v %v", result, err)
 	}
+	t.Run("sample capped at five per reason", func(t *testing.T) {
+		cappedRoot := t.TempDir()
+		for i := range 7 {
+			p := filepath.Join(cappedRoot, fmt.Sprintf("large_%d.go", i))
+			if err := os.WriteFile(p, []byte(content), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+		cappedResult, err := SearchTextFiles(context.Background(), cappedRoot, options)
+		if err != nil || cappedResult.Complete || cappedResult.Skipped["file_too_large"] != 7 || len(cappedResult.SkippedFiles["file_too_large"]) != maxFileSearchSkippedSampleFiles {
+			t.Fatalf("unexpected capped skippedFiles: %+v %v", cappedResult, err)
+		}
+	})
 	file, err := os.OpenFile(large, os.O_WRONLY, 0)
 	if err != nil {
 		t.Fatal(err)
@@ -352,14 +365,14 @@ func TestBuiltinFileSearchReportsReadErrors(t *testing.T) {
 		t.Fatal(err)
 	}
 	result, err := SearchTextFiles(context.Background(), root, TextFileSearchOptions{Query: "needle"})
-	if err != nil || result.Complete || result.Skipped["read_error"] != 1 {
+	if err != nil || result.Complete || result.Skipped["read_error"] != 1 || !reflect.DeepEqual(result.SkippedFiles["read_error"], []string{path}) {
 		t.Fatalf("read error hidden: %+v %v", result, err)
 	}
 	if err := os.Remove(path); err != nil {
 		t.Fatal(err)
 	}
 	result, err = SearchTextFiles(context.Background(), root, TextFileSearchOptions{Query: "needle"})
-	if err != nil || !result.Complete || len(result.Skipped) != 0 {
+	if err != nil || !result.Complete || len(result.Skipped) != 0 || len(result.SkippedFiles) != 0 {
 		t.Fatalf("empty search not complete: %+v %v", result, err)
 	}
 }
@@ -1345,5 +1358,59 @@ func TestBuiltinTextReadersRejectImageWithMediaHint(t *testing.T) {
 		if payload["reason"] != "unsupported_media" || payload["recommendedTool"] != MediaRead {
 			t.Fatalf("%s should recommend media_read: %+v", name, payload)
 		}
+	}
+}
+
+func TestBuiltinFileSearchPayloadIncludesSkippedFiles(t *testing.T) {
+	home := t.TempDir()
+	proj := t.TempDir()
+	runner := NewBuiltinRunner(WithHomeDir(home))
+	defer runner.Close()
+
+	writePatchTestFile(t, filepath.Join(proj, "ok.txt"), "needle\n")
+	cleanRes := runner.Call(context.Background(), Call{
+		Name:        FileSearch,
+		ProjectDirs: []string{proj},
+		Args:        resultJSON(map[string]any{"scope": "project", "path": ".", "query": "needle"}),
+	})
+	cleanPayload := decodeToolResult(t, cleanRes)
+	if !cleanRes.Ok || cleanPayload["complete"] != true {
+		t.Fatalf("clean search failed: %s", cleanRes.Content)
+	}
+	if _, exists := cleanPayload["skippedFiles"]; exists {
+		t.Fatalf("clean search must omit skippedFiles: %+v", cleanPayload)
+	}
+
+	largeContent := strings.Repeat("// padding\n", maxFileSearchBytes/10+1)
+	writePatchTestFile(t, filepath.Join(proj, "large.txt"), largeContent)
+	projRes := runner.Call(context.Background(), Call{
+		Name:        FileSearch,
+		ProjectDirs: []string{proj},
+		Args:        resultJSON(map[string]any{"scope": "project", "path": ".", "query": "needle"}),
+	})
+	projPayload := decodeToolResult(t, projRes)
+	if !projRes.Ok || projPayload["complete"] != false {
+		t.Fatalf("project search unexpected result: %s", projRes.Content)
+	}
+	projSkipped, _ := projPayload["skippedFiles"].(map[string]any)
+	projLarge, _ := projSkipped["file_too_large"].([]any)
+	wantProjLarge := filepath.Join(projPayload["root"].(string), "large.txt")
+	if !reflect.DeepEqual(projLarge, []any{wantProjLarge}) {
+		t.Fatalf("expected project skippedFiles %q, got %+v", wantProjLarge, projPayload["skippedFiles"])
+	}
+
+	writePatchTestFile(t, filepath.Join(home, "temp", "sub", "large.txt"), largeContent)
+	tempRes := runner.Call(context.Background(), Call{
+		Name: FileSearch,
+		Args: resultJSON(map[string]any{"scope": "temp", "path": ".", "query": "needle"}),
+	})
+	tempPayload := decodeToolResult(t, tempRes)
+	if !tempRes.Ok || tempPayload["complete"] != false {
+		t.Fatalf("temp search unexpected result: %s", tempRes.Content)
+	}
+	tempSkipped, _ := tempPayload["skippedFiles"].(map[string]any)
+	tempLarge, _ := tempSkipped["file_too_large"].([]any)
+	if !reflect.DeepEqual(tempLarge, []any{"sub/large.txt"}) {
+		t.Fatalf("expected relative temp skippedFiles [sub/large.txt], got %+v", tempPayload["skippedFiles"])
 	}
 }

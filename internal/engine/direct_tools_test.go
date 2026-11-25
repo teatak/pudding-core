@@ -68,7 +68,9 @@ func TestDirectToolCallUsesCanonicalTurn(t *testing.T) {
 	if err != nil || !tool.HasDefinition(defs, tool.TimeGetCurrent) {
 		t.Fatalf("core tool not listed: %+v, %v", defs, err)
 	}
-	result, err := eng.CallTool(ctx, session.ID, store.ModeCode, tool.TimeGetCurrent, json.RawMessage(`{}`))
+	events, unsubscribe := eng.hub.Subscribe(session.ID)
+	defer unsubscribe()
+	result, err := eng.CallTool(ctx, session.ID, store.ModeCode, tool.TimeGetCurrent, json.RawMessage(`{"timezone":"UTC"}`))
 	if err != nil || !result.Ok || called.Mode != store.ModeCode || called.CallID == "" {
 		t.Fatalf("direct call failed: %+v, %v", result, err)
 	}
@@ -88,6 +90,19 @@ func TestDirectToolCallUsesCanonicalTurn(t *testing.T) {
 	}
 	if !use || !output || eng.running[session.ID] != nil {
 		t.Fatal("tool history or normal turn cleanup missing")
+	}
+	unsubscribe()
+	sawInput := false
+	for ev := range events {
+		if ev.Kind == event.TurnTool && ev.CallID == called.CallID && ev.Phase == "running" {
+			sawInput = true
+			if ev.ArgsText != string(called.Args) {
+				t.Fatalf("live tool input differs from execution: %q, want %s", ev.ArgsText, called.Args)
+			}
+		}
+	}
+	if !sawInput {
+		t.Fatal("missing live tool execution")
 	}
 }
 

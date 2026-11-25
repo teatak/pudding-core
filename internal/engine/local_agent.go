@@ -495,7 +495,7 @@ func (e *Engine) streamLocalTurn(ctx context.Context, id, turnID string, resolve
 	}
 	prompt = append(history, prompt...)
 	if r.hostSecret != "" {
-		hostPrompt, err := e.localHostPrompt(ctx, id, turnID, r.hostName)
+		hostPrompt, err := e.localHostPrompt(ctx, id, turnID, r.hostSecret, r.hostName)
 		if err != nil {
 			return failed(err)
 		}
@@ -519,91 +519,130 @@ func (e *Engine) streamLocalTurn(ctx context.Context, id, turnID string, resolve
 	defer stop()
 	hostTurn := &LocalHostTurn{SessionID: id, TurnID: turnID, Context: promptCtx, mu: &outputMu, active: active, parts: parts}
 	e.startLocalHost(r.hostSecret, hostTurn)
-	result, err := r.client.Prompt(promptCtx, r.state.AgentSessionID, prompt, acp.Handlers{Update: func(update acp.Update) {
-		outputMu.Lock()
-		defer outputMu.Unlock()
-		if outputErr != nil {
-			return
-		}
-		switch update.SessionUpdate {
-		case "agent_message_chunk", "agent_thought_chunk":
-			var content acp.Content
-			if json.Unmarshal(update.Content, &content) != nil || content.Type != "text" {
-				return
+	result, err := r.client.Prompt(promptCtx, r.state.AgentSessionID, prompt, acp.Handlers{
+		Ready: func() {
+			active.mu.Lock()
+			defer active.mu.Unlock()
+			if promptCtx.Err() == nil {
+				active.acceptingSteers = true
+				active.checkLocalSteer = r.client.CheckSteer
 			}
-			part := provider.PartText
-			if update.SessionUpdate == "agent_thought_chunk" {
-				part = provider.PartThought
+		},
+		Steering: active.steerNotify,
+		NextPrompt: func(seal bool) ([]acp.Content, error) {
+			outputMu.Lock()
+			defer outputMu.Unlock()
+			var steers []pendingSteer
+			if seal {
+				steers = active.consumeSteersOrSeal()
+			} else {
+				steers = active.consumeSteers()
 			}
-			parts.AppendDelta(part, content.Text)
-			outputErr = e.commitTurnParts(turnID, parts, false)
+			if len(steers) == 0 {
+				return nil, nil
+			}
+			if err := e.commitTurnParts(turnID, parts, true); err != nil {
+				return nil, err
+			}
+			if err := e.applyTurnSteers(turnID, steers); err != nil {
+				return nil, err
+			}
+			var input []store.ContentPart
+			for _, steer := range steers {
+				var message []store.ContentPart
+				if err := json.Unmarshal(steer.event.Parts, &message); err != nil {
+					return nil, err
+				}
+				input = append(input, message...)
+			}
+			return e.localPrompt(id, input, "", r.state)
+		},
+		Update: func(update acp.Update) {
+			outputMu.Lock()
+			defer outputMu.Unlock()
 			if outputErr != nil {
-				stop()
 				return
 			}
-			e.hub.Publish(event.Event{SessionID: id, TurnID: turnID, Kind: event.TurnDelta, Part: string(part), Delta: content.Text})
-		case "usage_update":
-			r.state.ContextUsed = update.Used
-			r.state.ContextSize = update.Size
-		case "tool_call", "tool_call_update":
-			if update.ToolCallID == "" {
-				return
-			}
-			call, exists := calls[update.ToolCallID]
-			if !exists {
-				name := update.Name
-				if name == "" {
-					name = update.Title
+			switch update.SessionUpdate {
+			case "agent_message_chunk", "agent_thought_chunk":
+				var content acp.Content
+				if json.Unmarshal(update.Content, &content) != nil || content.Type != "text" {
+					return
 				}
-				if name == "" {
-					name = update.Kind
+				part := provider.PartText
+				if update.SessionUpdate == "agent_thought_chunk" {
+					part = provider.PartThought
 				}
-				args, ok := acpToolRawInput(update.RawInput)
-				if !ok {
-					args = json.RawMessage(`{}`)
-				}
-				call = tool.Call{CallID: "acp:" + update.ToolCallID, Name: "antigravity." + name, Args: args}
-				calls[update.ToolCallID] = call
-				callOrder = append(callOrder, update.ToolCallID)
-				parts.AppendTool(provider.ToolCallChunk{Index: len(parts.parts), CallID: call.CallID, Name: call.Name, ArgsDelta: string(call.Args)})
-				if outputErr = e.commitTurnParts(turnID, parts, true); outputErr != nil {
+				parts.AppendDelta(part, content.Text)
+				outputErr = e.commitTurnParts(turnID, parts, false)
+				if outputErr != nil {
 					stop()
 					return
 				}
-				e.hub.Publish(event.Event{SessionID: id, TurnID: turnID, Kind: event.TurnTool, CallID: call.CallID, Name: call.Name, Phase: "running", ArgsText: string(call.Args)})
-			} else if !finished[call.CallID] {
-				if args, ok := acpToolRawInput(update.RawInput); ok {
-					changed := !bytes.Equal(call.Args, args)
-					call.Args = args
+				e.hub.Publish(event.Event{SessionID: id, TurnID: turnID, Kind: event.TurnDelta, Part: string(part), Delta: content.Text})
+			case "usage_update":
+				r.state.ContextUsed = update.Used
+				r.state.ContextSize = update.Size
+			case "tool_call", "tool_call_update":
+				if update.ToolCallID == "" {
+					return
+				}
+				call, exists := calls[update.ToolCallID]
+				if !exists {
+					name := update.Name
+					if name == "" {
+						name = update.Title
+					}
+					if name == "" {
+						name = update.Kind
+					}
+					args, ok := acpToolRawInput(update.RawInput)
+					if !ok {
+						args = json.RawMessage(`{}`)
+					}
+					call = tool.Call{CallID: "acp:" + update.ToolCallID, Name: "antigravity." + name, Args: args}
 					calls[update.ToolCallID] = call
-					if changed {
-						parts.ReplaceToolArguments(call.CallID, args)
-						if outputErr = e.store.UpdateTurnToolArguments(context.Background(), turnID, call.CallID, args); outputErr != nil {
-							stop()
-							return
+					callOrder = append(callOrder, update.ToolCallID)
+					parts.AppendTool(provider.ToolCallChunk{Index: len(parts.parts), CallID: call.CallID, Name: call.Name, ArgsDelta: string(call.Args)})
+					if outputErr = e.commitTurnParts(turnID, parts, true); outputErr != nil {
+						stop()
+						return
+					}
+					e.hub.Publish(event.Event{SessionID: id, TurnID: turnID, Kind: event.TurnTool, CallID: call.CallID, Name: call.Name, Phase: "running", ArgsText: string(call.Args)})
+				} else if !finished[call.CallID] {
+					if args, ok := acpToolRawInput(update.RawInput); ok {
+						changed := !bytes.Equal(call.Args, args)
+						call.Args = args
+						calls[update.ToolCallID] = call
+						if changed {
+							parts.ReplaceToolArguments(call.CallID, args)
+							if outputErr = e.store.UpdateTurnToolArguments(context.Background(), turnID, call.CallID, args); outputErr != nil {
+								stop()
+								return
+							}
+							e.hub.Publish(event.Event{SessionID: id, TurnID: turnID, Kind: event.TurnTool, CallID: call.CallID, Name: call.Name, Phase: "running", ArgsText: string(call.Args)})
 						}
-						e.hub.Publish(event.Event{SessionID: id, TurnID: turnID, Kind: event.TurnTool, CallID: call.CallID, Name: call.Name, Phase: "running", ArgsText: string(call.Args)})
 					}
 				}
-			}
-			if !finished[call.CallID] && (update.Status == "completed" || update.Status == "failed") {
-				raw, _ := json.Marshal(update)
-				toolResult := tool.Result{CallID: call.CallID, Name: call.Name, Ok: update.Status == "completed", Content: string(raw)}
-				// agy reports in-flight tools as failed in response to session/cancel.
-				// Preserve the raw update, but distinguish this from an earlier failure.
-				if update.Status == "failed" && ctx.Err() != nil {
-					toolResult.SummaryKind = tool.SummaryCancelled
+				if !finished[call.CallID] && (update.Status == "completed" || update.Status == "failed") {
+					raw, _ := json.Marshal(update)
+					toolResult := tool.Result{CallID: call.CallID, Name: call.Name, Ok: update.Status == "completed", Content: string(raw)}
+					// agy reports in-flight tools as failed in response to session/cancel.
+					// Preserve the raw update, but distinguish this from an earlier failure.
+					if update.Status == "failed" && ctx.Err() != nil {
+						toolResult.SummaryKind = tool.SummaryCancelled
+					}
+					outputErr = completeACPTool(call, toolResult)
+					if outputErr != nil {
+						stop()
+					}
 				}
-				outputErr = completeACPTool(call, toolResult)
-				if outputErr != nil {
-					stop()
-				}
-			}
 
-		}
-	}, Permission: func(permissionCtx context.Context, p acp.Permission) acp.Outcome {
-		return e.requestLocalPermission(permissionCtx, id, turnID, r.hostSecret, p)
-	}})
+			}
+		}, Permission: func(permissionCtx context.Context, p acp.Permission) acp.Outcome {
+			return e.requestLocalPermission(permissionCtx, id, turnID, r.hostSecret, p)
+		}})
+	active.stopAcceptingSteers()
 	stop()
 	e.finishLocalHost(r.hostSecret, hostTurn)
 	if !r.client.Alive() {
@@ -636,7 +675,7 @@ func (e *Engine) streamLocalTurn(ctx context.Context, id, turnID string, resolve
 	}
 	if result.Usage != nil {
 		u := result.Usage
-		e.recordUsage(context.Background(), id, resolved.providerName, resolved.model, 0, provider.UsageInfo{InputUncachedTokens: u.Input, InputCachedTokens: u.CachedRead, CacheCreationTokens: u.CachedWrite, OutputContentTokens: u.Output, OutputReasoningTokens: u.Thought}, 1)
+		e.recordUsage(context.Background(), id, resolved.providerName, resolved.model, 0, provider.UsageInfo{InputUncachedTokens: u.Input, InputCachedTokens: u.CachedRead, CacheCreationTokens: u.CachedWrite, OutputContentTokens: u.Output, OutputReasoningTokens: u.Thought}, result.Requests)
 	}
 	if outputErr != nil {
 		return failed(fmt.Errorf("save ACP output: %w", outputErr))

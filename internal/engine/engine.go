@@ -148,6 +148,8 @@ type activeTurn struct {
 	mu              sync.Mutex
 	acceptingSteers bool
 	pendingSteers   []pendingSteer
+	steerNotify     chan struct{}
+	checkLocalSteer func() error
 }
 
 type pendingSteer struct {
@@ -156,7 +158,14 @@ type pendingSteer struct {
 }
 
 func newActiveTurn(turnID string, cancel context.CancelFunc) *activeTurn {
-	return &activeTurn{turnID: turnID, cancel: cancel, done: make(chan struct{}), acceptingSteers: true}
+	return &activeTurn{turnID: turnID, cancel: cancel, done: make(chan struct{}), acceptingSteers: true, steerNotify: make(chan struct{}, 1)}
+}
+
+func (t *activeTurn) notifySteer() {
+	select {
+	case t.steerNotify <- struct{}{}:
+	default:
+	}
 }
 
 func (t *activeTurn) consumeSteers() []pendingSteer {
@@ -1191,11 +1200,20 @@ func (e *Engine) Steer(ctx context.Context, in SteerInput) (*SteerResult, error)
 	if active == nil || active.turnID != in.TurnID {
 		return nil, ErrTurnNotActive
 	}
+	if active.localAgent && !IsDesktopRequest(ctx) {
+		return nil, ErrLocalAgentDesktop
+	}
 
 	active.mu.Lock()
 	if !active.acceptingSteers {
 		active.mu.Unlock()
 		return nil, ErrTurnNotActive
+	}
+	if active.checkLocalSteer != nil {
+		if err := active.checkLocalSteer(); err != nil {
+			active.mu.Unlock()
+			return nil, err
+		}
 	}
 	res, err := e.store.AppendTurnSteer(ctx, store.AppendTurnSteerInput{
 		SessionID:       in.SessionID,
@@ -1218,6 +1236,7 @@ func (e *Engine) Steer(ctx context.Context, in SteerInput) (*SteerResult, error)
 			messageID: res.UserMessage.ID,
 			event:     res.Event,
 		})
+		active.notifySteer()
 	}
 	active.mu.Unlock()
 
@@ -1241,11 +1260,20 @@ func (e *Engine) SteerQueuedInput(ctx context.Context, sessionID, turnID, client
 	if active == nil || active.turnID != turnID {
 		return nil, ErrTurnNotActive
 	}
+	if active.localAgent && !IsDesktopRequest(ctx) {
+		return nil, ErrLocalAgentDesktop
+	}
 
 	active.mu.Lock()
 	if !active.acceptingSteers {
 		active.mu.Unlock()
 		return nil, ErrTurnNotActive
+	}
+	if active.checkLocalSteer != nil {
+		if err := active.checkLocalSteer(); err != nil {
+			active.mu.Unlock()
+			return nil, err
+		}
 	}
 	res, err := e.store.SteerQueuedInput(ctx, store.SteerQueuedInputInput{
 		SessionID:       sessionID,
@@ -1266,6 +1294,7 @@ func (e *Engine) SteerQueuedInput(ctx context.Context, sessionID, turnID, client
 			messageID: res.UserMessage.ID,
 			event:     res.SteeredEvent,
 		})
+		active.notifySteer()
 	}
 	active.mu.Unlock()
 
@@ -1444,8 +1473,6 @@ func (e *Engine) TryDrainQueued(sessionID string) {
 	}
 	if acp.IsProvider(res.Input.Provider) {
 		resolved := &resolvedModel{providerName: res.Input.Provider, model: res.Input.Model, mode: res.Input.Mode, protocol: "acp", config: cfg, configJSON: res.Input.ModelConfig}
-		active.localAgent = true
-		active.stopAcceptingSteers()
 		e.wg.Add(1)
 		go e.runTurn(turnCtx, sessionID, res.Turn.ID, resolved, nil, active)
 		return
@@ -3602,6 +3629,10 @@ func (e *Engine) promoteQueuedForRun(sessionID string) (*store.PromoteQueuedInpu
 	runtimeID := e.takeQueuedRuntimeLocked(sessionID, res.Input.ClientMessageID)
 	turnCtx, cancel := context.WithCancel(plugin.WithRuntimeID(context.Background(), runtimeID))
 	active := newActiveTurn(res.Turn.ID, cancel)
+	if acp.IsProvider(res.Input.Provider) {
+		active.localAgent = true
+		active.stopAcceptingSteers()
+	}
 	e.running[sessionID] = active
 	e.mu.Unlock()
 	return res, active, turnCtx

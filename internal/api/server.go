@@ -1119,6 +1119,9 @@ func (s *Server) steerTurn(c *cart.Context) error {
 		c.JSON(http.StatusConflict, map[string]string{"error": "turn_not_active"})
 		return nil
 	case err != nil:
+		if isLocalAgentFailure(err) {
+			return localAgentFailure(c, err)
+		}
 		return s.fail(c, err)
 	}
 	if res.Duplicate {
@@ -1242,6 +1245,9 @@ func (s *Server) steerQueuedInput(c *cart.Context) error {
 		c.JSON(http.StatusConflict, map[string]string{"error": "queued_input_editing"})
 		return nil
 	case err != nil:
+		if isLocalAgentFailure(err) {
+			return localAgentFailure(c, err)
+		}
 		return s.fail(c, err)
 	}
 	if res.Duplicate {

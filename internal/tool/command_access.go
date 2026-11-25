@@ -32,7 +32,11 @@ func PrepareCommandProjectAccess(call Call, risk ToolRisk, managedHome string) (
 			return nil, call, err
 		}
 		for _, path := range risk.requiredProjectPaths {
-			resolved, err := resolveExistingParent(path)
+			target := path
+			if !filepath.IsAbs(target) {
+				target = filepath.Join(cwd, target)
+			}
+			resolved, err := resolveExistingParent(target)
 			if err != nil {
 				return nil, call, err
 			}

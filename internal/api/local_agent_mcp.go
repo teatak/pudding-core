@@ -12,7 +12,7 @@ import (
 )
 
 var localHostTools = []debugMCPTool{
-	{Name: "pudding_tools", Description: "Discover tools, plugins and Skills on demand. Set query to a tool name or search text to get matching inputSchemas; omit query for the catalog and live instructions. Reuse schemas already in context. No per-turn refresh is required: Pudding supplies current project and selected Skill/plugin instructions with each prompt and refreshes them in tool results.", InputSchema: json.RawMessage(`{"type":"object","properties":{"query":{"type":"string"}},"additionalProperties":false}`)},
+	{Name: "pudding_tools", Description: "Discover tools, plugins and Skills on demand. Set query or queries (up to 16) to tool names or search text to get matching inputSchemas; omit both for the catalog and latest instructions. Reuse schemas already in context. No per-turn refresh is required: Pudding supplies projectInstructions initially and when changed, skipping unchanged repeats.", InputSchema: json.RawMessage(`{"type":"object","properties":{"query":{"type":"string"},"queries":{"type":"array","items":{"type":"string"},"maxItems":16}},"additionalProperties":false}`)},
 	{Name: "pudding_call", Description: "Execute a Pudding tool in the current conversation and user turn. Use the exact tool name and arguments from pudding_tools. No bindingID or turnID is needed. All operations inherit the conversation's permissions. Read updated projectInstructions and instructions in results.", InputSchema: json.RawMessage(`{"type":"object","properties":{"tool":{"type":"string"},"arguments":{"type":"object"}},"required":["tool","arguments"],"additionalProperties":false}`)},
 }
 
@@ -78,21 +78,25 @@ func (s *Server) localHostCall(ctx context.Context, secret, name string, args js
 		return nil, errors.New(`arguments must be an object. Example: pudding_tools({"query":"builtin_file_read"}) or pudding_call({"tool":"builtin_file_read","arguments":{"path":"README.md"}})`)
 	}
 	var (
-		query    string
+		queries  []string
 		toolName string
 		toolArgs json.RawMessage
 	)
 	switch name {
 	case "pudding_tools":
 		var in struct {
-			Query string `json:"query"`
+			Query   string   `json:"query"`
+			Queries []string `json:"queries"`
 		}
 		decode := json.NewDecoder(bytes.NewReader(args))
 		decode.DisallowUnknownFields()
 		if err := decode.Decode(&in); err != nil {
-			return nil, fmt.Errorf("invalid arguments for pudding_tools: %w. Allowed properties: query (optional string). Example: pudding_tools({\"query\":\"builtin_file_read\"})", err)
+			return nil, fmt.Errorf("invalid arguments for pudding_tools: %w. Allowed properties: query (optional string), queries (optional array of strings). Example: pudding_tools({\"query\":\"builtin_file_read\"})", err)
 		}
-		query = in.Query
+		if len(in.Queries) > maxAgentCatalogQueries {
+			return nil, fmt.Errorf("invalid arguments for pudding_tools: queries accepts at most %d items", maxAgentCatalogQueries)
+		}
+		queries = normalizeCatalogQueries(in.Query, in.Queries)
 	case "pudding_call":
 		var in struct {
 			Tool      string          `json:"tool"`
@@ -125,9 +129,15 @@ func (s *Server) localHostCall(ctx context.Context, secret, name string, args js
 		return nil, err
 	}
 	if name == "pudding_tools" {
-		catalog, err := s.sessionToolCatalog(callCtx, sess, turn.TurnID, s.engine.LocalHostMode(turn, sess.ActiveMode), query, false)
+		catalog, err := s.sessionToolCatalog(callCtx, sess, turn.TurnID, s.engine.LocalHostMode(turn, sess.ActiveMode), queries, false)
 		if err != nil {
 			return nil, err
+		}
+		if rules, ok := catalog["projectInstructions"].(string); ok {
+			changed := s.engine.SyncLocalHostProjectRules(secret, rules)
+			if len(queries) > 0 && !changed {
+				delete(catalog, "projectInstructions")
+			}
 		}
 		// Lifecycle identifiers belong to the host, not model arguments.
 		delete(catalog, "activeTurnID")
@@ -156,8 +166,18 @@ func (s *Server) localHostCall(ctx context.Context, secret, name string, args js
 	if err = json.Unmarshal(raw, &out); err != nil {
 		return nil, err
 	}
+	if out.ProjectInstructions != nil && !s.engine.SyncLocalHostProjectRules(secret, *out.ProjectInstructions) {
+		out.ProjectInstructions = nil
+	}
 	if len(out.Instructions) > 0 || out.ProjectInstructions != nil {
-		instructions, _ := json.Marshal(map[string]any{"instructions": out.Instructions, "projectInstructions": out.ProjectInstructions})
+		payload := map[string]any{}
+		if len(out.Instructions) > 0 {
+			payload["instructions"] = out.Instructions
+		}
+		if out.ProjectInstructions != nil {
+			payload["projectInstructions"] = out.ProjectInstructions
+		}
+		instructions, _ := json.Marshal(payload)
 		out.Content = append(out.Content, map[string]any{"type": "text", "text": string(instructions)})
 	}
 	return out.debugMCPResult, nil

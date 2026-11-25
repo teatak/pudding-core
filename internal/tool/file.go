@@ -50,9 +50,10 @@ const (
 	defaultFileSearchMax          = 100
 	maxFileSearchMax              = 500
 	maxFileSearchContextLines     = 5
-	maxFileSearchGlobs            = 32
-	maxFileSearchGlobChars        = 256
-	maxFileSearchFiles            = 20000
+	maxFileSearchGlobs              = 32
+	maxFileSearchGlobChars          = 256
+	maxFileSearchFiles              = 20000
+	maxFileSearchSkippedSampleFiles = 5
 )
 
 type resolvedFilePath struct {
@@ -324,12 +325,7 @@ func (r *BuiltinRunner) fileSearch(ctx context.Context, call Call) Result {
 	}
 	items := make([]map[string]any, 0, len(result.Matches))
 	for _, match := range result.Matches {
-		path := match.Path
-		if !resolved.project {
-			if rel, err := filepath.Rel(resolved.root, match.Path); err == nil {
-				path = filepath.ToSlash(rel)
-			}
-		}
+		path := formatSearchResultPath(resolved.root, resolved.project, match.Path)
 		if args.Scope == managedScopeWidget && !widgetVisiblePath(path, false) {
 			continue
 		}
@@ -363,6 +359,9 @@ func (r *BuiltinRunner) fileSearch(ctx context.Context, call Call) Result {
 		"outputMode":     result.OutputMode,
 		"includeIgnored": result.IncludeIgnored,
 	})
+	if skippedFiles := visibleSearchSkippedFiles(args.Scope, resolved.root, resolved.project, result.SkippedFiles); len(skippedFiles) > 0 {
+		payload["skippedFiles"] = skippedFiles
+	}
 	if result.OutputMode == "files" {
 		files := make([]string, 0, len(items))
 		for _, item := range items {
@@ -375,6 +374,39 @@ func (r *BuiltinRunner) fileSearch(ctx context.Context, call Call) Result {
 	out.Content = jsonString(payload)
 	out.SummaryKind = SummaryReturnedItems
 	out.SummaryCount = len(items)
+	return out
+}
+
+func formatSearchResultPath(root string, project bool, filePath string) string {
+	if !project {
+		if rel, err := filepath.Rel(root, filePath); err == nil {
+			return filepath.ToSlash(rel)
+		}
+	}
+	return filePath
+}
+
+func visibleSearchSkippedFiles(scope, root string, project bool, raw map[string][]string) map[string][]string {
+	if len(raw) == 0 {
+		return nil
+	}
+	out := make(map[string][]string, len(raw))
+	for reason, paths := range raw {
+		visible := make([]string, 0, len(paths))
+		for _, skippedPath := range paths {
+			displayPath := formatSearchResultPath(root, project, skippedPath)
+			if scope == managedScopeWidget && !widgetVisiblePath(displayPath, false) {
+				continue
+			}
+			visible = append(visible, displayPath)
+		}
+		if len(visible) > 0 {
+			out[reason] = visible
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
 	return out
 }
 
@@ -1192,9 +1224,18 @@ type fileSearchOptions struct {
 	contextLines   int
 	skipHidden     bool
 	skipped        map[string]int
+	skippedFiles   map[string][]string
 	filesOnly      bool
 	includeIgnored bool
 	page           *filePage
+}
+
+func (o fileSearchOptions) recordSkipped(reason, filePath string) {
+	o.skipped[reason]++
+	if o.skippedFiles == nil || filePath == "" || len(o.skippedFiles[reason]) >= maxFileSearchSkippedSampleFiles {
+		return
+	}
+	o.skippedFiles[reason] = append(o.skippedFiles[reason], filePath)
 }
 
 // TextFileSearchOptions configures the shared UTF-8 content search used by
@@ -1236,6 +1277,7 @@ type TextFileSearchResult struct {
 	ResultsCapped  bool
 	Complete       bool
 	Skipped        map[string]int
+	SkippedFiles   map[string][]string
 	OutputMode     string
 	IncludeIgnored bool
 	NextCursor     string
@@ -1435,6 +1477,7 @@ func SearchTextFiles(ctx context.Context, root string, options TextFileSearchOpt
 		return TextFileSearchResult{}, err
 	}
 	skipped := make(map[string]int)
+	skippedFiles := make(map[string][]string)
 	matches, filesScanned, capped, err := searchTextFiles(ctx, root, fileSearchOptions{
 		baseRoot:       baseRoot,
 		matcher:        matcher,
@@ -1443,6 +1486,7 @@ func SearchTextFiles(ctx context.Context, root string, options TextFileSearchOpt
 		contextLines:   options.ContextLines,
 		skipHidden:     options.SkipHidden,
 		skipped:        skipped,
+		skippedFiles:   skippedFiles,
 		filesOnly:      options.OutputMode == "files",
 		includeIgnored: options.IncludeIgnored,
 		page:           page,
@@ -1462,6 +1506,7 @@ func SearchTextFiles(ctx context.Context, root string, options TextFileSearchOpt
 		ResultsCapped:  capped,
 		Complete:       !capped && len(skipped) == 0,
 		Skipped:        skipped,
+		SkippedFiles:   skippedFiles,
 		OutputMode:     options.OutputMode,
 		IncludeIgnored: options.IncludeIgnored,
 	}
@@ -1471,19 +1516,39 @@ func SearchTextFiles(ctx context.Context, root string, options TextFileSearchOpt
 	for _, match := range matches {
 		// Keep the caller's path representation (e.g. /var vs /private/var),
 		// while traversal and ignore matching use the canonical root.
-		if root != requestedRoot {
-			rel, err := filepath.Rel(root, match.path)
-			if err != nil {
-				return TextFileSearchResult{}, err
-			}
-			match.path = filepath.Join(requestedRoot, rel)
+		rebased, err := rebaseSearchResultPath(root, requestedRoot, match.path)
+		if err != nil {
+			return TextFileSearchResult{}, err
 		}
+		match.path = rebased
 		result.Matches = append(result.Matches, TextFileSearchMatch{
 			Path: match.path, Line: match.line, LineStart: match.lineStart, LineEnd: match.lineEnd,
 			Text: match.text, Excerpt: match.excerpt, Truncated: match.truncated,
 		})
 	}
+	if root != requestedRoot {
+		for _, paths := range result.SkippedFiles {
+			for i, skippedPath := range paths {
+				rebased, err := rebaseSearchResultPath(root, requestedRoot, skippedPath)
+				if err != nil {
+					return TextFileSearchResult{}, err
+				}
+				paths[i] = rebased
+			}
+		}
+	}
 	return result, nil
+}
+
+func rebaseSearchResultPath(root, requestedRoot, filePath string) (string, error) {
+	if root == requestedRoot {
+		return filePath, nil
+	}
+	rel, err := filepath.Rel(root, filePath)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(requestedRoot, rel), nil
 }
 
 func searchTextFiles(ctx context.Context, root string, options fileSearchOptions, maxResults int) ([]fileSearchMatch, int, bool, error) {
@@ -1531,7 +1596,7 @@ func searchTextFiles(ctx context.Context, root string, options fileSearchOptions
 			if path == root {
 				return walkErr
 			}
-			options.skipped["read_error"]++
+			options.recordSkipped("read_error", path)
 			return nil
 		}
 		if path == root {
@@ -1569,11 +1634,11 @@ func searchTextFiles(ctx context.Context, root string, options fileSearchOptions
 		}
 		info, err := entry.Info()
 		if err != nil {
-			options.skipped["read_error"]++
+			options.recordSkipped("read_error", path)
 			return nil
 		}
 		if info.Mode()&os.ModeSymlink != 0 {
-			options.skipped["symlink"]++
+			options.recordSkipped("symlink", path)
 			return nil
 		}
 		if !info.Mode().IsRegular() {
@@ -1583,7 +1648,7 @@ func searchTextFiles(ctx context.Context, root string, options fileSearchOptions
 			return nil
 		}
 		if info.Size() > maxFileSearchBytes {
-			options.skipped["file_too_large"]++
+			options.recordSkipped("file_too_large", path)
 			return nil
 		}
 		fileMatches, scanned, err := searchTextFile(ctx, path, options, maxResults+1-len(matches))
@@ -1592,7 +1657,7 @@ func searchTextFiles(ctx context.Context, root string, options fileSearchOptions
 			if ctx.Err() != nil {
 				return ctx.Err()
 			}
-			options.skipped["read_error"]++
+			options.recordSkipped("read_error", path)
 			return nil
 		}
 		matches = append(matches, fileMatches...)

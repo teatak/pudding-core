@@ -913,3 +913,168 @@ func TestLocalAgentToolCallUpdateRawInput(t *testing.T) {
 		t.Fatalf("late failure moved the tool or lost its outcome: order=%v failures=%d status=%s", order, failedResults, lateTurn.Status)
 	}
 }
+
+// Preserve one Pudding turn while agy completes each superseded prompt RPC.
+// Exercise the observed wire order, direct/queued input, usage and cancellation.
+func TestLocalAgentSteering(t *testing.T) {
+	binary := filepath.Join(t.TempDir(), "agy")
+	if runtime.GOOS == "windows" {
+		binary += ".exe"
+	}
+	if output, err := exec.Command("go", "build", "-o", binary, "./testdata/acp").CombinedOutput(); err != nil {
+		t.Fatalf("build: %v %s", err, output)
+	}
+	for _, scenario := range []string{"finish", "cancel", "permission"} {
+		t.Run(scenario, func(t *testing.T) {
+			ctx := WithRequestSource(context.Background(), "desktop")
+			ms := storetest.New(t)
+			hub := event.NewHub()
+			e := New(ms, hub, registry.Static(mock.New()), ms, WithAttachmentHome(t.TempDir()))
+			e.localAgentPaths = []string{binary}
+			defer func() { e.Stop(); e.Wait() }()
+			if err := ms.CreateSession(ctx, &store.Session{ID: "steer", Provider: acp.Provider, Model: "flash"}); err != nil {
+				t.Fatal(err)
+			}
+			events, unsubscribe := hub.Subscribe("steer")
+			defer unsubscribe()
+			wait := func(kind event.Kind, text string) {
+				t.Helper()
+				timer := time.NewTimer(5 * time.Second)
+				defer timer.Stop()
+				for {
+					select {
+					case ev := <-events:
+						if ev.Kind == kind && (text == "" || ev.Delta == text) {
+							return
+						}
+					case <-timer.C:
+						t.Fatalf("missing %s %s", kind, text)
+					}
+				}
+			}
+			prompt := "steering-start"
+			if scenario == "permission" {
+				prompt = "permission-test"
+			}
+			first, err := e.Submit(ctx, SubmitInput{SessionID: "steer", ClientMessageID: "first", Text: prompt})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if scenario == "permission" {
+				wait(event.ApprovalRequested, "")
+			} else {
+				wait(event.TurnDelta, "STEERING_READY")
+			}
+			queued, err := e.Submit(ctx, SubmitInput{SessionID: "steer", ClientMessageID: "queued", Text: "steer-hold"})
+			if err != nil || !queued.Queued {
+				t.Fatalf("queue: %+v %v", queued, err)
+			}
+			// A remote caller cannot use either steer endpoint to drive this local agent.
+			remote := WithRequestSource(ctx, "remote")
+			if _, err := e.Steer(remote, SteerInput{SessionID: "steer", TurnID: first.TurnID, ClientMessageID: "remote", Text: "steer-finish"}); !errors.Is(err, ErrLocalAgentDesktop) {
+				t.Fatalf("remote steer: %v", err)
+			}
+			if _, err := e.SteerQueuedInput(remote, "steer", first.TurnID, "queued"); !errors.Is(err, ErrLocalAgentDesktop) {
+				t.Fatalf("remote queue steer: %v", err)
+			}
+			if scenario == "permission" {
+				if _, err := e.SteerQueuedInput(ctx, "steer", first.TurnID, "queued"); !errors.Is(err, acp.ErrSteerBlocked) {
+					t.Fatalf("pending permission: %v", err)
+				}
+				if _, err := e.Steer(ctx, SteerInput{SessionID: "steer", TurnID: first.TurnID, ClientMessageID: "direct", Text: "steer-finish"}); !errors.Is(err, acp.ErrSteerBlocked) {
+					t.Fatalf("pending permission direct: %v", err)
+				}
+				inputs, err := ms.ListQueuedInputs(ctx, "steer")
+				if err != nil || len(inputs) != 1 || inputs[0].Status != store.QueuedInputQueued {
+					t.Fatalf("lost queue: %+v %v", inputs, err)
+				}
+				turn, _ := ms.GetConversationTurn(ctx, "steer", first.TurnID)
+				for _, msg := range turn.Messages {
+					if msg.ClientMessageID == "queued" || msg.ClientMessageID == "direct" {
+						t.Fatal("rejected steer entered history")
+					}
+				}
+				// Keep the queued message from auto-running in this rejection-only case.
+				cancelledStatus := store.QueuedInputCancelled
+				if _, err := ms.UpdateQueuedInput(ctx, store.UpdateQueuedInputInput{SessionID: "steer", ClientMessageID: "queued", Status: &cancelledStatus}); err != nil {
+					t.Fatal(err)
+				}
+				if err := e.Cancel("steer"); err != nil {
+					t.Fatal(err)
+				}
+				e.Wait()
+				return
+			}
+			result, err := e.SteerQueuedInput(ctx, "steer", first.TurnID, "queued")
+			if err != nil || result.TurnID != first.TurnID {
+				t.Fatalf("queue steer: %+v %v", result, err)
+			}
+			wait(event.TurnDelta, "ACCEPTED_steer-hold")
+			turn, _ := ms.GetConversationTurn(ctx, "steer", first.TurnID)
+			if turn.Status != store.TurnRunning {
+				t.Fatalf("old RPC closed turn early: %s", turn.Status)
+			}
+			duplicate, err := e.SteerQueuedInput(ctx, "steer", first.TurnID, "queued")
+			if err != nil || !duplicate.Duplicate {
+				t.Fatalf("duplicate: %+v %v", duplicate, err)
+			}
+			if scenario == "cancel" {
+				if err := e.Cancel("steer"); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				result, err = e.Steer(ctx, SteerInput{SessionID: "steer", TurnID: first.TurnID, ClientMessageID: "last", Text: "steer-finish"})
+				if err != nil || result.TurnID != first.TurnID {
+					t.Fatalf("direct steer: %+v %v", result, err)
+				}
+			}
+			e.Wait()
+			turns, err := ms.ListTurnsPage(ctx, "steer", "", 10)
+			if err != nil || len(turns.Turns) != 1 {
+				t.Fatalf("extra turns: %+v %v", turns, err)
+			}
+			turn = turns.Turns[0]
+			want := store.TurnCompleted
+			if scenario == "cancel" {
+				want = store.TurnCancelled
+			}
+			if turn.Status != want {
+				t.Fatalf("status %s: %s", turn.Status, turn.Error)
+			}
+			inputs, _ := ms.ListQueuedInputs(ctx, "steer")
+			if len(inputs) != 0 {
+				t.Fatalf("queue not consumed: %+v", inputs)
+			}
+			users, toolUses, toolResults := 0, 0, 0
+			for _, m := range turn.Messages {
+				if m.Role == store.RoleUser {
+					users++
+				}
+				for _, p := range m.Parts {
+					if p.Type == store.ContentPartToolUse {
+						toolUses++
+					}
+					if p.Type == store.ContentPartToolResult {
+						toolResults++
+						if scenario == "finish" && !p.Ok {
+							t.Fatalf("tool prematurely failed: %+v", p)
+						}
+					}
+				}
+			}
+			wantUsers := 3
+			if scenario == "cancel" {
+				wantUsers = 2
+			}
+			if users != wantUsers || toolUses != 1 || toolResults != 1 {
+				t.Fatalf("duplicate/missing records: users=%d tools=%d results=%d", users, toolUses, toolResults)
+			}
+			if scenario == "finish" {
+				usage, _ := ms.SessionUsage(ctx, "steer")
+				if usage.LastInputUncachedTokens != 27 || usage.LastOutputContentTokens != 7 || usage.RequestCount != 3 {
+					t.Fatalf("lost usage: %+v", usage)
+				}
+			}
+		})
+	}
+}

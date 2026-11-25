@@ -79,6 +79,7 @@ type agentRequest struct {
 	TurnID        string           `json:"turnID"`
 	Tool          string           `json:"tool"`
 	Query         string           `json:"query"`
+	Queries       []string         `json:"queries"`
 	NamesOnly     bool             `json:"namesOnly"`
 	Arguments     json.RawMessage  `json:"arguments"`
 	Status        store.TurnStatus `json:"status"`
@@ -161,7 +162,10 @@ func (s *Server) agentCommand(c *cart.Context) error {
 	}
 	switch action {
 	case "tools":
-		catalog, err := s.agentCatalog(ctx, sess, b, in.Query, in.NamesOnly)
+		if len(in.Queries) > maxAgentCatalogQueries {
+			return badRequest(c, "queries accepts at most 16 items")
+		}
+		catalog, err := s.agentCatalog(ctx, sess, b, normalizeCatalogQueries(in.Query, in.Queries), in.NamesOnly)
 		if err != nil {
 			return s.failAgent(c, err)
 		}
@@ -306,20 +310,40 @@ func (s *Server) agentToolReply(ctx context.Context, sess *store.Session, turnID
 	}{out, guides, projectInstructions}, nil
 }
 
-func (s *Server) agentCatalog(ctx context.Context, sess *store.Session, b *store.ExternalAgentBinding, query string, namesOnly bool) (map[string]any, error) {
-	turnID, mode := s.engine.ExternalTurnContext(b, sess.ActiveMode)
-	return s.sessionToolCatalog(ctx, sess, turnID, mode, query, namesOnly)
+const maxAgentCatalogQueries = 16
+
+func normalizeCatalogQueries(query string, queries []string) []string {
+	out := make([]string, 0, 1+len(queries))
+	seen := map[string]bool{}
+	add := func(item string) {
+		q := strings.ToLower(strings.TrimSpace(item))
+		if q == "" || seen[q] {
+			return
+		}
+		seen[q] = true
+		out = append(out, q)
+	}
+	add(query)
+	for _, item := range queries {
+		add(item)
+	}
+	return out
 }
 
-func (s *Server) sessionToolCatalog(ctx context.Context, sess *store.Session, turnID string, mode store.AgentMode, query string, namesOnly bool) (map[string]any, error) {
+func (s *Server) agentCatalog(ctx context.Context, sess *store.Session, b *store.ExternalAgentBinding, queries []string, namesOnly bool) (map[string]any, error) {
+	turnID, mode := s.engine.ExternalTurnContext(b, sess.ActiveMode)
+	return s.sessionToolCatalog(ctx, sess, turnID, mode, queries, namesOnly)
+}
+
+func (s *Server) sessionToolCatalog(ctx context.Context, sess *store.Session, turnID string, mode store.AgentMode, queries []string, namesOnly bool) (map[string]any, error) {
 	sess.ActiveMode = mode
 	defs, err := s.engine.ToolDefinitions(ctx, sess.ID, mode)
 	if err != nil {
 		return nil, err
 	}
 	out := map[string]any{"session": sess.Title, "mode": mode, "activeTurnID": turnID}
-	q := strings.ToLower(strings.TrimSpace(query))
-	if q == "" || namesOnly {
+	hasQuery := len(queries) > 0
+	if !hasQuery || namesOnly {
 		names := make([]string, 0, len(defs))
 		for _, d := range defs {
 			names = append(names, d.Name)
@@ -331,39 +355,42 @@ func (s *Server) sessionToolCatalog(ctx context.Context, sess *store.Session, tu
 	}
 	matches := []debugMCPTool{}
 	plugins := []map[string]any{}
-	if q != "" {
-		if i := slices.IndexFunc(defs, func(d provider.ToolDef) bool { return strings.EqualFold(d.Name, q) }); i >= 0 {
-			defs = defs[i : i+1]
-		}
-	}
-	needsProjectRules := q == ""
-	terms := strings.Fields(q)
+	needsProjectRules := !hasQuery
 	var guideIDs []string
 	endpointKinds := map[string]bool{}
-	for _, d := range defs {
-		searchable := strings.ToLower(d.Name + " " + d.Description)
-		if q == "" || slices.ContainsFunc(terms, func(term string) bool { return !strings.Contains(searchable, term) }) {
-			continue
+	seenMatches := map[string]bool{}
+	for _, q := range queries {
+		candidates := defs
+		if i := slices.IndexFunc(defs, func(d provider.ToolDef) bool { return strings.EqualFold(d.Name, q) }); i >= 0 {
+			candidates = defs[i : i+1]
 		}
-		if len(matches) >= 30 {
-			continue
-		}
-		matches = append(matches, debugMCPTool{Name: d.Name, Description: d.Description, InputSchema: d.InputSchema})
-		if !needsProjectRules && mode == store.ModeCode && engine.IsExternalCodeTool(d) {
-			needsProjectRules = true
-		}
-		if kind := tool.PluginAPIEndpointKind(d.Name); kind != "" {
-			endpointKinds[kind] = true
-		}
-		id := d.PluginID
-		if id == "" {
-			id, _ = tool.BuiltinPluginIDForTool(d.Name)
-		}
-		if id != "" && !slices.Contains(guideIDs, id) {
-			guideIDs = append(guideIDs, id)
+		terms := strings.Fields(q)
+		for _, d := range candidates {
+			searchable := strings.ToLower(d.Name + " " + d.Description)
+			if slices.ContainsFunc(terms, func(term string) bool { return !strings.Contains(searchable, term) }) {
+				continue
+			}
+			if seenMatches[d.Name] || len(matches) >= 30 {
+				continue
+			}
+			seenMatches[d.Name] = true
+			matches = append(matches, debugMCPTool{Name: d.Name, Description: d.Description, InputSchema: d.InputSchema})
+			if !needsProjectRules && mode == store.ModeCode && engine.IsExternalCodeTool(d) {
+				needsProjectRules = true
+			}
+			if kind := tool.PluginAPIEndpointKind(d.Name); kind != "" {
+				endpointKinds[kind] = true
+			}
+			id := d.PluginID
+			if id == "" {
+				id, _ = tool.BuiltinPluginIDForTool(d.Name)
+			}
+			if id != "" && !slices.Contains(guideIDs, id) {
+				guideIDs = append(guideIDs, id)
+			}
 		}
 	}
-	if s.plugins != nil && (q == "" || len(endpointKinds) > 0) {
+	if s.plugins != nil && (!hasQuery || len(endpointKinds) > 0) {
 		list, err := s.plugins.ListDefinitions(ctx)
 		if err != nil {
 			return nil, err
@@ -373,7 +400,7 @@ func (s *Server) sessionToolCatalog(ctx context.Context, sess *store.Session, tu
 				continue
 			}
 			loaded := slices.Contains(sess.LoadedPluginIDs, p.ID)
-			if q == "" {
+			if !hasQuery {
 				plugins = append(plugins, map[string]any{"id": p.ID, "description": p.Description, "requiredMode": p.RequiredMode, "loaded": loaded})
 			}
 			if loaded && len(endpointKinds) > 0 && !slices.Contains(guideIDs, p.ID) {
@@ -386,22 +413,22 @@ func (s *Server) sessionToolCatalog(ctx context.Context, sess *store.Session, tu
 			}
 		}
 	}
-	if q != "" {
+	if hasQuery {
 		out["matches"] = matches
 	} else {
 		out["plugins"] = plugins
 	}
-	if q == "" && s.skills != nil {
+	if !hasQuery && s.skills != nil {
 		skills, err := s.skills.ListSkills(ctx)
 		if err != nil {
 			return nil, err
 		}
 		out["skills"] = skills
 	}
-	if q == "" {
+	if !hasQuery {
 		guideIDs = sess.LoadedPluginIDs
 	}
-	guides, err := s.engine.ExternalGuides(ctx, sess, guideIDs, nil, q == "")
+	guides, err := s.engine.ExternalGuides(ctx, sess, guideIDs, nil, !hasQuery)
 	if err != nil {
 		return nil, err
 	}

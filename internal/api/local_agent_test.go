@@ -289,17 +289,53 @@ func TestLocalAgentHostMCP(t *testing.T) {
 	if text := hostText("pudding_tools", map[string]any{}); !strings.Contains(text, "HOST_RULE_V1") || !strings.Contains(text, "host-refresh") {
 		t.Fatalf("initial rules or skill catalog missing: %s", text)
 	}
+	batchText := hostText("pudding_tools", map[string]any{"queries": []string{tool.FileRead, tool.FileSlice, tool.FileRead}})
+	var batchCatalog struct {
+		Matches             []debugMCPTool `json:"matches"`
+		ProjectInstructions *string        `json:"projectInstructions"`
+	}
+	if err := json.Unmarshal([]byte(batchText), &batchCatalog); err != nil {
+		t.Fatal(err)
+	}
+	if len(batchCatalog.Matches) != 2 || batchCatalog.ProjectInstructions != nil || strings.Contains(batchText, "HOST_RULE_V1") {
+		t.Fatalf("unexpected batch catalog or repeated rules: %s", batchText)
+	}
+	batchNames := map[string]bool{}
+	for _, match := range batchCatalog.Matches {
+		if len(match.InputSchema) == 0 {
+			t.Fatalf("batch match missing inputSchema: %+v", match)
+		}
+		batchNames[match.Name] = true
+	}
+	if !batchNames[tool.FileRead] || !batchNames[tool.FileSlice] {
+		t.Fatalf("batch queries missing expected tools: %+v", batchCatalog.Matches)
+	}
+	tooManyQueries := make([]string, 17)
+	for i := range tooManyQueries {
+		tooManyQueries[i] = tool.FileRead
+	}
+	if status, out := call(secret, "tools/call", map[string]any{"name": "pudding_tools", "arguments": map[string]any{"queries": tooManyQueries}}); status != 200 || out["result"].(map[string]any)["isError"] != true {
+		t.Fatalf("expected >16 queries rejected: %d %+v", status, out)
+	} else if content, _ := json.Marshal(out["result"].(map[string]any)["content"]); !strings.Contains(string(content), "16") {
+		t.Fatalf("expected max queries error detail: %s", content)
+	}
 	if text := business(tool.SkillRead, map[string]string{"skill_id": "host-refresh"}); strings.Count(text, "HOST_SKILL_V1") != 1 {
 		t.Fatalf("skill body must be delivered once: %s", text)
 	}
 	writeGuides("V2")
+	if text := business(tool.FileList, map[string]string{"scope": "project", "path": "."}); strings.Contains(text, "HOST_RULE_V1") || strings.Contains(text, "HOST_SKILL_V1") || !strings.Contains(text, "HOST_RULE_V2") || strings.Count(text, "HOST_SKILL_V2") != 1 {
+		t.Fatalf("refreshed instructions missing or stale: %s", text)
+	}
 	for _, text := range []string{
-		hostText("pudding_tools", map[string]any{}),
 		business(tool.FileList, map[string]string{"scope": "project", "path": "."}),
+		hostText("pudding_tools", map[string]any{"query": tool.FileRead}),
 	} {
-		if strings.Contains(text, "HOST_RULE_V1") || strings.Contains(text, "HOST_SKILL_V1") || !strings.Contains(text, "HOST_RULE_V2") || strings.Count(text, "HOST_SKILL_V2") != 1 {
-			t.Fatalf("refreshed instructions missing or stale: %s", text)
+		if strings.Contains(text, "HOST_RULE_V2") || strings.Contains(text, "projectInstructions") {
+			t.Fatalf("unchanged projectInstructions repeated: %s", text)
 		}
+	}
+	if text := hostText("pudding_tools", map[string]any{}); strings.Contains(text, "HOST_RULE_V1") || strings.Contains(text, "HOST_SKILL_V1") || !strings.Contains(text, "HOST_RULE_V2") || strings.Count(text, "HOST_SKILL_V2") != 1 {
+		t.Fatalf("unfiltered catalog must keep returning latest rules: %s", text)
 	}
 	query := map[string]string{"query": tool.SkillValidate}
 	if text := hostText("pudding_tools", query); strings.Contains(text, `"name":"builtin_skill_validate"`) {

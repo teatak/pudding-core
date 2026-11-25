@@ -3,6 +3,7 @@ package api
 import (
 	"errors"
 	"github.com/teatak/cart/v3"
+	"github.com/teatak/pudding-core/internal/acp"
 	"github.com/teatak/pudding-core/internal/engine"
 	"net/http"
 )
@@ -18,7 +19,7 @@ func (s *Server) localAgentCatalog(c *cart.Context) error {
 
 func isLocalAgentFailure(err error) bool {
 	var handoff *engine.LocalAgentHandoffRequired
-	return errors.Is(err, engine.ErrLocalAgent) || errors.Is(err, engine.ErrLocalAgentDesktop) || errors.As(err, &handoff)
+	return errors.Is(err, engine.ErrLocalAgent) || errors.Is(err, engine.ErrLocalAgentDesktop) || errors.Is(err, acp.ErrSteerBlocked) || errors.As(err, &handoff)
 }
 func localAgentFailure(c *cart.Context, err error) error {
 	var handoff *engine.LocalAgentHandoffRequired
@@ -29,6 +30,9 @@ func localAgentFailure(c *cart.Context, err error) error {
 	code, status := "local_agent_unavailable", http.StatusBadRequest
 	if errors.Is(err, engine.ErrLocalAgentDesktop) {
 		code, status = "local_agent_desktop_required", http.StatusForbidden
+	}
+	if errors.Is(err, acp.ErrSteerBlocked) {
+		code, status = "local_agent_steer_blocked", http.StatusConflict
 	}
 	c.JSON(status, map[string]string{"error": code, "detail": err.Error()})
 	return nil

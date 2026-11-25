@@ -706,6 +706,29 @@ endpoints:
 	if initial["content"] != initialGuide {
 		t.Fatalf("missing plugin guide in REST tool discovery: %v", discovered)
 	}
+	batch := post("/agent-mcp/tools", credential, map[string]any{
+		"queries": []string{tool.RESTRequest, tool.GraphQLRequest, tool.RESTRequest},
+	}, 200)
+	matches, _ := batch["matches"].([]any)
+	if len(matches) != 2 {
+		t.Fatalf("expected 2 deduplicated matches for batch queries, got %v", batch)
+	}
+	var matchNames []string
+	for _, item := range matches {
+		if entry, ok := item.(map[string]any); ok {
+			if name, ok := entry["name"].(string); ok {
+				matchNames = append(matchNames, name)
+			}
+		}
+	}
+	if !slices.Contains(matchNames, tool.RESTRequest) || !slices.Contains(matchNames, tool.GraphQLRequest) {
+		t.Fatalf("unexpected batch match names: %v", matchNames)
+	}
+	tooMany := make([]string, 17)
+	for i := range tooMany {
+		tooMany[i] = tool.RESTRequest
+	}
+	_ = post("/agent-mcp/tools", credential, map[string]any{"queries": tooMany}, 400)
 	turn := post("/agent-mcp/begin", credential, map[string]string{"task": "Read the latest notes"}, 200)["turnID"]
 	for _, step := range []struct {
 		name, guide string
