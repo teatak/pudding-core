@@ -337,10 +337,12 @@ func (s *Server) sessionToolCatalog(ctx context.Context, sess *store.Session, tu
 		}
 	}
 	needsProjectRules := q == ""
+	terms := strings.Fields(q)
 	var guideIDs []string
 	endpointKinds := map[string]bool{}
 	for _, d := range defs {
-		if q == "" || !strings.Contains(strings.ToLower(d.Name+" "+d.Description), q) {
+		searchable := strings.ToLower(d.Name + " " + d.Description)
+		if q == "" || slices.ContainsFunc(terms, func(term string) bool { return !strings.Contains(searchable, term) }) {
 			continue
 		}
 		if len(matches) >= 30 {

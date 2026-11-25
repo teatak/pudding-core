@@ -465,11 +465,10 @@ func (e *Engine) Submit(ctx context.Context, in SubmitInput) (*SubmitResult, err
 	resolved.mode = initialMode(sess)
 	var client provider.Client
 	if acp.IsProvider(resolved.providerName) {
-		unlock, out, err := e.preflightLocal(ctx, &in, sess, resolved)
+		out, err := e.preflightLocal(ctx, &in, sess, resolved)
 		if err != nil || out != nil {
 			return out, err
 		}
-		defer unlock()
 	} else {
 		if err := resolved.applyReasoningEffort(activeReasoningEffort(in.ReasoningEffort, sess, resolved)); err != nil {
 			return nil, err
@@ -3183,6 +3182,13 @@ func (a *turnPartAccumulator) AppendTool(chunk provider.ToolCallChunk) (string, 
 		builder.WriteString(chunk.ArgsDelta)
 	}
 	return part.CallID, part.Name, chunk.ArgsDelta
+}
+
+// ReplaceToolArguments applies a full snapshot for an already registered ACP call.
+func (a *turnPartAccumulator) ReplaceToolArguments(callID string, args json.RawMessage) {
+	builder := a.toolArgs["id:"+callID]
+	builder.Reset()
+	builder.Write(args)
 }
 
 func (a *turnPartAccumulator) toolKey(chunk provider.ToolCallChunk) string {

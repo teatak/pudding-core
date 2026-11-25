@@ -57,6 +57,7 @@ const (
 	SummaryReadChars      = "read_chars"
 	SummaryReadFiles      = "read_files"
 	SummaryChangedLines   = "changed_lines"
+	SummaryCancelled      = "cancelled"
 )
 
 type Runner interface {

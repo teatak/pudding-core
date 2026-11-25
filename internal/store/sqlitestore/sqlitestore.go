@@ -1590,6 +1590,31 @@ func (s *Store) AppendTurnOutput(ctx context.Context, in store.AppendTurnOutputI
 	return out, err
 }
 
+func (s *Store) UpdateTurnToolArguments(ctx context.Context, turnID, callID string, args json.RawMessage) error {
+	return s.tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		turn, err := getTurnTx(ctx, tx, turnID)
+		if err != nil {
+			return err
+		}
+		if turn.Status != store.TurnRunning {
+			return store.ErrNotFound
+		}
+		// AssistantOutputSegments persists each tool use as its own message.
+		var id, raw string
+		if err := tx.QueryRowContext(ctx, `SELECT id,parts FROM messages WHERE turn_id=? AND kind=? AND json_extract(parts,'$[0].id')=?`,
+			turnID, store.MessageKindToolUse, callID).Scan(&id, &raw); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return store.ErrNotFound
+			}
+			return err
+		}
+		parts := decodeParts(raw)
+		parts[0].Args = append(json.RawMessage(nil), args...)
+		_, err = tx.ExecContext(ctx, `UPDATE messages SET parts=? WHERE id=?`, encodeParts(parts), id)
+		return err
+	})
+}
+
 func (s *Store) AppendTurnSteer(ctx context.Context, in store.AppendTurnSteerInput) (*store.AppendTurnSteerResult, error) {
 	var out *store.AppendTurnSteerResult
 	err := s.tx(ctx, func(ctx context.Context, tx *sql.Tx) error {

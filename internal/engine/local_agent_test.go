@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"github.com/teatak/pudding-core/internal/acp"
+	"github.com/teatak/pudding-core/internal/attachment"
 	"github.com/teatak/pudding-core/internal/event"
 	"github.com/teatak/pudding-core/internal/provider/mock"
 	"github.com/teatak/pudding-core/internal/provider/registry"
@@ -19,6 +20,69 @@ import (
 	"testing"
 	"time"
 )
+
+func TestLocalAgentAttachmentInputs(t *testing.T) {
+	home := t.TempDir()
+	e := &Engine{attachmentHome: home}
+	t.Run("directory and project references", func(t *testing.T) {
+		folder := store.LocalFolder{ID: "folder", Name: "Shared", Path: filepath.Join(home, "shared folder"), Origin: "picker"}
+		reference := store.ProjectReference{ID: "ref", Name: "main.go", Path: "main.go", SourcePath: filepath.Join(home, "main.go"), RootID: "root", Kind: "file", StartLine: 3, StartColumn: 1, EndLine: 5, EndColumn: 4}
+		blocks, err := e.localPrompt("acp", []store.ContentPart{store.LocalFolderPart(folder), store.ProjectReferencePart(reference)}, "", &store.LocalAgentState{})
+		if err != nil || len(blocks) != 2 {
+			t.Fatalf("reference inputs: %+v %v", blocks, err)
+		}
+		_, folders, _ := strings.Cut(blocks[0].Text, "\n")
+		folders, _, _ = strings.Cut(folders, "\n")
+		_, references, _ := strings.Cut(blocks[1].Text, "\n")
+		references, _, _ = strings.Cut(references, "\n")
+		var folderData struct{ Folders []store.LocalFolder }
+		var referenceData struct{ References []store.ProjectReference }
+		if json.Unmarshal([]byte(folders), &folderData) != nil || len(folderData.Folders) != 1 || folderData.Folders[0] != folder {
+			t.Fatalf("directory identity or path lost: %s", blocks[0].Text)
+		}
+		if json.Unmarshal([]byte(references), &referenceData) != nil || len(referenceData.References) != 1 || referenceData.References[0] != reference {
+			t.Fatalf("project reference identity, path or selection lost: %s", blocks[1].Text)
+		}
+	})
+	for _, tc := range []struct {
+		name, mime, data, wantType string
+		capabilities               store.LocalAgentState
+	}{
+		{"report.pdf", "application/pdf", "%PDF-1.4\nPDF fixture", "text", store.LocalAgentState{EmbeddedContext: true}},
+		{"recording.wav", "audio/wav", "RIFF fixture", "text", store.LocalAgentState{}},
+		{"image.png", "image/png", "image fixture", "text", store.LocalAgentState{}},
+		{"inline.png", "image/png", "image fixture", "image", store.LocalAgentState{Image: true}},
+		{"notes.txt", "text/plain", "attachment text", "resource", store.LocalAgentState{EmbeddedContext: true}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			file, err := attachment.NewService(home).StoreReader("acp", tc.name, tc.mime, strings.NewReader(tc.data))
+			if err != nil {
+				t.Fatal(err)
+			}
+			part := store.AttachmentPart(file)
+			blocks, err := e.localPrompt("acp", []store.ContentPart{part}, "", &tc.capabilities)
+			if err != nil || len(blocks) != 1 || blocks[0].Type != tc.wantType {
+				t.Fatalf("attachment input: %+v, %v", blocks, err)
+			}
+			if tc.wantType == "text" {
+				for _, want := range []string{file.Name, file.MIME, file.AttachmentKey, "builtin_attachment_export", "scope=temp"} {
+					if !strings.Contains(blocks[0].Text, want) {
+						t.Fatalf("missing usable attachment reference %q: %s", want, blocks[0].Text)
+					}
+				}
+				if strings.Contains(blocks[0].Text, tc.data) || strings.Contains(blocks[0].Text, home) {
+					t.Fatalf("fallback exposed binary content or private storage path: %s", blocks[0].Text)
+				}
+			}
+			if err := attachment.NewService(home).Delete("acp", file.AttachmentKey); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := e.localPrompt("acp", []store.ContentPart{part}, "", &tc.capabilities); err == nil {
+				t.Fatal("missing attachment must still fail instead of sending an unusable reference")
+			}
+		})
+	}
+}
 
 func TestLocalAgentConversation(t *testing.T) {
 	name := "agy"
@@ -69,6 +133,20 @@ func TestLocalAgentConversation(t *testing.T) {
 		if !strings.Contains(text.String(), contains) {
 			t.Fatalf("missing %q: %s", contains, text.String())
 		}
+	}
+	assistantText := func(id string) string {
+		t.Helper()
+		turn, err := ms.GetConversationTurn(ctx, "acp", id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var text strings.Builder
+		for _, m := range turn.Messages {
+			if m.Role == store.RoleAssistant {
+				text.WriteString(store.TextFromParts(m.Parts))
+			}
+		}
+		return text.String()
 	}
 	first := submit("first", "hello")
 	e.Wait()
@@ -121,6 +199,45 @@ func TestLocalAgentConversation(t *testing.T) {
 	if _, err = e.GenerateCommitMessage(ctx, "acp", "diff", "en"); !errors.Is(err, ErrNoModel) {
 		t.Fatalf("auxiliary model: %v", err)
 	}
+	// A visible widget/browser accompanies ordinary follow-up messages. Keep
+	// the structured canonical context and send its neutral text to ACP.
+	for _, ui := range []store.ContentPart{
+		{Type: store.ContentPartUIContext, Surface: "studio", Resource: "studio_item", CallID: "widget_todo", Name: "Todo", ResourceKind: "widget"},
+		{Type: store.ContentPartUIContext, Surface: "browser", Resource: "browser_tab", CallID: "tab_1", URL: "https://example.com/", SelectionText: "selected browser text", ResourceKind: "webview"},
+	} {
+		out, err := e.Submit(ctx, SubmitInput{SessionID: "acp", ClientMessageID: "ui-" + ui.Surface,
+			Parts: []store.ContentPart{{Type: store.ContentPartText, Text: "continue with the visible item"}, ui}})
+		if err != nil {
+			t.Fatalf("%s UI context rejected: %v", ui.Surface, err)
+		}
+		e.Wait()
+		turn, err := ms.GetConversationTurn(ctx, "acp", out.TurnID)
+		if err != nil || turn.Status != store.TurnCompleted {
+			t.Fatalf("UI context turn: %+v, %v", turn, err)
+		}
+		var response strings.Builder
+		saved := false
+		for _, message := range turn.Messages {
+			if message.Role == store.RoleAssistant {
+				response.WriteString(store.TextFromParts(message.Parts))
+			}
+			if message.Role == store.RoleUser {
+				for _, part := range message.Parts {
+					if part.Type == store.ContentPartUIContext && part.CallID == ui.CallID && part.Surface == ui.Surface && part.SelectionText == ui.SelectionText {
+						saved = true
+					}
+				}
+			}
+		}
+		_, payload, found := strings.Cut(response.String(), "<ui-context>")
+		payload, _, closed := strings.Cut(payload, "</ui-context>")
+		var got map[string]string
+		if !saved || !found || !closed || json.Unmarshal([]byte(payload), &got) != nil ||
+			got["surface"] != ui.Surface || got["resource"] != ui.Resource || got["id"] != ui.CallID ||
+			got["kind"] != ui.ResourceKind || got["name"] != ui.Name || got["url"] != ui.URL || got["selectionText"] != ui.SelectionText {
+			t.Fatalf("UI context lost between Submit, ACP prompt and history: saved=%v response=%q", saved, response.String())
+		}
+	}
 	// Deduplication precedes CLI preparation, even when the old binary disappears.
 	e.closeLocalAgents("acp")
 	e.localAgentPaths = []string{"/does/not/exist"}
@@ -128,13 +245,12 @@ func TestLocalAgentConversation(t *testing.T) {
 	if !duplicate.Duplicate || duplicate.TurnID != first.TurnID {
 		t.Fatalf("duplicate: %+v", duplicate)
 	}
-	_, err = e.Submit(ctx, SubmitInput{SessionID: "acp", ClientMessageID: "unaccepted", Text: "hello"})
-	if !errors.Is(err, ErrLocalAgent) {
-		t.Fatalf("startup failure: %v", err)
-	}
-	turn, queued, err := ms.LookupSubmission(ctx, "acp", "unaccepted")
-	if err != nil || turn != nil || queued != nil {
-		t.Fatal("preparation failure accepted input")
+	failedStart := submit("failed-start", "Remember STARTUP_HISTORY_481")
+	e.Wait()
+	checkTurn(failedStart.TurnID, store.TurnFailed, "STARTUP_HISTORY_481")
+	turn, queued, err := ms.LookupSubmission(ctx, "acp", "failed-start")
+	if err != nil || turn == nil || turn.ID != failedStart.TurnID || queued != nil {
+		t.Fatal("preparation failure lost the accepted input")
 	}
 	e.localAgentPaths = []string{binary}
 	// Resume/load replays must not enter Pudding history; configuration is reapplied.
@@ -146,7 +262,15 @@ func TestLocalAgentConversation(t *testing.T) {
 	e = makeEngine()
 	second := submit("second", "again")
 	e.Wait()
-	checkTurn(second.TurnID, store.TurnCompleted, "flash/low: again")
+	checkTurn(second.TurnID, store.TurnCompleted, "again")
+	if text := assistantText(second.TurnID); !strings.Contains(text, "STARTUP_HISTORY_481") || !strings.HasSuffix(text, "again") {
+		t.Fatalf("new message did not receive failed startup history: %s", text)
+	}
+	third := submit("third", "only the new request")
+	e.Wait()
+	if text := assistantText(third.TurnID); strings.Contains(text, "STARTUP_HISTORY_481") || !strings.Contains(text, "flash/low: only the new request") {
+		t.Fatalf("acknowledged history sent again: %s", text)
+	}
 	state, _ = ms.GetLocalAgentState(ctx, "acp")
 	if state.AgentSessionID != originalID {
 		t.Fatal("restored a different agent session")
@@ -173,8 +297,17 @@ func TestLocalAgentConversation(t *testing.T) {
 	if err != nil || promoted == nil {
 		t.Fatal("queue did not drain")
 	}
-	checkTurn(promoted.ID, store.TurnCompleted, "flash/low: next")
+	checkTurn(promoted.ID, store.TurnCompleted, "next")
 	crash := submit("crash", "crash")
+	e.Wait()
+	checkTurn(crash.TurnID, store.TurnFailed, "crash")
+	continued := submit("after-crash", "continue without pressing retry")
+	e.Wait()
+	checkTurn(continued.TurnID, store.TurnCompleted, "continue without pressing retry")
+	if text := assistantText(continued.TurnID); !strings.Contains(text, `"text":"crash"`) {
+		t.Fatalf("failed RPC input missing from follow-up context: %s", text)
+	}
+	crash = submit("crash-for-retry", "crash")
 	e.Wait()
 	checkTurn(crash.TurnID, store.TurnFailed, "crash")
 	retried, err := e.Retry(ctx, "acp", crash.TurnID, "retry-crash")
@@ -192,19 +325,25 @@ func TestLocalAgentConversation(t *testing.T) {
 			t.Fatalf("source %q accepted: %v", source, err)
 		}
 	}
-	// Unsupported model configuration must leave the draft unaccepted.
+	// Configuration failures leave a failed turn, not an unsent draft.
 	bad := "invalid"
 	_, _ = ms.UpdateSession(ctx, "acp", store.SessionUpdate{Model: &bad})
-	_, err = e.Submit(ctx, SubmitInput{SessionID: "acp", ClientMessageID: "badmodel", Text: "hello"})
-	if !errors.Is(err, ErrLocalAgent) {
-		t.Fatalf("invalid config: %v", err)
-	}
+	badConfig := submit("badmodel", "Remember CONFIG_HISTORY_926")
+	e.Wait()
+	checkTurn(badConfig.TurnID, store.TurnFailed, "CONFIG_HISTORY_926")
 	turn, _, _ = ms.LookupSubmission(ctx, "acp", "badmodel")
-	if turn != nil {
-		t.Fatal("bad config accepted a turn")
+	if turn == nil || turn.ID != badConfig.TurnID {
+		t.Fatal("bad config lost its user message")
+	}
+	good := "flash"
+	_, _ = ms.UpdateSession(ctx, "acp", store.SessionUpdate{Model: &good})
+	configRecovery := submit("after-config", "use the earlier code")
+	e.Wait()
+	checkTurn(configRecovery.TurnID, store.TurnCompleted, "CONFIG_HISTORY_926")
+	if text := assistantText(configRecovery.TurnID); !strings.Contains(text, "CONFIG_HISTORY_926") {
+		t.Fatalf("failed configuration input missing from follow-up context: %s", text)
 	}
 	// CWD changes require an explicit, editable handoff before creating context.
-	good := "flash"
 	project := &store.Project{ID: "other", Name: "Other", RootDirs: []string{t.TempDir()}}
 	if err = ms.CreateProject(ctx, project); err != nil {
 		t.Fatal(err)
@@ -217,22 +356,22 @@ func TestLocalAgentConversation(t *testing.T) {
 	}
 	edited := "Keep only this reviewed context"
 	_, _ = ms.UpdateSession(ctx, "acp", store.SessionUpdate{Model: &bad})
-	_, err = e.Submit(ctx, SubmitInput{SessionID: "acp", ClientMessageID: "handoff", Text: "continue", LocalAgentHandoff: &edited})
-	if !errors.Is(err, ErrLocalAgent) {
-		t.Fatalf("handoff preparation error: %v", err)
+	failedHandoff, err := e.Submit(ctx, SubmitInput{SessionID: "acp", ClientMessageID: "handoff", Text: "continue", LocalAgentHandoff: &edited})
+	if err != nil {
+		t.Fatal(err)
 	}
+	e.Wait()
+	checkTurn(failedHandoff.TurnID, store.TurnFailed, edited)
 	_, _ = ms.UpdateSession(ctx, "acp", store.SessionUpdate{Model: &good})
-	_, err = e.Submit(ctx, SubmitInput{SessionID: "acp", ClientMessageID: "handoff", Text: "continue"})
-	if !errors.As(err, &handoff) {
-		t.Fatalf("failed preparation lost the unsent handoff: %v", err)
-	}
-
-	confirmed, err := e.Submit(ctx, SubmitInput{SessionID: "acp", ClientMessageID: "handoff", Text: "continue", LocalAgentHandoff: &edited})
+	confirmed, err := e.Submit(ctx, SubmitInput{SessionID: "acp", ClientMessageID: "after-handoff", Text: "continue"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	e.Wait()
 	checkTurn(confirmed.TurnID, store.TurnCompleted, edited)
+	if text := assistantText(confirmed.TurnID); strings.Contains(text, "STARTUP_HISTORY_481") || !strings.Contains(text, edited) {
+		t.Fatalf("reviewed handoff lost or omitted history reintroduced: %s", text)
+	}
 	state, _ = ms.GetLocalAgentState(ctx, "acp")
 	if state.AgentSessionID == originalID || state.CWD != project.RootDirs[0] {
 		t.Fatalf("handoff state: %+v", state)
@@ -241,17 +380,60 @@ func TestLocalAgentConversation(t *testing.T) {
 	if err = os.WriteFile(filepath.Join(state.CWD, "restore-fails"), []byte{}, 0600); err != nil {
 		t.Fatal(err)
 	}
-	_, err = e.Submit(ctx, SubmitInput{SessionID: "acp", ClientMessageID: "restore-failed", Text: "continue"})
+	restoreFailure := submit("restore-failed", "continue")
+	e.Wait()
+	checkTurn(restoreFailure.TurnID, store.TurnFailed, "continue")
+	// The next send can review a new context, even after restarting Pudding.
+	e.Stop()
+	e.Wait()
+	e = makeEngine()
+	_, err = e.Submit(ctx, SubmitInput{SessionID: "acp", ClientMessageID: "fresh-reset", Text: "continue"})
 	if !errors.As(err, &handoff) {
 		t.Fatalf("restore failure must offer reviewed handoff: %v", err)
 	}
 	empty := ""
-	reset, err := e.Submit(ctx, SubmitInput{SessionID: "acp", ClientMessageID: "restore-failed", Text: "fresh context", LocalAgentHandoff: &empty})
+	reset, err := e.Submit(ctx, SubmitInput{SessionID: "acp", ClientMessageID: "fresh-reset", Text: "fresh context", LocalAgentHandoff: &empty})
 	if err != nil {
 		t.Fatal(err)
 	}
 	e.Wait()
 	checkTurn(reset.TurnID, store.TurnCompleted, "fresh context")
+	if text := assistantText(reset.TurnID); strings.Contains(text, edited) || strings.Contains(text, "Earlier Pudding conversation history") {
+		t.Fatalf("explicit fresh context included previous history: %s", text)
+	}
+	// Even the very first message survives failure before an ACP session exists.
+	if err := ms.CreateSession(ctx, &store.Session{ID: "first-failure", Provider: acp.Provider, Model: "flash"}); err != nil {
+		t.Fatal(err)
+	}
+	e.localAgentPaths = []string{"/does/not/exist"}
+	initial, err := e.Submit(ctx, SubmitInput{SessionID: "first-failure", ClientMessageID: "first", Text: "Remember FIRST_HISTORY_739"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.Wait()
+	initialTurn, err := ms.GetConversationTurn(ctx, "first-failure", initial.TurnID)
+	if err != nil || initialTurn.Status != store.TurnFailed || store.TextFromParts(initialTurn.Messages[0].Parts) != "Remember FIRST_HISTORY_739" {
+		t.Fatalf("first failed message was withdrawn: %+v %v", initialTurn, err)
+	}
+	e.localAgentPaths = []string{binary}
+	followup, err := e.Submit(ctx, SubmitInput{SessionID: "first-failure", ClientMessageID: "second", Text: "what was the code?"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.Wait()
+	followupTurn, err := ms.GetConversationTurn(ctx, "first-failure", followup.TurnID)
+	if err != nil || followupTurn.Status != store.TurnCompleted {
+		t.Fatalf("follow-up failed: %+v %v", followupTurn, err)
+	}
+	foundHistory := false
+	for _, message := range followupTurn.Messages {
+		if message.Role == store.RoleAssistant && strings.Contains(store.TextFromParts(message.Parts), "FIRST_HISTORY_739") {
+			foundHistory = true
+		}
+	}
+	if !foundHistory {
+		t.Fatal("first failed message missing from ACP context")
+	}
 	deadline, cancel := context.WithTimeout(ctx, time.Second)
 	defer cancel()
 	if err = e.WaitSession(deadline, "acp"); err != nil {
@@ -285,12 +467,18 @@ func TestLocalAgentHostTools(t *testing.T) {
 		return out
 	}
 	first := submit("one", "hold")
-	r := e.localRuntime("host")
-	secret := r.hostSecret
+	secret := ""
 	var turn *LocalHostTurn
 	var release func()
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
+		e.localMu.Lock()
+		for key, host := range e.localHosts {
+			if host.sessionID == "host" && host.turn != nil && host.turn.TurnID == first.TurnID {
+				secret = key
+			}
+		}
+		e.localMu.Unlock()
 		var err error
 		turn, release, err = e.AcquireLocalHost(secret)
 		if err == nil {
@@ -468,5 +656,260 @@ func TestLocalAgentHostPermissionScope(t *testing.T) {
 	host.turn = nil
 	if _, ok := e.localHostPermission("session", "turn", "owned", permission); ok {
 		t.Fatal("idle connection allowed gateway")
+	}
+}
+
+func TestLocalAgentToolCallUpdateRawInput(t *testing.T) {
+	name := "agy"
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+	binary := filepath.Join(t.TempDir(), name)
+	if output, err := exec.Command("go", "build", "-o", binary, "./testdata/acp").CombinedOutput(); err != nil {
+		t.Fatalf("build fake ACP: %v: %s", err, output)
+	}
+	ctx := WithRequestSource(context.Background(), "desktop")
+	ms := storetest.New(t)
+	hub := event.NewHub()
+	e := New(ms, hub, registry.Static(mock.New()), ms, WithAttachmentHome(t.TempDir()))
+	e.localAgentPaths = []string{binary}
+	defer func() { e.Stop(); e.Wait() }()
+	if err := ms.CreateSession(ctx, &store.Session{ID: "acp-tool", Provider: acp.Provider, Model: "flash"}); err != nil {
+		t.Fatal(err)
+	}
+	sub, unsubscribe := hub.Subscribe("acp-tool")
+	defer unsubscribe()
+
+	decodeArgsMap := func(t *testing.T, raw []byte, label string) map[string]any {
+		t.Helper()
+		var got map[string]any
+		if err := json.Unmarshal(raw, &got); err != nil {
+			t.Fatalf("%s invalid JSON: %q (%v)", label, string(raw), err)
+		}
+		return got
+	}
+	drainToolEvents := func(turnID string) []event.Event {
+		var out []event.Event
+		for {
+			select {
+			case ev, ok := <-sub:
+				if !ok {
+					return out
+				}
+				if ev.Kind == event.TurnTool && ev.TurnID == turnID {
+					out = append(out, ev)
+				}
+			default:
+				return out
+			}
+		}
+	}
+
+	// 1) tool_call (no args) -> thought -> rawInput -> full snapshot replacement (drops old key) -> null -> completed (omitted)
+	out, err := e.Submit(ctx, SubmitInput{SessionID: "acp-tool", ClientMessageID: "tool-raw-input", Text: "tool-update-raw-input"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.Wait()
+
+	turn, err := ms.GetConversationTurn(ctx, "acp-tool", out.TurnID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if turn.Status != store.TurnCompleted {
+		t.Fatalf("turn status %s: %s", turn.Status, turn.Error)
+	}
+
+	var toolUses []store.ContentPart
+	var toolResults []store.ContentPart
+	sawThought := false
+	for _, msg := range turn.Messages {
+		for _, part := range msg.Parts {
+			switch part.Type {
+			case store.ContentPartThought:
+				if strings.Contains(part.Text, "Inspecting target file") {
+					sawThought = true
+				}
+			case store.ContentPartToolUse:
+				toolUses = append(toolUses, part)
+			case store.ContentPartToolResult:
+				toolResults = append(toolResults, part)
+			}
+		}
+	}
+	if !sawThought {
+		t.Fatal("expected thought part to be persisted")
+	}
+	if len(toolUses) != 1 || len(toolResults) != 1 {
+		t.Fatalf("expected 1 tool_use and 1 tool_result, got tool_use=%d tool_result=%d", len(toolUses), len(toolResults))
+	}
+	if toolUses[0].CallID != "acp:tool-1" || toolUses[0].Name != "antigravity.read_file" {
+		t.Fatalf("unexpected canonical tool_use identity: %+v", toolUses[0])
+	}
+	savedArgs := decodeArgsMap(t, toolUses[0].Args, "canonical tool_use.Args")
+	if len(savedArgs) != 2 || savedArgs["path"] != "README.md" || savedArgs["startLine"] != float64(1) {
+		t.Errorf("canonical tool_use.Args did not match replaced snapshot: got %s, want {\"path\":\"README.md\",\"startLine\":1}", string(toolUses[0].Args))
+	}
+
+	toolEvents := drainToolEvents(out.TurnID)
+	var argsSnapshots []string
+	okCount := 0
+	for _, ev := range toolEvents {
+		if ev.CallID != "acp:tool-1" {
+			t.Errorf("unexpected extra tool CallID in SSE: %q", ev.CallID)
+		}
+		if ev.ArgsText != "" {
+			argsSnapshots = append(argsSnapshots, ev.ArgsText)
+		}
+		if ev.Phase == "ok" && ev.Ok != nil && *ev.Ok {
+			okCount++
+		}
+	}
+	if okCount != 1 {
+		t.Errorf("expected exactly 1 completed turn.tool SSE event, got %d (events=%+v)", okCount, toolEvents)
+	}
+	if len(argsSnapshots) != 3 {
+		t.Fatalf("expected 3 SSE args snapshots (initial {}, first rawInput, replaced snapshot), got %d: %v", len(argsSnapshots), argsSnapshots)
+	}
+	if first := decodeArgsMap(t, []byte(argsSnapshots[0]), "first SSE ArgsText"); len(first) != 0 {
+		t.Errorf("expected initial empty args snapshot, got %s", argsSnapshots[0])
+	}
+	if second := decodeArgsMap(t, []byte(argsSnapshots[1]), "second SSE ArgsText"); second["path"] != "OLD.md" || second["obsolete"] != true {
+		t.Errorf("unexpected second SSE args snapshot: %s", argsSnapshots[1])
+	}
+	lastSSEArgs := decodeArgsMap(t, []byte(argsSnapshots[len(argsSnapshots)-1]), "last SSE ArgsText")
+	if len(lastSSEArgs) != 2 || lastSSEArgs["path"] != "README.md" || lastSSEArgs["startLine"] != float64(1) {
+		t.Errorf("SSE turn.tool did not retain replaced snapshot: got %s, want {\"path\":\"README.md\",\"startLine\":1}", argsSnapshots[len(argsSnapshots)-1])
+	}
+
+	// 2) Both missing final updates and agy's failed-on-cancel updates close once
+	// with the latest input, preserving raw failures but marking their cancellation.
+	for _, prompt := range []string{"tool-update-cancel", "tool-update-cancel-failed"} {
+		cancelled, err := e.Submit(ctx, SubmitInput{SessionID: "acp-tool", ClientMessageID: prompt, Text: prompt})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var cancelToolEvents []event.Event
+		deadline := time.After(5 * time.Second)
+		ready := false
+		for !ready {
+			select {
+			case ev, ok := <-sub:
+				if !ok {
+					t.Fatal("event subscription closed before CANCEL_READY")
+				}
+				if ev.TurnID != cancelled.TurnID {
+					continue
+				}
+				if ev.Kind == event.TurnTool {
+					cancelToolEvents = append(cancelToolEvents, ev)
+				}
+				if ev.Kind == event.TurnDelta && ev.Delta == "CANCEL_READY" {
+					ready = true
+				}
+			case <-deadline:
+				_ = e.Cancel("acp-tool")
+				t.Fatal("timed out waiting for CANCEL_READY")
+			}
+		}
+		if err := e.Cancel("acp-tool"); err != nil {
+			t.Fatal(err)
+		}
+		e.Wait()
+		cancelToolEvents = append(cancelToolEvents, drainToolEvents(cancelled.TurnID)...)
+
+		cancelTurn, err := ms.GetConversationTurn(ctx, "acp-tool", cancelled.TurnID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cancelTurn.Status != store.TurnCancelled {
+			t.Fatalf("cancelled turn status %s: %s", cancelTurn.Status, cancelTurn.Error)
+		}
+		var cancelUses []store.ContentPart
+		var cancelResults []store.ContentPart
+		for _, msg := range cancelTurn.Messages {
+			for _, part := range msg.Parts {
+				switch part.Type {
+				case store.ContentPartToolUse:
+					cancelUses = append(cancelUses, part)
+				case store.ContentPartToolResult:
+					cancelResults = append(cancelResults, part)
+				}
+			}
+		}
+		if len(cancelUses) != 1 || len(cancelResults) != 1 {
+			t.Fatalf("cancelled turn expected 1 tool_use and 1 tool_result, got tool_use=%d tool_result=%d", len(cancelUses), len(cancelResults))
+		}
+		if cancelUses[0].CallID != "acp:tool-cancel" || cancelResults[0].CallID != "acp:tool-cancel" || cancelResults[0].Ok || cancelResults[0].SummaryKind != tool.SummaryCancelled {
+			t.Fatalf("unexpected cancelled tool records: use=%+v result=%+v", cancelUses[0], cancelResults[0])
+		}
+		if prompt == "tool-update-cancel" {
+			if cancelResults[0].Content != "cancelled" {
+				t.Fatalf("missing cancelled result: %+v", cancelResults[0])
+			}
+		} else {
+			var raw acp.Update
+			if json.Unmarshal([]byte(cancelResults[0].Content), &raw) != nil || raw.Status != "failed" {
+				t.Fatalf("raw ACP cancellation update was lost: %+v", cancelResults[0])
+			}
+		}
+		cancelArgs := decodeArgsMap(t, cancelUses[0].Args, "cancelled canonical tool_use.Args")
+		if len(cancelArgs) != 1 || cancelArgs["path"] != "final.md" {
+			t.Errorf("cancelled canonical tool_use.Args did not retain latest snapshot: got %s, want {\"path\":\"final.md\"}", string(cancelUses[0].Args))
+		}
+
+		var cancelLastArgs string
+		cancelErrCount := 0
+		for _, ev := range cancelToolEvents {
+			if ev.CallID != "acp:tool-cancel" {
+				t.Errorf("unexpected CallID in cancelled turn SSE: %q", ev.CallID)
+			}
+			if ev.ArgsText != "" {
+				cancelLastArgs = ev.ArgsText
+			}
+			if ev.Phase == "error" && ev.Ok != nil && !*ev.Ok {
+				if ev.SummaryKind != tool.SummaryCancelled {
+					t.Fatalf("SSE lost cancellation: %+v", ev)
+				}
+				cancelErrCount++
+			}
+		}
+		if cancelErrCount != 1 {
+			t.Errorf("expected exactly 1 error turn.tool SSE event on cancel, got %d (events=%+v)", cancelErrCount, cancelToolEvents)
+		}
+		cancelSSEArgs := decodeArgsMap(t, []byte(cancelLastArgs), "cancelled last SSE ArgsText")
+		if len(cancelSSEArgs) != 1 || cancelSSEArgs["path"] != "final.md" {
+			t.Errorf("cancelled SSE turn.tool did not retain latest snapshot: got %s, want {\"path\":\"final.md\"}", cancelLastArgs)
+		}
+	}
+
+	// A background tool may finish after the answer. Its use must retain the
+	// original position, so history merges the late result into that row.
+	late, err := e.Submit(ctx, SubmitInput{SessionID: "acp-tool", ClientMessageID: "late-failure", Text: "tool-late-failure"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.Wait()
+	lateTurn, err := ms.GetConversationTurn(ctx, "acp-tool", late.TurnID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var order []string
+	failedResults := 0
+	for _, msg := range lateTurn.Messages {
+		for _, part := range msg.Parts {
+			if part.Type == store.ContentPartToolUse {
+				order = append(order, part.CallID)
+			}
+			if msg.Role == store.RoleAssistant && part.Type == store.ContentPartText {
+				order = append(order, part.Text)
+			}
+			if part.Type == store.ContentPartToolResult && part.CallID == "acp:slow-command" && !part.Ok {
+				failedResults++
+			}
+		}
+	}
+	if strings.Join(order, "|") != "acp:slow-command|acp:quick-read|Answer before background command finishes" || failedResults != 1 || lateTurn.Status != store.TurnCompleted {
+		t.Fatalf("late failure moved the tool or lost its outcome: order=%v failures=%d status=%s", order, failedResults, lateTurn.Status)
 	}
 }

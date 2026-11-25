@@ -30,6 +30,7 @@ func main() {
 		}
 	}
 	var pending any
+	failedToolOnCancel := false
 	scanner := bufio.NewScanner(os.Stdin)
 	for scanner.Scan() {
 		var m struct {
@@ -119,12 +120,46 @@ func main() {
 				notify(sessionID, map[string]any{"sessionUpdate": "agent_message_chunk", "content": map[string]string{"type": "text", "text": "HOLD_READY"}})
 				continue
 			}
+			if strings.HasSuffix(text, "tool-update-raw-input") {
+				notify(sessionID, map[string]any{"sessionUpdate": "tool_call", "toolCallId": "tool-1", "name": "read_file", "title": "Read file", "kind": "read", "status": "pending"})
+				notify(sessionID, map[string]any{"sessionUpdate": "agent_thought_chunk", "content": map[string]string{"type": "text", "text": "Inspecting target file"}})
+				notify(sessionID, map[string]any{"sessionUpdate": "tool_call_update", "toolCallId": "tool-1", "status": "in_progress", "rawInput": map[string]any{"path": "OLD.md", "obsolete": true}})
+				notify(sessionID, map[string]any{"sessionUpdate": "tool_call_update", "toolCallId": "tool-1", "status": "in_progress", "rawInput": map[string]any{"path": "README.md", "startLine": 1}})
+				notify(sessionID, map[string]any{"sessionUpdate": "tool_call_update", "toolCallId": "tool-1", "status": "in_progress", "rawInput": nil})
+				notify(sessionID, map[string]any{"sessionUpdate": "tool_call_update", "toolCallId": "tool-1", "status": "completed"})
+				notify(sessionID, map[string]any{"sessionUpdate": "agent_message_chunk", "content": map[string]string{"type": "text", "text": "done"}})
+				reply(m.ID, map[string]any{"stopReason": "end_turn"})
+				continue
+			}
+			if strings.HasSuffix(text, "tool-update-cancel") || strings.HasSuffix(text, "tool-update-cancel-failed") {
+				pending = m.ID
+				failedToolOnCancel = strings.HasSuffix(text, "tool-update-cancel-failed")
+				notify(sessionID, map[string]any{"sessionUpdate": "tool_call", "toolCallId": "tool-cancel", "name": "read_file", "status": "pending"})
+				notify(sessionID, map[string]any{"sessionUpdate": "agent_thought_chunk", "content": map[string]string{"type": "text", "text": "Still working"}})
+				notify(sessionID, map[string]any{"sessionUpdate": "tool_call_update", "toolCallId": "tool-cancel", "status": "in_progress", "rawInput": map[string]any{"path": "draft.md", "obsolete": true}})
+				notify(sessionID, map[string]any{"sessionUpdate": "tool_call_update", "toolCallId": "tool-cancel", "status": "in_progress", "rawInput": map[string]any{"path": "final.md"}})
+				notify(sessionID, map[string]any{"sessionUpdate": "tool_call_update", "toolCallId": "tool-cancel", "status": "in_progress", "rawInput": nil})
+				notify(sessionID, map[string]any{"sessionUpdate": "agent_message_chunk", "content": map[string]string{"type": "text", "text": "CANCEL_READY"}})
+				continue
+			}
+			if strings.HasSuffix(text, "tool-late-failure") {
+				notify(sessionID, map[string]any{"sessionUpdate": "tool_call", "toolCallId": "slow-command", "name": "run_command", "status": "in_progress", "rawInput": map[string]string{"command": "search"}})
+				notify(sessionID, map[string]any{"sessionUpdate": "tool_call", "toolCallId": "quick-read", "name": "read_file", "status": "completed", "rawInput": map[string]string{"path": "README.md"}})
+				notify(sessionID, map[string]any{"sessionUpdate": "agent_message_chunk", "content": map[string]string{"type": "text", "text": "Answer before background command finishes"}})
+				notify(sessionID, map[string]any{"sessionUpdate": "tool_call_update", "toolCallId": "slow-command", "status": "failed", "rawOutput": "terminated"})
+				reply(m.ID, map[string]any{"stopReason": "end_turn"})
+				continue
+			}
 			notify(sessionID, map[string]any{"sessionUpdate": "agent_thought_chunk", "content": map[string]string{"type": "text", "text": "Thinking"}})
 			notify(sessionID, map[string]any{"sessionUpdate": "agent_message_chunk", "content": map[string]string{"type": "text", "text": model + "/" + effort + ": " + text}})
 			notify(sessionID, map[string]any{"sessionUpdate": "usage_update", "used": 123, "size": 10000})
 			reply(m.ID, map[string]any{"stopReason": "end_turn", "usage": map[string]int{"inputTokens": 20, "outputTokens": 7, "thoughtTokens": 3}})
 		case "session/cancel":
 			if pending != nil {
+				if failedToolOnCancel {
+					notify(sessionID, map[string]any{"sessionUpdate": "tool_call_update", "toolCallId": "tool-cancel", "status": "failed", "rawOutput": nil})
+					failedToolOnCancel = false
+				}
 				reply(pending, map[string]string{"stopReason": "cancelled"})
 				pending = nil
 			}

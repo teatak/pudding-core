@@ -129,7 +129,53 @@ func TestLocalAgentHostMCP(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	state, _ := ms.GetLocalAgentState(ctx, "host")
+	var state *store.LocalAgentState
+	for deadline := time.Now().Add(3 * time.Second); time.Now().Before(deadline); {
+		state, err = ms.GetLocalAgentState(ctx, "host")
+		if err == nil {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if state == nil {
+		t.Fatalf("accepted turn did not prepare an ACP session: %v", err)
+	}
+	// Inspect what the actual ACP subprocess receives before it calls any tool.
+	// The second prompt must refresh selected guides without a discovery call.
+	promptText := func(want int) string {
+		t.Helper()
+		deadline := time.Now().Add(3 * time.Second)
+		for time.Now().Before(deadline) {
+			log, err := os.ReadFile(filepath.Join(state.CWD, "rpc.log"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			count := 0
+			for _, line := range bytes.Split(log, []byte("\n")) {
+				var msg struct {
+					Method string
+					Params struct{ Prompt []acp.Content }
+				}
+				if json.Unmarshal(line, &msg) != nil || msg.Method != "session/prompt" {
+					continue
+				}
+				count++
+				if count == want {
+					var text strings.Builder
+					for _, part := range msg.Params.Prompt {
+						text.WriteString(part.Text)
+					}
+					return text.String()
+				}
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		t.Fatalf("ACP prompt %d not received", want)
+		return ""
+	}
+	if text := promptText(1); !strings.Contains(text, "HOST_RULE_V1") || strings.Contains(text, "HOST_SKILL_V1") {
+		t.Fatalf("prompt must supply current project rules without loading unselected Skills: %s", text)
+	}
 	log, err := os.ReadFile(filepath.Join(state.CWD, "rpc.log"))
 	if err != nil {
 		t.Fatal(err)
@@ -189,8 +235,9 @@ func TestLocalAgentHostMCP(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	for _, params := range []any{
-		map[string]any{"name": "pudding_tools", "arguments": map[string]any{"query": "builtin_time_get_current"}},
+		// Calling a known schema never requires a preliminary catalog call.
 		map[string]any{"name": "pudding_call", "arguments": map[string]any{"tool": "builtin_time_get_current", "arguments": map[string]string{"timezone": "UTC"}}},
+		map[string]any{"name": "pudding_tools", "arguments": map[string]any{"query": "builtin_time_get_current"}},
 	} {
 		status, out := call(secret, "tools/call", params)
 		result, ok := out["result"].(map[string]any)
@@ -217,6 +264,27 @@ func TestLocalAgentHostMCP(t *testing.T) {
 	}
 	business := func(name string, args any) string {
 		return hostText("pudding_call", map[string]any{"tool": name, "arguments": args})
+	}
+	// Agents naturally search for "file read" before knowing builtin_file_read.
+	// All words must match, while an exact name still selects only that tool.
+	for _, query := range []string{"file read", "BuIlTiN_fIlE_rEaD", "file no-such-operation"} {
+		var catalog struct{ Matches []debugMCPTool }
+		if err := json.Unmarshal([]byte(hostText("pudding_tools", map[string]string{"query": query})), &catalog); err != nil {
+			t.Fatal(err)
+		}
+		if query == "file no-such-operation" {
+			if len(catalog.Matches) != 0 {
+				t.Fatalf("query must match every word: %+v", catalog.Matches)
+			}
+			continue
+		}
+		found := false
+		for _, match := range catalog.Matches {
+			found = found || (match.Name == tool.FileRead && len(match.InputSchema) > 0)
+		}
+		if !found || (query == "BuIlTiN_fIlE_rEaD" && len(catalog.Matches) != 1) {
+			t.Fatalf("query %q did not return the required schema: %+v", query, catalog.Matches)
+		}
 	}
 	if text := hostText("pudding_tools", map[string]any{}); !strings.Contains(text, "HOST_RULE_V1") || !strings.Contains(text, "host-refresh") {
 		t.Fatalf("initial rules or skill catalog missing: %s", text)
@@ -268,6 +336,9 @@ func TestLocalAgentHostMCP(t *testing.T) {
 	writeGuides("V3")
 	if _, err := eng.Submit(ctx, engine.SubmitInput{SessionID: "host", ClientMessageID: "next", Text: "hold"}); err != nil {
 		t.Fatal(err)
+	}
+	if text := promptText(2); !strings.Contains(text, "HOST_RULE_V3") || strings.Count(text, "HOST_SKILL_V3") != 1 || strings.Contains(text, "HOST_RULE_V2") || strings.Contains(text, "HOST_SKILL_V2") || !strings.Contains(text, plugin.BuiltinSkillAuthoringID) {
+		t.Fatalf("next prompt must refresh rules, selected Skills and loaded plugins: %s", text)
 	}
 	deadline = time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {

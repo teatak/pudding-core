@@ -602,13 +602,13 @@ func (b *Builder) providerParts(
 	localFolders := make([]store.LocalFolder, 0)
 	projectReferences := make([]store.ProjectReference, 0)
 	flushLocalFolders := func() {
-		if text := localFoldersProviderText(localFolders); text != "" {
+		if text := LocalFoldersText(localFolders); text != "" {
 			out = append(out, provider.Part{Type: provider.PartText, Text: text})
 		}
 		localFolders = localFolders[:0]
 	}
 	flushProjectReferences := func() {
-		if text := projectReferencesProviderText(projectReferences); text != "" {
+		if text := ProjectReferencesText(projectReferences); text != "" {
 			out = append(out, provider.Part{Type: provider.PartText, Text: text})
 		}
 		projectReferences = projectReferences[:0]
@@ -666,7 +666,7 @@ func (b *Builder) providerParts(
 			}
 			toolPath := b.attachmentToolPath(sessionID, part)
 			if imagePart, ok := b.imageProviderPart(sessionID, part, cfg); ok {
-				if text := attachmentProviderText(part, toolPath, "image"); text != "" {
+				if text := AttachmentText(part, toolPath, "image"); text != "" {
 					if imagePart.Width > 0 && imagePart.Height > 0 {
 						text += fmt.Sprintf("\nModel image size: %dx%d pixels.", imagePart.Width, imagePart.Height)
 					}
@@ -674,11 +674,11 @@ func (b *Builder) providerParts(
 				}
 				out = append(out, imagePart)
 			} else if audioPart, ok := b.audioProviderPart(sessionID, part, cfg); ok {
-				if text := attachmentProviderText(part, toolPath, "audio"); text != "" {
+				if text := AttachmentText(part, toolPath, "audio"); text != "" {
 					out = append(out, provider.Part{Type: provider.PartText, Text: text})
 				}
 				out = append(out, audioPart)
-			} else if text := attachmentProviderText(part, toolPath, ""); text != "" {
+			} else if text := AttachmentText(part, toolPath, ""); text != "" {
 				out = append(out, provider.Part{Type: provider.PartText, Text: text})
 			}
 		case store.ContentPartLocalFolder:
@@ -703,7 +703,7 @@ func (b *Builder) providerParts(
 			})
 		case store.ContentPartUIContext:
 			flushReferences()
-			if text := uiContextProviderText(part); text != "" {
+			if text := UIContextText(part); text != "" {
 				out = append(out, provider.Part{Type: provider.PartText, Text: text})
 			}
 		}
@@ -721,7 +721,9 @@ func (b *Builder) providerParts(
 	return out
 }
 
-func uiContextProviderText(part store.ContentPart) string {
+// UIContextText projects the visible resource as neutral model input. Both
+// API providers and local Agents use this representation; history stays structured.
+func UIContextText(part store.ContentPart) string {
 	type payload struct {
 		Surface       string `json:"surface"`
 		Resource      string `json:"resource,omitempty"`
@@ -829,7 +831,9 @@ func audioAttachmentsAllowed(cfg provider.ModelConfig) bool {
 	return cfg.Capabilities != nil && cfg.Capabilities.Audio
 }
 
-func attachmentProviderText(part store.ContentPart, toolPath, mediaKind string) string {
+// AttachmentText preserves attachment metadata and file-tool references when
+// projecting a canonical attachment into a model's input.
+func AttachmentText(part store.ContentPart, toolPath, mediaKind string) string {
 	var b strings.Builder
 	b.WriteString("[Attachment]\n")
 	if part.Name != "" {
@@ -889,7 +893,8 @@ func attachmentProviderText(part store.ContentPart, toolPath, mediaKind string) 
 	return strings.TrimSpace(b.String())
 }
 
-func localFoldersProviderText(folders []store.LocalFolder) string {
+// LocalFoldersText projects selected directories for API and ACP inputs.
+func LocalFoldersText(folders []store.LocalFolder) string {
 	folders = store.NormalizeLocalFolders(folders)
 	if len(folders) == 0 {
 		return ""
@@ -904,7 +909,8 @@ func localFoldersProviderText(folders []store.LocalFolder) string {
 	return "<pudding-local-folders version=\"1\">\n" + string(data) + "\n</pudding-local-folders>\n"
 }
 
-func projectReferencesProviderText(references []store.ProjectReference) string {
+// ProjectReferencesText preserves file identity and selected source ranges.
+func ProjectReferencesText(references []store.ProjectReference) string {
 	references = store.NormalizeProjectReferences(references)
 	if len(references) == 0 {
 		return ""

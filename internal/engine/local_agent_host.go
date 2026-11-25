@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"sync"
 
@@ -29,6 +30,30 @@ type LocalHostTurn struct {
 	state     externalTurn
 	parts     *turnPartAccumulator
 	wg        sync.WaitGroup
+}
+
+// Resolve live instructions before the model runs, so refreshing them does not
+// require a catalog round trip. Tool discovery and schemas remain on demand.
+func (e *Engine) localHostPrompt(ctx context.Context, sessionID, turnID, hostName string) (string, error) {
+	sess, err := e.store.GetSession(ctx, sessionID)
+	if err != nil {
+		return "", err
+	}
+	rules, err := e.ExternalProjectRules(ctx, sess, turnID)
+	if err != nil {
+		return "", err
+	}
+	guides, err := e.ExternalGuides(ctx, sess, sess.LoadedPluginIDs, nil, true)
+	if err != nil {
+		return "", err
+	}
+	current, err := json.Marshal(map[string]any{
+		"mode": sess.ActiveMode, "projectInstructions": rules, "instructions": guides,
+	})
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("You are running inside Pudding. Use the %s MCP server for file, command, browser, widget and plugin operations so changes, approvals and results appear in this conversation. The current project rules and selected Skill/plugin instructions are supplied below; they replace earlier snapshots, including any old instruction to call pudding_tools at the start of every turn. Do not call tools for greetings or other requests that need no tools. Use pudding_tools only when you need to discover a tool, plugin or Skill, or lack a tool's exact inputSchema (including after context compaction). Reuse schemas already in context across calls and turns; query again if a tool is unavailable or its arguments are rejected. Call pudding_call directly when you already know the required schema. Pudding manages connection and Turn IDs; do not connect/begin/end manually. Read refreshed instructions in tool results. Use native tools only when Pudding cannot provide the needed operation, and explain that fallback. Other configured MCP servers may expose older Pudding tools requiring binding IDs; do not use them for this conversation.\n\nCurrent Pudding context:\n%s", hostName, current), nil
 }
 
 func (e *Engine) SetLocalHostEndpoint(endpoint string) { e.localHostEndpoint = endpoint }

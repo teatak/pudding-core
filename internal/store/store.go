@@ -2465,6 +2465,9 @@ type Store interface {
 	// AppendTurnOutput 在 turn 仍 running 时追加已经完整的 assistant/tool
 	// output message;token delta 不走这里。
 	AppendTurnOutput(ctx context.Context, in AppendTurnOutputInput) (*AppendTurnOutputResult, error)
+	// UpdateTurnToolArguments replaces an active turn's tool input snapshot
+	// without moving the original tool-use message in the conversation.
+	UpdateTurnToolArguments(ctx context.Context, turnID, callID string, args json.RawMessage) error
 	// AppendTurnSteer 在指定 turn 仍 running 时追加用户引导。
 	// input.steered 在 ApplyTurnSteers 的安全采样边界落库。
 	AppendTurnSteer(ctx context.Context, in AppendTurnSteerInput) (*AppendTurnSteerResult, error)

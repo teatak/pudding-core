@@ -1798,6 +1798,16 @@ func TestAppendTurnOutputBeforeFinish(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	before, err := st.ListMessages(context.Background(), "sess_1", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.UpdateTurnToolArguments(context.Background(), "turn_1", "call_1", json.RawMessage(`{"timezone":"UTC"}`)); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.UpdateTurnToolArguments(context.Background(), "turn_1", "missing", json.RawMessage(`{}`)); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("missing tool update: %v", err)
+	}
 	if _, err := st.FinishTurn(context.Background(), store.FinishTurnInput{
 		TurnID: "turn_1",
 		Status: store.TurnCompleted,
@@ -1814,6 +1824,12 @@ func TestAppendTurnOutputBeforeFinish(t *testing.T) {
 	}
 	if msgs[1].Text != "first" || msgs[2].Kind != store.MessageKindToolUse {
 		t.Fatalf("unexpected appended messages: %+v", msgs)
+	}
+	if msgs[2].ID != before[2].ID || msgs[2].TurnIndex != before[2].TurnIndex || !msgs[2].CreatedAt.Equal(before[2].CreatedAt) || string(msgs[2].Parts[0].Args) != `{"timezone":"UTC"}` {
+		t.Fatalf("tool arguments changed identity, order or failed to persist: %+v", msgs[2])
+	}
+	if err := st.UpdateTurnToolArguments(context.Background(), "turn_1", "call_1", json.RawMessage(`{}`)); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("finished turn accepted tool update: %v", err)
 	}
 	evs, err := st.EventsAfter(context.Background(), "sess_1", 0, 0)
 	if err != nil {

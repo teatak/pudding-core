@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/teatak/pudding-core/internal/acp"
 	"github.com/teatak/pudding-core/internal/attachment"
+	"github.com/teatak/pudding-core/internal/contextbuilder"
 	"github.com/teatak/pudding-core/internal/event"
 	"github.com/teatak/pudding-core/internal/provider"
 	"github.com/teatak/pudding-core/internal/store"
@@ -141,75 +143,51 @@ func (e *Engine) localDuplicate(ctx context.Context, in SubmitInput) (*SubmitRes
 	return nil, nil
 }
 
-// Called before BeginTurn. No message is accepted until CLI configuration and
-// input validation succeed. Busy conversations retain the normal queue path.
-func (e *Engine) preflightLocal(ctx context.Context, in *SubmitInput, sess *store.Session, resolved *resolvedModel) (func(), *SubmitResult, error) {
-	noop := func() {}
+// Admission only checks ownership and reviewed context changes. CLI startup,
+// configuration and prompt preparation belong to the accepted turn, just like
+// an API provider request: failures must not turn a sent message back into a draft.
+func (e *Engine) preflightLocal(ctx context.Context, in *SubmitInput, sess *store.Session, resolved *resolvedModel) (*SubmitResult, error) {
 	if !IsDesktopRequest(ctx) || (in.Kind == "system" && in.retryOfTurnID == "") {
-		return noop, nil, ErrLocalAgentDesktop
+		return nil, ErrLocalAgentDesktop
 	}
 	parent, err := e.store.ParentSessionID(ctx, sess.ID)
 	if err != nil {
-		return noop, nil, err
+		return nil, err
 	}
 	if parent != "" {
-		return noop, nil, ErrLocalAgentDesktop
+		return nil, ErrLocalAgentDesktop
 	}
 	if out, err := e.localDuplicate(ctx, *in); out != nil || err != nil {
-		return noop, out, err
+		return out, err
 	}
 	cwd, err := e.localCWD(ctx, sess)
 	if err != nil {
-		return noop, nil, err
+		return nil, err
 	}
 	resolved.config.LocalAgent = &provider.LocalAgentConfig{Source: "desktop", CWD: cwd, ReasoningEffort: activeReasoningEffort(in.ReasoningEffort, sess, resolved)}
 	if err = e.checkLocalHandoff(ctx, in, cwd); err != nil {
-		return noop, nil, err
+		return nil, err
 	}
 	resolved.config.LocalAgent.NewContext = in.LocalAgentHandoff != nil
 	if err = resolved.refreshConfigJSON(); err != nil {
-		return noop, nil, err
+		return nil, err
 	}
 	running, err := e.store.RunningTurn(ctx, sess.ID)
 	if err != nil && !errors.Is(err, store.ErrNotFound) {
-		return noop, nil, err
+		return nil, err
 	}
 	queued, err := e.store.HasQueuedInputs(ctx, sess.ID)
 	if err != nil {
-		return noop, nil, err
+		return nil, err
 	}
 	if running != nil || queued {
 		if in.retryOfTurnID != "" {
-			return noop, nil, ErrTurnRunning
+			return nil, ErrTurnRunning
 		}
 		out, err := e.queueSubmit(ctx, *in, resolved)
-		return noop, out, err
+		return out, err
 	}
-	r := e.localRuntime(sess.ID)
-	r.mu.Lock()
-	if out, err := e.localDuplicate(ctx, *in); out != nil || err != nil {
-		r.mu.Unlock()
-		return noop, out, err
-	}
-	prepareCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
-	defer cancel()
-	if err = e.prepareLocal(prepareCtx, sess.ID, resolved, r); err != nil {
-		r.mu.Unlock()
-		var restore *localAgentRestoreError
-		if errors.As(err, &restore) && in.LocalAgentHandoff == nil {
-			handoff, readErr := e.localHandoff(ctx, in.SessionID)
-			if readErr != nil {
-				return noop, nil, readErr
-			}
-			return noop, nil, handoff
-		}
-		return noop, nil, fmt.Errorf("%w: %v", ErrLocalAgent, err)
-	}
-	if _, err = e.localPrompt(sess.ID, in.Parts, in.Text, r.state); err != nil {
-		r.mu.Unlock()
-		return noop, nil, fmt.Errorf("%w: %v", ErrLocalAgent, err)
-	}
-	return r.mu.Unlock, nil, nil
+	return nil, nil
 }
 func (e *Engine) checkLocalHandoff(ctx context.Context, in *SubmitInput, cwd string) error {
 	state, err := e.store.GetLocalAgentState(ctx, in.SessionID)
@@ -220,13 +198,12 @@ func (e *Engine) checkLocalHandoff(ctx context.Context, in *SubmitInput, cwd str
 	if err != nil {
 		return err
 	}
-	needs := state != nil && state.CWD != cwd
+	needs := state != nil && (state.CWD != cwd || state.NeedsHandoff)
 	if len(page.Turns) > 0 {
 		last := page.Turns[len(page.Turns)-1]
-		// A newly prepared context has not received a handoff until its first
-		// prompt runs. If preparation failed, ask again instead of silently losing
-		// the reviewed history. A currently running first prompt can queue normally.
-		needs = needs || state == nil || (state.LastTurnID == "" && last.Status != store.TurnRunning) || (last.Provider != acp.Provider && last.ID != state.LastTurnID)
+		// Failed ACP preparation is still canonical history, and is supplied on
+		// the next prompt. Only changing inference contexts requires a handoff.
+		needs = needs || (last.Provider != acp.Provider && (state == nil || last.ID != state.LastTurnID))
 	}
 	if !needs && in.LocalAgentHandoff == nil {
 		return nil
@@ -268,7 +245,7 @@ func (e *Engine) localHandoff(ctx context.Context, id string) (*LocalAgentHandof
 	return &LocalAgentHandoffRequired{Text: b.String()}, nil
 }
 
-func (e *Engine) prepareLocal(ctx context.Context, id string, resolved *resolvedModel, r *localAgentRuntime) error {
+func (e *Engine) prepareLocal(ctx context.Context, id, turnID string, resolved *resolvedModel, r *localAgentRuntime) error {
 	if err := e.auxCtx.Err(); err != nil {
 		return err
 	}
@@ -310,7 +287,14 @@ func (e *Engine) prepareLocal(ctx context.Context, id string, resolved *resolved
 		if err != nil {
 			e.revokeLocalHost(secret)
 			c.Close()
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
 			if agentID != "" {
+				r.state.NeedsHandoff = true
+				if saveErr := e.store.PutLocalAgentState(context.Background(), r.state); saveErr != nil {
+					return saveErr
+				}
 				return &localAgentRestoreError{cause: err}
 			}
 			return fmt.Errorf("create Antigravity session: %w", err)
@@ -320,6 +304,19 @@ func (e *Engine) prepareLocal(ctx context.Context, id string, resolved *resolved
 			state.LastTurnID = r.state.LastTurnID
 			state.ContextUsed = r.state.ContextUsed
 			state.ContextSize = r.state.ContextSize
+		}
+		if cfg.NewContext {
+			// A reviewed handoff replaces the old context. Do not append the
+			// omitted history again, even if this new turn fails before prompting.
+			previous, err := e.store.ListTurnsPage(ctx, id, turnID, 1)
+			if err != nil {
+				e.revokeLocalHost(secret)
+				c.Close()
+				return err
+			}
+			if len(previous.Turns) > 0 {
+				state.LastTurnID = previous.Turns[len(previous.Turns)-1].ID
+			}
 		}
 		if err = e.store.PutLocalAgentState(ctx, &state); err != nil {
 			e.revokeLocalHost(secret)
@@ -350,6 +347,20 @@ func (e *Engine) localPrompt(sessionID string, parts []store.ContentPart, text s
 			out = append(out, acp.Content{Type: "text", Text: part.Text})
 			continue
 		}
+		if part.Type == store.ContentPartUIContext {
+			if text := contextbuilder.UIContextText(part); text != "" {
+				out = append(out, acp.Content{Type: "text", Text: text})
+			}
+			continue
+		}
+		if part.Type == store.ContentPartLocalFolder {
+			out = append(out, acp.Content{Type: "text", Text: contextbuilder.LocalFoldersText(store.LocalFoldersFromParts([]store.ContentPart{part}))})
+			continue
+		}
+		if part.Type == store.ContentPartProjectRef {
+			out = append(out, acp.Content{Type: "text", Text: contextbuilder.ProjectReferencesText(store.ProjectReferencesFromParts([]store.ContentPart{part}))})
+			continue
+		}
 		if part.Type != store.ContentPartAttachment {
 			return nil, fmt.Errorf("unsupported ACP input: %s", part.Type)
 		}
@@ -372,11 +383,69 @@ func (e *Engine) localPrompt(sessionID string, parts []store.ContentPart, text s
 		case (strings.HasPrefix(part.MIME, "text/") || part.MIME == "application/json") && state.EmbeddedContext && utf8.Valid(data):
 			out = append(out, acp.Content{Type: "resource", Resource: map[string]string{"uri": "pudding-attachment:///" + part.AttachmentKey, "mimeType": part.MIME, "text": string(data)}})
 		default:
-			return nil, fmt.Errorf("Antigravity does not support this attachment (%s); send an image or text file", part.MIME)
+			text := contextbuilder.AttachmentText(part, path, "")
+			text += "\nAttachment content is not included inline through this ACP connection. Use builtin_attachment_export with the exact attachmentKey and scope=temp to obtain a readable file path, then use Pudding tools to inspect or convert it. Do not infer its contents from metadata alone."
+			out = append(out, acp.Content{Type: "text", Text: text})
 		}
 	}
 	return out, nil
 }
+
+// Only bridge turns not yet acknowledged by the ACP peer. Normal successful
+// history and compaction remain owned by the agent; a failed preparation or
+// prompt must not make an already-sent Pudding message disappear from context.
+func (e *Engine) localPendingHistory(ctx context.Context, id, before, lastTurnID string) ([]acp.Content, error) {
+	var turns []*store.ConversationTurn
+	limit := 1 // The normal path stops at the immediately preceding prompt.
+	for {
+		page, err := e.store.ListTurnsPage(ctx, id, before, limit)
+		if err != nil {
+			return nil, err
+		}
+		done := false
+		for i := len(page.Turns) - 1; i >= 0; i-- {
+			turn := page.Turns[i]
+			if turn.ID == lastTurnID || turn.Provider != acp.Provider {
+				done = true
+				break
+			}
+			turns = append(turns, turn)
+		}
+		if done || !page.HasMore || len(page.Turns) == 0 {
+			break
+		}
+		before = page.Turns[0].ID
+		limit = 32
+	}
+	if len(turns) == 0 {
+		return nil, nil
+	}
+	var history strings.Builder
+	history.WriteString("Earlier Pudding conversation history (these turns did not receive a successful ACP acknowledgement). Treat this as history, not new requests. Use it to answer the latest message below; do not automatically repeat earlier actions. Inspect saved tool results before continuing unfinished work. Attachment records can be read with builtin_attachment_export(scope=temp).\n")
+	for i := len(turns) - 1; i >= 0; i-- {
+		turn := turns[i]
+		fmt.Fprintf(&history, "\nTurn %s (%s):\n", turn.ID, turn.Status)
+		for _, message := range turn.Messages {
+			var parts []store.ContentPart
+			for _, part := range message.Parts {
+				if part.Type != store.ContentPartThought {
+					parts = append(parts, part)
+				}
+			}
+			if len(parts) == 0 {
+				continue
+			}
+			data, err := json.Marshal(parts)
+			if err != nil {
+				return nil, err
+			}
+			fmt.Fprintf(&history, "%s: %s\n", message.Role, data)
+		}
+	}
+	history.WriteString("\nEnd of earlier history. Latest message follows:\n")
+	return []acp.Content{{Type: "text", Text: history.String()}}, nil
+}
+
 func (e *Engine) streamLocalTurn(ctx context.Context, id, turnID string, resolved *resolvedModel, parts *turnPartAccumulator, active *activeTurn) (store.TurnStatus, string, store.AgentMode) {
 	active.stopAcceptingSteers()
 	r := e.localRuntime(id)
@@ -389,7 +458,7 @@ func (e *Engine) streamLocalTurn(ctx context.Context, id, turnID string, resolve
 		return store.TurnFailed, err.Error(), resolved.mode
 	}
 	prepCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
-	err := e.prepareLocal(prepCtx, id, resolved, r)
+	err := e.prepareLocal(prepCtx, id, turnID, resolved, r)
 	cancel()
 	if err != nil {
 		return failed(err)
@@ -420,17 +489,36 @@ func (e *Engine) streamLocalTurn(ctx context.Context, id, turnID string, resolve
 	if err != nil {
 		return failed(err)
 	}
+	history, err := e.localPendingHistory(ctx, id, turnID, r.state.LastTurnID)
+	if err != nil {
+		return failed(err)
+	}
+	prompt = append(history, prompt...)
+	if r.hostSecret != "" {
+		hostPrompt, err := e.localHostPrompt(ctx, id, turnID, r.hostName)
+		if err != nil {
+			return failed(err)
+		}
+		prompt = append([]acp.Content{{Type: "text", Text: hostPrompt}}, prompt...)
+	}
 	var outputErr error
 	var outputMu sync.Mutex
 	calls := map[string]tool.Call{}
+	callOrder := []string{}
 	finished := map[string]bool{}
+	// Keep the tool use at its start position. ACP may replace its input later
+	// or finish a background command after the answer has already streamed.
+	completeACPTool := func(call tool.Call, result tool.Result) error {
+		if finished[call.CallID] {
+			return nil
+		}
+		finished[call.CallID] = true
+		return e.completeToolCall(id, turnID, nil, parts, call, result)
+	}
 	promptCtx, stop := context.WithCancel(ctx)
 	defer stop()
 	hostTurn := &LocalHostTurn{SessionID: id, TurnID: turnID, Context: promptCtx, mu: &outputMu, active: active, parts: parts}
 	e.startLocalHost(r.hostSecret, hostTurn)
-	if r.hostSecret != "" {
-		prompt = append([]acp.Content{{Type: "text", Text: fmt.Sprintf("You are running inside Pudding. Use the %s MCP server for file, command, browser, widget and plugin operations so changes, approvals and results appear in this conversation. At the start of each turn call pudding_tools to read current tools, project instructions and Skills; query a tool's exact schema before calling pudding_call. Pudding manages connection and Turn IDs; do not connect/begin/end manually. Read refreshed instructions in tool results. Use native tools only when Pudding cannot provide the needed operation, and explain that fallback. Other configured MCP servers may expose older Pudding tools requiring binding IDs; do not use them for this conversation.", r.hostName)}}, prompt...)
-	}
 	result, err := r.client.Prompt(promptCtx, r.state.AgentSessionID, prompt, acp.Handlers{Update: func(update acp.Update) {
 		outputMu.Lock()
 		defer outputMu.Unlock()
@@ -470,18 +558,43 @@ func (e *Engine) streamLocalTurn(ctx context.Context, id, turnID string, resolve
 				if name == "" {
 					name = update.Kind
 				}
-				call = tool.Call{CallID: "acp:" + update.ToolCallID, Name: "antigravity." + name, Args: update.RawInput}
-				if len(call.Args) == 0 {
-					call.Args = json.RawMessage(`{}`)
+				args, ok := acpToolRawInput(update.RawInput)
+				if !ok {
+					args = json.RawMessage(`{}`)
 				}
-				parts.AppendTool(provider.ToolCallChunk{Index: len(parts.parts), CallID: call.CallID, Name: call.Name, ArgsDelta: string(call.Args)})
+				call = tool.Call{CallID: "acp:" + update.ToolCallID, Name: "antigravity." + name, Args: args}
 				calls[update.ToolCallID] = call
+				callOrder = append(callOrder, update.ToolCallID)
+				parts.AppendTool(provider.ToolCallChunk{Index: len(parts.parts), CallID: call.CallID, Name: call.Name, ArgsDelta: string(call.Args)})
+				if outputErr = e.commitTurnParts(turnID, parts, true); outputErr != nil {
+					stop()
+					return
+				}
 				e.hub.Publish(event.Event{SessionID: id, TurnID: turnID, Kind: event.TurnTool, CallID: call.CallID, Name: call.Name, Phase: "running", ArgsText: string(call.Args)})
+			} else if !finished[call.CallID] {
+				if args, ok := acpToolRawInput(update.RawInput); ok {
+					changed := !bytes.Equal(call.Args, args)
+					call.Args = args
+					calls[update.ToolCallID] = call
+					if changed {
+						parts.ReplaceToolArguments(call.CallID, args)
+						if outputErr = e.store.UpdateTurnToolArguments(context.Background(), turnID, call.CallID, args); outputErr != nil {
+							stop()
+							return
+						}
+						e.hub.Publish(event.Event{SessionID: id, TurnID: turnID, Kind: event.TurnTool, CallID: call.CallID, Name: call.Name, Phase: "running", ArgsText: string(call.Args)})
+					}
+				}
 			}
 			if !finished[call.CallID] && (update.Status == "completed" || update.Status == "failed") {
 				raw, _ := json.Marshal(update)
-				outputErr = e.completeToolCall(id, turnID, nil, parts, call, tool.Result{CallID: call.CallID, Name: call.Name, Ok: update.Status == "completed", Content: string(raw)})
-				finished[call.CallID] = true
+				toolResult := tool.Result{CallID: call.CallID, Name: call.Name, Ok: update.Status == "completed", Content: string(raw)}
+				// agy reports in-flight tools as failed in response to session/cancel.
+				// Preserve the raw update, but distinguish this from an earlier failure.
+				if update.Status == "failed" && ctx.Err() != nil {
+					toolResult.SummaryKind = tool.SummaryCancelled
+				}
+				outputErr = completeACPTool(call, toolResult)
 				if outputErr != nil {
 					stop()
 				}
@@ -497,18 +610,27 @@ func (e *Engine) streamLocalTurn(ctx context.Context, id, turnID string, resolve
 		e.revokeLocalHost(r.hostSecret)
 	}
 
-	for _, call := range calls {
+	outputMu.Lock()
+	for _, toolID := range callOrder {
+		call := calls[toolID]
 		if !finished[call.CallID] {
 			reason := "Antigravity ended before this tool returned"
+			summary := ""
 			if ctx.Err() != nil {
 				reason = "cancelled"
+				summary = tool.SummaryCancelled
 			}
-			if closeErr := e.completeToolCall(id, turnID, nil, parts, call, tool.Result{CallID: call.CallID, Name: call.Name, Ok: false, Content: reason}); closeErr != nil && outputErr == nil {
+			if closeErr := completeACPTool(call, tool.Result{CallID: call.CallID, Name: call.Name, Ok: false, Content: reason, SummaryKind: summary}); closeErr != nil && outputErr == nil {
 				outputErr = closeErr
 			}
 		}
 	}
-	r.state.LastTurnID = turnID
+	outputMu.Unlock()
+	// An RPC failure does not establish that the agent saved the input. Keep
+	// those turns in the next prompt as labelled history, never as fresh actions.
+	if err == nil {
+		r.state.LastTurnID = turnID
+	}
 	if saveErr := e.store.PutLocalAgentState(context.Background(), r.state); saveErr != nil {
 		return failed(saveErr)
 	}
@@ -533,6 +655,14 @@ func (e *Engine) streamLocalTurn(ctx context.Context, id, turnID string, resolve
 		return failed(readErr)
 	}
 	return store.TurnCompleted, "", e.LocalHostMode(hostTurn, session.ActiveMode)
+}
+
+func acpToolRawInput(raw json.RawMessage) (json.RawMessage, bool) {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		return nil, false
+	}
+	return append(json.RawMessage(nil), trimmed...), true
 }
 func (e *Engine) localUsage(ctx context.Context, id string) (*SessionUsageInfo, error) {
 	stat, err := e.store.SessionUsage(ctx, id)

@@ -12,7 +12,7 @@ import (
 )
 
 var localHostTools = []debugMCPTool{
-	{Name: "pudding_tools", Description: "Read the current conversation's tool names, plugins, Skills and live project instructions. Set query to a tool name to get its inputSchema before calling it. Repeat to refresh rules and dynamic tools.", InputSchema: json.RawMessage(`{"type":"object","properties":{"query":{"type":"string"}},"additionalProperties":false}`)},
+	{Name: "pudding_tools", Description: "Discover tools, plugins and Skills on demand. Set query to a tool name or search text to get matching inputSchemas; omit query for the catalog and live instructions. Reuse schemas already in context. No per-turn refresh is required: Pudding supplies current project and selected Skill/plugin instructions with each prompt and refreshes them in tool results.", InputSchema: json.RawMessage(`{"type":"object","properties":{"query":{"type":"string"}},"additionalProperties":false}`)},
 	{Name: "pudding_call", Description: "Execute a Pudding tool in the current conversation and user turn. Use the exact tool name and arguments from pudding_tools. No bindingID or turnID is needed. All operations inherit the conversation's permissions. Read updated projectInstructions and instructions in results.", InputSchema: json.RawMessage(`{"type":"object","properties":{"tool":{"type":"string"},"arguments":{"type":"object"}},"required":["tool","arguments"],"additionalProperties":false}`)},
 }
 
@@ -44,7 +44,7 @@ func (s *Server) serveLocalAgentMCP(w http.ResponseWriter, r *http.Request) {
 	var result any
 	switch request.Method {
 	case "initialize":
-		result = map[string]any{"protocolVersion": debugMCPProtocolVersion, "serverInfo": map[string]string{"name": "pudding", "version": "1"}, "capabilities": map[string]any{"tools": map[string]any{}}, "instructions": "Use pudding_tools to read current tools, rules and Skills, then pudding_call to execute business tools. The host owns the conversation and Turn. Do not connect or begin/end turns."}
+		result = map[string]any{"protocolVersion": debugMCPProtocolVersion, "serverInfo": map[string]string{"name": "pudding", "version": "1"}, "capabilities": map[string]any{"tools": map[string]any{}}, "instructions": "Pudding supplies current rules with each prompt. Discover tools and missing schemas with pudding_tools only when needed; reuse known schemas and execute with pudding_call. No per-turn catalog call is required. The host owns the conversation and Turn. Do not connect or begin/end turns."}
 	case "ping":
 		result = map[string]any{}
 	case "tools/list":
