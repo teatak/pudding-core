@@ -726,6 +726,14 @@ func TestSandboxGoDownloadReusePreservesConfiguration(t *testing.T) {
 
 func TestMacOSCommandSandboxReusesGoModuleArchives(t *testing.T) {
 	project, home, cache := t.TempDir(), t.TempDir(), t.TempDir()
+	// CI may install Go outside the sandbox's trusted toolchain locations.
+	// Put a disposable copy in the fixture so the real download always runs.
+	goRoot := filepath.Join(t.TempDir(), "go")
+	if err := os.CopyFS(goRoot, os.DirFS(runtime.GOROOT())); err != nil {
+		t.Fatal(err)
+	}
+	goExecutable := filepath.Join(goRoot, "bin", "go")
+	projectDirs := []string{project, cache, goRoot}
 	const module = "example.com/sandboxcache"
 	const moduleVersion = "v1.0.0"
 	const mod = "module example.com/sandboxcache\n\ngo 1.26\n"
@@ -770,18 +778,16 @@ func TestMacOSCommandSandboxReusesGoModuleArchives(t *testing.T) {
 	// The fixture has complete go.sum entries. A cache miss must fail offline.
 	env = sandboxSetEnv(env, "GOPROXY", strings.Replace(sandboxEnvValue(env, "GOPROXY"), ",https://proxy.golang.org,direct", ",off", 1))
 	env = sandboxSetEnv(env, "GOTOOLCHAIN", "local")
-	if _, err := resolveExecutableFromEnv("go", project, env); err != nil {
-		t.Skip("requires Go on PATH")
-	}
+	env = sandboxSetEnv(env, "GOROOT", goRoot)
 	runner := newPlatformCommandRunner(home)
 	for _, state := range []string{"project:first", "project:second"} {
 		t.Cleanup(func() {
-			clean := runMacOSSandboxTestCommand(t, runner, commandSpec{Executable: "/bin/sh", Args: []string{"-c", "go clean -modcache"}, CWD: project, Env: env, ProjectDirs: []string{project, cache}, StateKey: state})
+			clean := runMacOSSandboxTestCommand(t, runner, commandSpec{Executable: goExecutable, Args: []string{"clean", "-modcache"}, CWD: project, Env: env, ProjectDirs: projectDirs, StateKey: state})
 			if clean.exitCode != 0 {
 				t.Errorf("clean private cache: %+v", clean)
 			}
 		})
-		result := runMacOSSandboxTestCommand(t, runner, commandSpec{Executable: "/bin/sh", Args: []string{"-c", "go mod download -json " + module + "@" + moduleVersion}, CWD: project, Env: env, ProjectDirs: []string{project, cache}, StateKey: state})
+		result := runMacOSSandboxTestCommand(t, runner, commandSpec{Executable: goExecutable, Args: []string{"mod", "download", "-json", module + "@" + moduleVersion}, CWD: project, Env: env, ProjectDirs: projectDirs, StateKey: state})
 		var download struct{ Dir, Sum string }
 		if result.exitCode != 0 || json.Unmarshal([]byte(result.stdout), &download) != nil || download.Sum != zipSum {
 			t.Fatalf("offline cache reuse failed: %+v", result)
