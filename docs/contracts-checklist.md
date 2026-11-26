@@ -39,8 +39,8 @@ SSE 帧格式:lifecycle 事件带 `id: <seq>`;`event: <kind>`;`data: <Event JSON
 
 | 实体 | Go | TS | 字段 |
 | --- | --- | --- | --- |
-| Session | `store.Session` | `session` | id, title, provider, model, activeMode(chat/work/code), modeLease, projectID?, createdAt, updatedAt, running(读取时派生), backgroundProcessCount(读取时派生) |
-| Project | `store.Project` | `project` | id, name, rootDirs, approvalMode, createdAt, updatedAt |
+| Session | `store.Session` | `session` | id, title, provider, model, approvalMode(ask/auto/full), activeMode(chat/work/code), modeLease, projectID?, createdAt, updatedAt, running(读取时派生), backgroundProcessCount(读取时派生) |
+| Project | `store.Project` | `project` | id, name, rootDirs, createdAt, updatedAt |
 | ConversationTurn | `store.ConversationTurn` | `conversationTurn` | id, sessionID, clientMessageID, retryOfTurnID?, status, provider?, model?, mode?, error?, createdAt, updatedAt, messages[], fileChanges[] |
 | TurnFileChange | `store.TurnFileChange` | `turnFileChange` | id, sessionID, turnID, rootPath, kind(added/modified/deleted/renamed), originalPath?, path, additions, deletions, binary, tooLarge, oldSize, newSize, oldContent?, newContent? |
 | ContentPart | `store.ContentPart` | `contentPart` | type(text/thought/tool_use/tool_result), text?, id?, name?, args?, ok?, content?, summaryKind?, summaryCount?, attachments?(tool_result user-display artifacts) |
@@ -58,12 +58,12 @@ web 契约 `providerProfile.protocol` 与设置表单下拉;不在枚举内的 p
 
 | 端点 | 请求 | 响应 | 错误 |
 | --- | --- | --- | --- |
-| `POST /sessions` | `{title?, clientRequestID?, projectID?, provider, model}，创建待接入 Agent 的空会话时可用 `externalAgent: true` 代替模型参数` | 201 Session | — |
+| `POST /sessions` | `{title?, clientRequestID?, approvalMode?, projectID?, provider, model}，创建待接入 Agent 的空会话时可用 `externalAgent: true` 代替模型参数` | 201 Session | — |
 | `GET /sessions` | — | `{sessions: []}`，普通／归档列表仅返回主会话 | — |
 | `GET /sessions/{id}/children` | — | `{children: [{session,status,latestTurnID?,pendingApprovals,resultCollected,summary?}]}`，包括最新重试轮次 | 404 |
 | `POST /sessions/{id}/collaboration/stop` | — | 204；取消子会话运行／排队输入，保留主会话与历史 | 400 / 404 |
 | `GET /sessions/{id}` | — | Session | 404 |
-| `PATCH /sessions/{id}` | `{title?, provider?, model?, projectID?, activeMode?, modeLease?}` | Session | 404 |
+| `PATCH /sessions/{id}` | `{title?, provider?, model?, projectID?, approvalMode?, activeMode?, modeLease?}` | Session | 404 |
 | `DELETE /sessions/{id}` | — | 204 | 404 |
 | `POST /sessions/{id}/submit` | `{clientMessageID, text}` | 202 `{turnID, userMessageID}`;重复 200 `{duplicate, turnID, userMessageID}` | 400 / 404 / 409 `turn_running` |
 | `POST /sessions/{id}/turns/{turnID}/steer` | `{clientMessageID, text?, parts[]}` | 202 `{turnID, userMessageID}`;重复 200 `{duplicate, turnID, userMessageID}` | 400 / 404 / 409 `turn_not_active` |

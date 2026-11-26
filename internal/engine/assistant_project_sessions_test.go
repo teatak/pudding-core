@@ -128,11 +128,11 @@ func TestAssistantProjectSessionsReuseRequiresApproval(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
 			eng, db, sid := newAssistantProjectEngine(t)
-			project := &store.Project{ID: "project", Name: "pudding-core", ApprovalMode: store.ApprovalFull}
+			project := &store.Project{ID: "project", Name: "pudding-core"}
 			if err := db.CreateProject(ctx, project); err != nil {
 				t.Fatal(err)
 			}
-			worker := &store.Session{ID: "manual-worker", Title: "Existing review", ProjectID: project.ID, Provider: "configured", Model: "configured-model", ActiveMode: store.ModeWork, ModeLease: store.ModeLeaseSession}
+			worker := &store.Session{ApprovalMode: store.ApprovalFull, ID: "manual-worker", Title: "Existing review", ProjectID: project.ID, Provider: "configured", Model: "configured-model", ActiveMode: store.ModeWork, ModeLease: store.ModeLeaseSession}
 			if err := db.CreateSession(ctx, worker); err != nil {
 				t.Fatal(err)
 			}
@@ -189,9 +189,9 @@ func TestAssistantProjectSessionsReuseRequiresApproval(t *testing.T) {
 			if err != nil || len(sessions) != 1 || sessions[0].ID != worker.ID || sessions[0].ActiveMode != store.ModeWork || sessions[0].ModeLease != store.ModeLeaseSession {
 				t.Fatalf("reuse created or upgraded a session: %+v, %v", sessions, err)
 			}
-			stored, err := db.GetProject(ctx, project.ID)
+			stored, err := db.GetSession(ctx, worker.ID)
 			if err != nil || stored.ApprovalMode != store.ApprovalFull {
-				t.Fatalf("reuse changed project policy: %+v, %v", stored, err)
+				t.Fatalf("reuse changed session policy: %+v, %v", stored, err)
 			}
 		})
 	}

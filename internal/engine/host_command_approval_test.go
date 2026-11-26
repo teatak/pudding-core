@@ -22,10 +22,10 @@ func TestHostCommandsRequireFreshApproval(t *testing.T) {
 			defer cancel()
 			ms := storetest.New(t)
 			root := t.TempDir()
-			if err := ms.CreateProject(ctx, &store.Project{ID: "p", RootDirs: []string{root}, ApprovalMode: mode}); err != nil {
+			if err := ms.CreateProject(ctx, &store.Project{ID: "p", RootDirs: []string{root}}); err != nil {
 				t.Fatal(err)
 			}
-			if err := ms.CreateSession(ctx, &store.Session{ID: "s", ProjectID: "p", ActiveMode: store.ModeCode, Provider: "mock", Model: "mock"}); err != nil {
+			if err := ms.CreateSession(ctx, &store.Session{ApprovalMode: mode, ID: "s", ProjectID: "p", ActiveMode: store.ModeCode, Provider: "mock", Model: "mock"}); err != nil {
 				t.Fatal(err)
 			}
 			hub := event.NewHub()

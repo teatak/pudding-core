@@ -178,6 +178,19 @@ func TestMacOSCommandSandboxTrustsCommonUserExecutableDirs(t *testing.T) {
 			t.Fatalf("common executable dir %q was rejected: %v", relativeDir, err)
 		}
 	}
+	dir := filepath.Join(home, ".local", "bin")
+	command := "PATH=" + dir + ":\"$PATH\" pudding-tool && echo selected"
+	raw, _ := json.Marshal(map[string]any{"scope": "project", "command": command})
+	if risk, ok := ClassifyToolCallForProject(CommandRun, raw, []string{project}); !ok || !risk.LowRisk {
+		t.Fatalf("installed tool required approval: %+v", risk)
+	}
+	// Keep the fixture off the initial PATH so lookup depends on the prefix.
+	result := runMacOSSandboxTestCommand(t, newPlatformCommandRunner(t.TempDir()), commandSpec{
+		Executable: "/bin/sh", Args: []string{"-c", command}, CWD: project, Env: []string{"PATH=/usr/bin:/bin"}, ProjectDirs: []string{project}, StateKey: "path-selection",
+	})
+	if !result.sandboxed || result.exitCode != 0 || strings.TrimSpace(result.stdout) != "selected" {
+		t.Fatalf("sandbox tool selection: %+v", result)
+	}
 }
 
 func TestMacOSCommandSandboxAllowsLoopbackServer(t *testing.T) {

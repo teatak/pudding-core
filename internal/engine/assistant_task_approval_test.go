@@ -57,11 +57,11 @@ func TestAssistantExistingTaskApproval(t *testing.T) {
 						if _, err := db.BeginTurn(ctx, store.BeginTurnInput{SessionID: sid, TurnID: "source", UserMessageID: "source-message", ClientMessageID: "source-client", UserText: "Arrange work"}); err != nil {
 							t.Fatal(err)
 						}
-						project := &store.Project{ID: "project", Name: "Project name", RootDirs: []string{t.TempDir()}, ApprovalMode: mode}
+						project := &store.Project{ID: "project", Name: "Project name", RootDirs: []string{t.TempDir()}}
 						if err := db.CreateProject(ctx, project); err != nil {
 							t.Fatal(err)
 						}
-						worker := &store.Session{ID: "worker", Title: "Existing work", Provider: "capture", Model: "test", ProjectID: project.ID, ActiveMode: store.ModeCode, ModeLease: store.ModeLeaseSession}
+						worker := &store.Session{ApprovalMode: mode, ID: "worker", Title: "Existing work", Provider: "capture", Model: "test", ProjectID: project.ID, ActiveMode: store.ModeCode, ModeLease: store.ModeLeaseSession}
 						if !inProject {
 							worker.ProjectID = ""
 						}
@@ -223,12 +223,15 @@ func TestAssistantCreatedTaskNeedsNoDispatchApproval(t *testing.T) {
 					t.Fatal(err)
 				}
 				sid := profile.Assistant.SessionID
+				if _, err := db.UpdateSession(ctx, sid, store.SessionUpdate{ApprovalMode: &mode}); err != nil {
+					t.Fatal(err)
+				}
 				if _, err := db.BeginTurn(ctx, store.BeginTurnInput{SessionID: sid, TurnID: "source", UserMessageID: "message", ClientMessageID: "client", UserText: "Arrange work"}); err != nil {
 					t.Fatal(err)
 				}
 				args := map[string]string{"title": "New work", "prompt": "Complete this task"}
 				if inProject {
-					if err := db.CreateProject(ctx, &store.Project{ID: "project", Name: "Project", RootDirs: []string{t.TempDir()}, ApprovalMode: mode}); err != nil {
+					if err := db.CreateProject(ctx, &store.Project{ID: "project", Name: "Project", RootDirs: []string{t.TempDir()}}); err != nil {
 						t.Fatal(err)
 					}
 					args["project_id"] = "project"

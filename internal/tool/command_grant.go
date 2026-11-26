@@ -32,6 +32,7 @@ type CommandSessionGrant struct {
 	env             []string
 	callArgs        json.RawMessage
 	identity        CommandGrantIdentity
+	shellPrefix     string
 	shellSuffix     string
 }
 
@@ -45,11 +46,48 @@ func CommandSessionGrantForCall(call Call) *CommandSessionGrant {
 	if err != nil || args.Background || args.TTY {
 		return nil
 	}
+	var argv []string
+	var prefix string
+	if args.Execution != CommandExecutionHost {
+		var assignments []string
+		argv, assignments = literalGrantCommand(args.Command)
+		if len(argv) == 0 {
+			return nil
+		}
+		// The original call is also classified before a grant is issued.
+		for key, value := range args.Env {
+			if commandEnvKeyRequiresApproval(key, value, call.ProjectDirs) {
+				return nil
+			}
+		}
+		var shellAssignments strings.Builder
+		for _, assignment := range assignments {
+			name, value, _ := strings.Cut(assignment, "=")
+			if commandEnvKeyRequiresApproval(name, value, call.ProjectDirs) {
+				return nil
+			}
+			if portableGrantEnvKey(name) {
+				for key := range args.Env {
+					if key != name && strings.EqualFold(strings.TrimSpace(key), name) {
+						return nil
+					}
+				}
+				if args.Env == nil {
+					args.Env = make(map[string]string)
+				}
+				args.Env[name] = value
+			} else {
+				// Other variables take effect after the sandbox and shell have
+				// prepared their environment. Bind that timing to this lease.
+				shellAssignments.WriteString(name + "=" + quoteShellArg(value) + " ")
+			}
+		}
+		prefix = shellAssignments.String()
+	}
 	env, err := commandEnvironment(args.Env)
 	if err != nil {
 		return nil
 	}
-	var argv []string
 	var suffix string
 	var grant *CommandSessionGrant
 	if args.Execution == CommandExecutionHost {
@@ -60,16 +98,13 @@ func CommandSessionGrantForCall(call Call) *CommandSessionGrant {
 		}
 		grant = chromeSessionGrantForCall(call, args, argv, env, tempProfile)
 	} else {
-		argv = literalGrantCommand(args.Command)
-		if len(argv) == 0 {
-			return nil
-		}
 		grant = sandboxSessionGrantForCall(call, args, argv, env)
 	}
 	if grant == nil {
 		return nil
 	}
 	grant.shellSuffix = suffix
+	grant.shellPrefix = prefix
 	grant.Execution = args.Execution
 	launchPath, err := resolveExecutableFromEnv(argv[0], grant.CWD, env)
 	if err != nil {
@@ -90,7 +125,7 @@ func CommandSessionGrantForCall(call Call) *CommandSessionGrant {
 		}
 		roots = append(roots, resolved)
 	}
-	data, _ := json.Marshal([]any{grant.Key, launchPath, args.Execution, call.CommandStateKey, roots, call.CommandArtifactDir, env, suffix})
+	data, _ := json.Marshal([]any{grant.Key, launchPath, args.Execution, call.CommandStateKey, roots, call.CommandArtifactDir, env, prefix, suffix})
 	hash := sha256.Sum256(data)
 	grant.Key = hex.EncodeToString(hash[:])
 	info, err := os.Stat(grant.Executable)
@@ -100,7 +135,7 @@ func CommandSessionGrantForCall(call Call) *CommandSessionGrant {
 	if call.CommandDiagnostics {
 		grant.identity = CommandGrantIdentity{
 			Program:     commandIdentityHash(grant.Kind, grant.Executable),
-			Environment: commandIdentityHash(env),
+			Environment: commandIdentityHash(env, prefix),
 			Context:     commandIdentityHash(grant.CWD, roots, call.CommandArtifactDir, args.Execution, call.CommandStateKey),
 			Executable:  commandIdentityHash(info.Size(), info.ModTime().UnixNano(), info.Mode()),
 			Arguments:   commandIdentityHash(argv[1:], suffix),
@@ -109,20 +144,47 @@ func CommandSessionGrantForCall(call Call) *CommandSessionGrant {
 	return grant
 }
 
-func literalGrantCommand(command string) []string {
+func literalGrantCommand(command string) ([]string, []string) {
 	file, err := syntax.NewParser(syntax.Variant(syntax.LangPOSIX)).Parse(strings.NewReader(command), "command")
 	if err != nil || len(file.Stmts) != 1 {
-		return nil
+		return nil, nil
 	}
 	stmt := file.Stmts[0]
 	if stmt.Negated || stmt.Background || stmt.Coprocess || stmt.Disown || len(stmt.Redirs) != 0 {
-		return nil
+		return nil, nil
 	}
 	call, ok := stmt.Cmd.(*syntax.CallExpr)
-	if !ok || len(call.Assigns) != 0 || len(call.Args) == 0 {
-		return nil
+	if !ok || len(call.Args) == 0 {
+		return nil, nil
 	}
-	return literalGrantWords(call.Args)
+	var env []string
+	for _, assign := range call.Assigns {
+		if assign.Name == nil || assign.Append || assign.Index != nil || assign.Array != nil {
+			return nil, nil
+		}
+		value := ""
+		if assign.Value != nil {
+			words := literalGrantWords([]*syntax.Word{assign.Value})
+			if len(words) != 1 {
+				return nil, nil
+			}
+			value = words[0]
+		}
+		env = append(env, assign.Name.Value+"="+value)
+	}
+	return literalGrantWords(call.Args), env
+}
+
+// These process settings survive both shell startup and sandbox preparation.
+// Other inline variables can influence the shell itself, tool lookup, or
+// override sandbox-managed defaults after startup; keep their shell semantics.
+func portableGrantEnvKey(key string) bool {
+	switch key {
+	case "LANG", "LANGUAGE", "TZ", "CI", "NO_COLOR", "FORCE_COLOR", "TERM", "COLORTERM",
+		"GOOS", "GOARCH", "CGO_ENABLED", "NODE_ENV", "RUST_BACKTRACE", "PYTHONUNBUFFERED":
+		return true
+	}
+	return strings.HasPrefix(key, "LC_")
 }
 
 func literalGrantWords(words []*syntax.Word) []string {
@@ -132,7 +194,7 @@ func literalGrantWords(words []*syntax.Word) []string {
 			return nil
 		}
 		for _, part := range word.Parts {
-			if lit, ok := part.(*syntax.Lit); ok && (strings.ContainsAny(lit.Value, "\\*?[]") || strings.HasPrefix(lit.Value, "~")) {
+			if lit, ok := part.(*syntax.Lit); ok && (strings.ContainsAny(lit.Value, "\\*?[]") || strings.HasPrefix(lit.Value, "~") || strings.Contains(lit.Value, ":~")) {
 				return nil
 			}
 			if quoted, ok := part.(*syntax.DblQuoted); ok {
@@ -160,13 +222,7 @@ func sandboxSessionGrantForCall(call Call, args commandRunArgs, argv, env []stri
 	if err != nil {
 		return nil
 	}
-	if commandEnvironmentRequiresApprovalForProject(args.Env, call.ProjectDirs) {
-		return nil
-	}
-	base := args
-	base.Env = nil
-	raw, _ := json.Marshal(base)
-	risk, ok := classifyCommandCall(raw, call.ProjectDirs, call.CommandArtifactDir)
+	risk, ok := classifyCommandCall(call.Args, call.ProjectDirs, call.CommandArtifactDir)
 	if !ok || !risk.LowRisk || risk.Class != RiskClassCommand {
 		return nil
 	}
@@ -213,7 +269,7 @@ func (g *CommandSessionGrant) invocation(call Call) (string, []string, []string,
 	if !bytes.Equal(g.callArgs, call.Args) || fresh == nil || fresh.Key != g.Key {
 		return "", nil, nil, errors.New("command approval context changed; request approval again")
 	}
-	command := "exec " + joinShellCommand(g.argv)
+	command := g.shellPrefix + "exec " + joinShellCommand(g.argv)
 	if g.shellSuffix != "" {
 		command = joinShellCommand(g.argv) + g.shellSuffix
 	}

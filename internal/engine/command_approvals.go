@@ -30,28 +30,27 @@ type CommandApprovalStatus struct {
 	ReusedCount        int            `json:"reusedCount"`
 }
 
-func commandApprovalContext(project *store.Project, roots []string) string {
+func commandApprovalContext(policy sessionToolPolicy, roots []string) string {
 	var projectID string
-	mode := store.ApprovalAuto
-	if project != nil {
-		projectID, mode = project.ID, store.NormalizeApprovalMode(project.ApprovalMode)
+	if policy.project != nil {
+		projectID = policy.project.ID
 	}
-	data, _ := json.Marshal([]any{projectID, mode, store.NormalizeProjectDirs(roots)})
+	data, _ := json.Marshal([]any{projectID, policy.mode, store.NormalizeProjectDirs(roots)})
 	return string(data)
 }
 
-func (e *Engine) commandApprovalState(sessionID string, project *store.Project, roots []string) *commandApprovalState {
+func (e *Engine) commandApprovalState(sessionID string, policy sessionToolPolicy, roots []string) *commandApprovalState {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	key := commandApprovalContext(project, roots)
+	key := commandApprovalContext(policy, roots)
 	state := e.commandGrants[sessionID]
 	if state == nil || state.context != key {
 		if state != nil && e.commandDiagnosticsEnabled {
 			e.commandReuseDiagnosticLocked(sessionID).lastReset = "scope_changed"
 		}
 		state = &commandApprovalState{context: key, grants: make(map[string]*tool.CommandProjectAccess), identities: make(map[string]tool.CommandGrantIdentity), reasons: make(map[string]int)}
-		if project != nil {
-			state.projectID = project.ID
+		if policy.project != nil {
+			state.projectID = policy.project.ID
 		}
 		e.commandGrants[sessionID] = state
 	}
@@ -59,12 +58,12 @@ func (e *Engine) commandApprovalState(sessionID string, project *store.Project, 
 }
 
 func (e *Engine) commandApprovalStillCurrent(ctx context.Context, sessionID, turnID string, mode store.AgentMode, state *commandApprovalState) bool {
-	project, err := e.projectForToolCallPolicy(ctx, sessionID)
+	policy, err := e.sessionToolPolicy(ctx, sessionID)
 	if err != nil {
 		return false
 	}
 	roots, err := e.projectRootDirsForToolCall(ctx, sessionID, turnID, mode)
-	if err != nil || commandApprovalContext(project, roots) != state.context {
+	if err != nil || commandApprovalContext(policy, roots) != state.context {
 		return false
 	}
 	e.mu.Lock()
@@ -114,6 +113,15 @@ func (e *Engine) RevokeCommandApprovals(sessionID string) {
 			delete(e.turnProjectAccess, id)
 		}
 	}
+}
+
+func (e *Engine) InvalidateSessionCommandApprovals(sessionID string) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.commandDiagnosticsEnabled {
+		e.commandReuseDiagnosticLocked(sessionID).lastReset = "scope_changed"
+	}
+	delete(e.commandGrants, sessionID)
 }
 
 func (e *Engine) RevokeProjectCommandApprovals(projectID string) {

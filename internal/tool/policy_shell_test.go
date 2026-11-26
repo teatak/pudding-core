@@ -4,8 +4,38 @@ package tool
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
+	"slices"
 	"testing"
 )
+
+func TestCommandApprovalOutsidePathStep(t *testing.T) {
+	root, outside := t.TempDir(), t.TempDir()
+	if err := os.Symlink(outside, filepath.Join(root, "linked")); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		command string
+		step    string
+	}{
+		{"go test && echo ok > " + quoteShellArg(filepath.Join(outside, "log")), "#2 echo"},
+		{`go test && cat linked`, "#2 cat"},
+		{`go test && sh -c 'echo ok > linked/log'`, "#2 echo"},
+		{`{ echo ok; } >> linked/log`, ">>"},
+		{`go test && echo ok > local.log`, ""},
+	} {
+		raw, _ := json.Marshal(map[string]any{"scope": "project", "command": tc.command})
+		risk, ok := ClassifyToolCallForProject(CommandRun, raw, []string{root})
+		triggers := risk.ApprovalTriggers["outside_project"]
+		if !ok || risk.LowRisk != (tc.step == "") || (len(risk.requiredProjectPaths) > 0) != (tc.step != "") {
+			t.Fatalf("%s: unexpected path decision: %+v", tc.command, risk)
+		}
+		if tc.step == "" && len(triggers) != 0 || tc.step != "" && !slices.Equal(triggers, []string{tc.step}) {
+			t.Fatalf("%s: got triggers %v, want %q", tc.command, triggers, tc.step)
+		}
+	}
+}
 
 func TestCommandApprovalStaticShellWrappers(t *testing.T) {
 	root := t.TempDir()

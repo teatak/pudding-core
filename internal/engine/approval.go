@@ -444,6 +444,9 @@ func (e *Engine) requestToolCallApproval(ctx context.Context, sessionID, turnID 
 	for key, value := range details {
 		payload[key] = value
 	}
+	if call.Name == tool.CommandRun && len(risk.ApprovalTriggers) > 0 {
+		payload["commandApprovalTriggers"] = risk.ApprovalTriggers
+	}
 	e.mu.Lock()
 	if call.Name == tool.CommandRun && e.commandDiagnosticsEnabled {
 		payload["approvalReasons"] = commandApprovalReasons(risk)
@@ -503,49 +506,41 @@ func (e *Engine) requestToolCallApproval(ctx context.Context, sessionID, turnID 
 	}
 }
 
-func (e *Engine) toolCallApprovalRequired(ctx context.Context, sessionID string, risk tool.ToolRisk, details map[string]any) (*store.Project, bool, error) {
-	project, err := e.projectForToolCallPolicy(ctx, sessionID)
-	if err != nil {
-		return nil, false, err
-	}
+func (e *Engine) toolCallApprovalRequired(ctx context.Context, sessionID string, mode store.ApprovalMode, risk tool.ToolRisk, details map[string]any) (bool, error) {
 	if copyPlan := tool.FileCopyPlanFromDetails(details); copyPlan != nil {
 		if copyPlan.ExternalAccess {
-			return project, true, nil
+			return true, nil
 		}
 		if copyPlan.To.Scope != "project" {
-			return project, false, nil
+			return false, nil
 		}
 	}
 	if risk.Scope == "computer" {
 		appID := computerAppIDFromDetails(details)
 		if appID == "" {
-			return project, false, errors.New("Computer Use approval is missing appID")
+			return false, errors.New("Computer Use approval is missing appID")
 		}
 		granted, err := e.store.HasComputerAppGrant(ctx, sessionID, appID)
-		return project, !granted, err
-	}
-	mode := store.ApprovalAuto
-	if project != nil {
-		mode = store.NormalizeApprovalMode(project.ApprovalMode)
+		return !granted, err
 	}
 	switch mode {
 	case store.ApprovalFull:
-		return project, false, nil
+		return false, nil
 	case store.ApprovalAsk:
 		// Ask protects writes and execution, not routine low-risk inspection.
-		return project, risk.Class != tool.RiskClassRead || !risk.LowRisk, nil
+		return risk.Class != tool.RiskClassRead || !risk.LowRisk, nil
 	default:
 		switch risk.Class {
 		case tool.RiskClassRead:
-			return project, false, nil
+			return false, nil
 		case tool.RiskClassWrite:
-			return project, !risk.LowRisk, nil
+			return !risk.LowRisk, nil
 		case tool.RiskClassDestructive:
-			return project, true, nil
+			return true, nil
 		case tool.RiskClassCommand:
-			return project, !risk.LowRisk, nil
+			return !risk.LowRisk, nil
 		default:
-			return project, false, nil
+			return false, nil
 		}
 	}
 }
@@ -566,8 +561,8 @@ func computerAppIDFromApprovalPayload(raw json.RawMessage) string {
 	return strings.TrimSpace(payload.AppID)
 }
 
-func commandSandboxModeForProject(project *store.Project) tool.CommandSandboxMode {
-	if project != nil && store.NormalizeApprovalMode(project.ApprovalMode) == store.ApprovalFull {
+func commandSandboxMode(mode store.ApprovalMode) tool.CommandSandboxMode {
+	if mode == store.ApprovalFull {
 		return tool.CommandSandboxBypass
 	}
 	return tool.CommandSandboxEnforce
@@ -596,17 +591,21 @@ func refineToolRisk(name string, risk tool.ToolRisk, details map[string]any) too
 	return risk
 }
 
-func (e *Engine) projectForToolCallPolicy(ctx context.Context, sessionID string) (*store.Project, error) {
-	if sess, err := e.store.GetSession(ctx, sessionID); err != nil {
-		return nil, err
-	} else if sess.ProjectID != "" {
-		project, err := e.store.GetProject(ctx, sess.ProjectID)
-		if err != nil {
-			return nil, err
-		}
-		return project, nil
+type sessionToolPolicy struct {
+	mode    store.ApprovalMode
+	project *store.Project
+}
+
+func (e *Engine) sessionToolPolicy(ctx context.Context, sessionID string) (sessionToolPolicy, error) {
+	session, err := e.store.GetSession(ctx, sessionID)
+	if err != nil {
+		return sessionToolPolicy{}, err
 	}
-	return nil, nil
+	policy := sessionToolPolicy{mode: session.ApprovalMode}
+	if session.ProjectID != "" {
+		policy.project, err = e.store.GetProject(ctx, session.ProjectID)
+	}
+	return policy, err
 }
 
 func capabilityToolResult(call tool.Call, ok bool, payload map[string]any) tool.Result {

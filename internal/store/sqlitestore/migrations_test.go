@@ -19,6 +19,7 @@ func TestSchemaReleaseContract(t *testing.T) {
 	// Published fingerprints through v32 are immutable. Unpublished Studio
 	// layouts 33–46 remain recognized sources, with v47 the only destination.
 	releasedFingerprints := map[int]string{
+		69: "dfb6ce4564422ad97ad1182000a38766c7c1c7d7edfe1a3aef5202236a013fd0",
 		68: "22ce0b89c421b65ad3086db3d43079f84d9be5ca2d02f25cb39145f71055eec1",
 		67: "c9ed022df9f018826738f4f9b0c14fd9540f18239c990899267c7fb700a1ffab",
 		66: "9f77564db5b457a85f5cba1ff903ba6e0cd17983d147660ea724be8b833ddd01",
@@ -113,6 +114,63 @@ func TestOpenCreatesVersionedSchema(t *testing.T) {
 	if version != currentSchemaVersion {
 		t.Fatalf("schema version = %d, want %d", version, currentSchemaVersion)
 	}
+}
+
+func TestSessionApprovalModeMigrationAndRestart(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "approval.db")
+	db := openMigrationTestDB(t, path)
+	if err := createCurrentSchema(db); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`ALTER TABLE sessions DROP COLUMN approval_mode;
+		INSERT INTO projects(id,approval_mode,created_at,updated_at) VALUES ('p','full',1,1),('q','ask',1,1);
+		INSERT INTO sessions(id,project_id,provider,model,created_at,updated_at,last_activity_at,archived_at) VALUES
+		('a','p','test','m',1,1,1,0),('b','p','test','m',1,1,1,0),('archived','q','test','m',1,1,1,2),('standalone','','test','m',1,1,1,0);
+		PRAGMA user_version=68;`); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	check := func(st *Store, id string, want store.ApprovalMode) {
+		t.Helper()
+		sess, err := scanSession(st.db.QueryRowContext(ctx, "SELECT "+sessionSelectColumnsAliasS+" FROM sessions s WHERE s.id=?", id))
+		if err != nil || sess.ApprovalMode != want {
+			t.Fatalf("%s: want %s, got %+v, %v", id, want, sess, err)
+		}
+	}
+	st, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	check(st, "a", store.ApprovalFull)
+	check(st, "b", store.ApprovalFull)
+	check(st, "archived", store.ApprovalAsk)
+	check(st, "standalone", store.ApprovalAuto)
+	if err := st.CreateSession(ctx, &store.Session{ID: "new", ProjectID: "p", Provider: "test", Model: "m"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.CreateChildSession(ctx, "a", &store.Session{ID: "child", Provider: "test", Model: "m"}); err != nil {
+		t.Fatal(err)
+	}
+	check(st, "child", store.ApprovalFull)
+	ask := store.ApprovalAsk
+	if _, err := st.UpdateSession(ctx, "a", store.SessionUpdate{ApprovalMode: &ask}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	st, err = Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	check(st, "new", store.ApprovalAuto)
+	check(st, "a", store.ApprovalAsk)
+	check(st, "child", store.ApprovalAsk)
+	check(st, "b", store.ApprovalFull)
 }
 
 func TestOpenUnifiesAgentSessions(t *testing.T) {
@@ -485,7 +543,7 @@ func TestOpenMigratesVersionSevenRemovesProjectAppBindings(t *testing.T) {
 		t.Fatal(err)
 	}
 	ctx := context.Background()
-	project := &store.Project{ID: "proj_v6", Name: "Existing project", ApprovalMode: store.ApprovalAuto}
+	project := &store.Project{ID: "proj_v6", Name: "Existing project"}
 	if err := st.CreateProject(ctx, project); err != nil {
 		t.Fatal(err)
 	}

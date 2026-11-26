@@ -49,13 +49,14 @@ type Session struct {
 	AssistantSessionID  string `json:"assistantSessionID,omitempty"`
 	AssistantTaskActive bool   `json:"assistantTaskActive,omitempty"`
 	// Provider and Model may both be empty until a local model is selected.
-	Provider          string    `json:"provider"`
-	Model             string    `json:"model"`
-	ReasoningEffort   string    `json:"reasoningEffort,omitempty"`
-	ReasoningModelKey string    `json:"reasoningModelKey,omitempty"`
-	ActiveMode        AgentMode `json:"activeMode"`
-	ModeLease         ModeLease `json:"modeLease"`
-	// ProjectID 指向可选的共享项目目录与审批设置。
+	Provider          string       `json:"provider"`
+	Model             string       `json:"model"`
+	ReasoningEffort   string       `json:"reasoningEffort,omitempty"`
+	ReasoningModelKey string       `json:"reasoningModelKey,omitempty"`
+	ActiveMode        AgentMode    `json:"activeMode"`
+	ModeLease         ModeLease    `json:"modeLease"`
+	ApprovalMode      ApprovalMode `json:"approvalMode"`
+	// ProjectID 指向可选的共享项目目录。
 	ProjectID string `json:"projectID,omitempty"`
 	// LoadedPluginIDs 是当前会话已经加载、会向后续 turn 提供工具的插件。
 	// 对客户端只读；写入仍只允许通过显式的 session 插件接口。
@@ -82,6 +83,7 @@ type ComputerAppGrant struct {
 }
 
 type SessionUpdate struct {
+	ApprovalMode *ApprovalMode `json:"approvalMode"`
 	// DirectoryGrants is internal; capability approval and directory management
 	// write it after explicit user consent, never through a generic session PATCH.
 	DirectoryGrants *[]string  `json:"-"`
@@ -164,10 +166,9 @@ type Project struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
 	// RootDirs preserves user order; the first entry is the primary project directory.
-	RootDirs     []string     `json:"rootDirs"`
-	ApprovalMode ApprovalMode `json:"approvalMode"`
-	CreatedAt    time.Time    `json:"createdAt"`
-	UpdatedAt    time.Time    `json:"updatedAt"`
+	RootDirs  []string  `json:"rootDirs"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
 	// LastActivityAt 持久化项目最近活动时间，初值为创建时间。
 	// 会话内容活动只推进此值；删除、归档、元数据修改不改变它。
 	LastActivityAt time.Time `json:"lastActivityAt"`
@@ -180,9 +181,8 @@ type ProjectMergeOptions struct {
 }
 
 type ProjectUpdate struct {
-	Name         *string       `json:"name"`
-	RootDirs     *[]string     `json:"rootDirs"`
-	ApprovalMode *ApprovalMode `json:"approvalMode"`
+	Name     *string   `json:"name"`
+	RootDirs *[]string `json:"rootDirs"`
 }
 
 type AgentMode string
@@ -276,6 +276,12 @@ func NormalizeRootSession(s *Session) error {
 	}
 	s.ReasoningEffort = strings.TrimSpace(s.ReasoningEffort)
 	s.ReasoningModelKey = strings.TrimSpace(s.ReasoningModelKey)
+	if s.ApprovalMode == "" {
+		s.ApprovalMode = ApprovalAuto
+	}
+	if !s.ApprovalMode.valid() {
+		return ErrInvalidSession
+	}
 	s.ProjectID = strings.TrimSpace(s.ProjectID)
 	if s.ProjectID != "" {
 		if s.ActiveMode == "" {
@@ -302,7 +308,12 @@ func NormalizeRootSession(s *Session) error {
 	return nil
 }
 
+func (m ApprovalMode) valid() bool { return m == ApprovalAsk || m == ApprovalAuto || m == ApprovalFull }
+
 func NormalizeSessionUpdate(upd *SessionUpdate) error {
+	if upd.ApprovalMode != nil && !upd.ApprovalMode.valid() {
+		return ErrInvalidSession
+	}
 	if upd.Provider != nil {
 		provider := strings.TrimSpace(*upd.Provider)
 		if provider == "" {
@@ -378,7 +389,6 @@ func NormalizeProject(project *Project) error {
 	project.ID = strings.TrimSpace(project.ID)
 	project.Name = strings.TrimSpace(project.Name)
 	project.RootDirs = NormalizeProjectDirs(project.RootDirs)
-	project.ApprovalMode = NormalizeApprovalMode(project.ApprovalMode)
 	if project.ID == "" {
 		return ErrInvalidProject
 	}
@@ -400,24 +410,7 @@ func NormalizeProjectUpdate(upd *ProjectUpdate) error {
 		dirs := NormalizeProjectDirs(*upd.RootDirs)
 		upd.RootDirs = &dirs
 	}
-	if upd.ApprovalMode != nil {
-		mode := NormalizeApprovalMode(*upd.ApprovalMode)
-		upd.ApprovalMode = &mode
-	}
 	return nil
-}
-
-func NormalizeApprovalMode(mode ApprovalMode) ApprovalMode {
-	switch ApprovalMode(strings.TrimSpace(strings.ToLower(string(mode)))) {
-	case ApprovalAsk:
-		return ApprovalAsk
-	case "", ApprovalAuto:
-		return ApprovalAuto
-	case ApprovalFull:
-		return ApprovalFull
-	default:
-		return ApprovalAuto
-	}
 }
 
 // NormalizeProjectDirs cleans and deduplicates paths without changing filename whitespace.

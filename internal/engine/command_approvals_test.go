@@ -25,10 +25,10 @@ func TestSandboxAutonomyApprovalModes(t *testing.T) {
 	t.Cleanup(eng.Stop)
 	for _, mode := range []store.ApprovalMode{store.ApprovalAuto, store.ApprovalAsk, store.ApprovalFull} {
 		id := string(mode)
-		if err := ms.CreateProject(ctx, &store.Project{ID: id, RootDirs: []string{root}, ApprovalMode: mode}); err != nil {
+		if err := ms.CreateProject(ctx, &store.Project{ID: id, RootDirs: []string{root}}); err != nil {
 			t.Fatal(err)
 		}
-		if err := ms.CreateSession(ctx, &store.Session{ID: id, Provider: "mock", Model: "mock", ProjectID: id}); err != nil {
+		if err := ms.CreateSession(ctx, &store.Session{ApprovalMode: mode, ID: id, Provider: "mock", Model: "mock", ProjectID: id}); err != nil {
 			t.Fatal(err)
 		}
 		for _, command := range []string{
@@ -39,13 +39,14 @@ func TestSandboxAutonomyApprovalModes(t *testing.T) {
 			`for d in $(ls); do git -C "$d" status; done`,
 			`f() { printf '%s' "$1"; }; f ok`,
 			`n=$(git ls-files | wc -l); echo "$n"`,
+			`PATH="/usr/bin:$PATH" go test ./... && git status`,
 		} {
 			raw, _ := json.Marshal(map[string]any{"scope": "project", "cwd": root, "command": command})
 			risk, ok := tool.ClassifyToolCallForProject(tool.CommandRun, raw, []string{root})
 			if !ok || !risk.LowRisk {
 				t.Fatalf("project code not eligible for sandbox Auto: %+v", risk)
 			}
-			_, required, err := eng.toolCallApprovalRequired(ctx, id, risk, nil)
+			required, err := eng.sessionApprovalRequiredForTest(ctx, id, risk, nil)
 			if err != nil || required != (mode == store.ApprovalAsk) {
 				t.Fatalf("mode=%s command=%s required=%v err=%v", mode, command, required, err)
 			}
@@ -57,7 +58,7 @@ func TestAutoDynamicCommandDispatchKeepsSandboxAndScope(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
 	ms := storetest.New(t)
-	if err := ms.CreateProject(ctx, &store.Project{ID: "project", RootDirs: []string{root}, ApprovalMode: store.ApprovalAuto}); err != nil {
+	if err := ms.CreateProject(ctx, &store.Project{ID: "project", RootDirs: []string{root}}); err != nil {
 		t.Fatal(err)
 	}
 	if err := ms.CreateSession(ctx, &store.Session{ID: "session", Provider: "mock", Model: "mock", ProjectID: "project"}); err != nil {
@@ -112,12 +113,12 @@ func testSandboxSessionCommandApprovals(t *testing.T, diagnostics bool) {
 		}
 	}
 	for _, id := range []string{"a", "b"} {
-		if err := ms.CreateProject(ctx, &store.Project{ID: id, RootDirs: []string{root}, ApprovalMode: store.ApprovalAsk}); err != nil {
+		if err := ms.CreateProject(ctx, &store.Project{ID: id, RootDirs: []string{root}}); err != nil {
 			t.Fatal(err)
 		}
 	}
 	for _, id := range []string{"one", "two"} {
-		if err := ms.CreateSession(ctx, &store.Session{ID: id, Provider: "mock", Model: "mock", ActiveMode: store.ModeCode, ProjectID: "a"}); err != nil {
+		if err := ms.CreateSession(ctx, &store.Session{ApprovalMode: store.ApprovalAsk, ID: id, Provider: "mock", Model: "mock", ActiveMode: store.ModeCode, ProjectID: "a"}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -131,7 +132,7 @@ func testSandboxSessionCommandApprovals(t *testing.T, diagnostics bool) {
 		defer unsub()
 		runCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
 		defer cancel()
-		raw, _ := json.Marshal(map[string]any{"scope": "project", "command": command, "env": map[string]string{"PYTHONPATH": root}})
+		raw, _ := json.Marshal(map[string]any{"scope": "project", "command": command, "env": map[string]string{"PYTHONPATH": root, "LANG": "C"}})
 		done := make(chan tool.Result, 1)
 		go func() {
 			done <- eng.executeAllowedTool(runCtx, session, "turn", store.ModeCode, tool.Call{SessionID: session, Name: tool.CommandRun, CallID: "call", Args: raw})
@@ -180,7 +181,7 @@ func testSandboxSessionCommandApprovals(t *testing.T, diagnostics bool) {
 		t.Fatal("once approval remembered")
 	}
 	execute("one", "cat file.txt", true, ApprovalScopeSession, nil, true)
-	execute("one", "cat file.txt", false, ApprovalScopeTurn, nil, true)
+	execute("one", "LANG=C cat file.txt", false, ApprovalScopeTurn, nil, true)
 	status := eng.CommandApprovals("one")
 	if status.GrantCount != 1 || status.DiagnosticsEnabled != diagnostics || (diagnostics && (status.ReusedCount != 1 || status.ApprovalReasons["ask_mode"] != 2)) {
 		t.Fatalf("status=%+v", status)
@@ -227,4 +228,12 @@ func testSandboxSessionCommandApprovals(t *testing.T, diagnostics bool) {
 	eng.Stop()
 	eng = New(ms, hub, registry.Static(mock.New()), ms, WithTools(&approvalDetailsRecordingToolRunner{recordingToolRunner: calls}))
 	execute("one", "cat file.txt", true, ApprovalScopeSession, nil, true)
+}
+
+func (e *Engine) sessionApprovalRequiredForTest(ctx context.Context, id string, risk tool.ToolRisk, details map[string]any) (bool, error) {
+	policy, err := e.sessionToolPolicy(ctx, id)
+	if err != nil {
+		return false, err
+	}
+	return e.toolCallApprovalRequired(ctx, id, policy.mode, risk, details)
 }

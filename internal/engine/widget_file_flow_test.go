@@ -42,12 +42,12 @@ func TestCodeSessionWidgetPatchRunsThroughEngineApproval(t *testing.T) {
 	home := t.TempDir()
 	ms := storetest.New(t)
 	hub := event.NewHub()
-	project := &store.Project{ID: "proj_canvas_patch", Name: "Widget patch", RootDirs: []string{t.TempDir()}, ApprovalMode: store.ApprovalAsk}
+	project := &store.Project{ID: "proj_canvas_patch", Name: "Widget patch", RootDirs: []string{t.TempDir()}}
 	if err := ms.CreateProject(ctx, project); err != nil {
 		t.Fatal(err)
 	}
 	const sessionID = "sess_canvas_patch"
-	if err := ms.CreateSession(ctx, &store.Session{ID: sessionID, Title: "Widget patch", Provider: "widget-patch", Model: "widget-model", ActiveMode: store.ModeCode, ModeLease: store.ModeLeaseSession, ProjectID: project.ID}); err != nil {
+	if err := ms.CreateSession(ctx, &store.Session{ApprovalMode: store.ApprovalAsk, ID: sessionID, Title: "Widget patch", Provider: "widget-patch", Model: "widget-model", ActiveMode: store.ModeCode, ModeLease: store.ModeLeaseSession, ProjectID: project.ID}); err != nil {
 		t.Fatal(err)
 	}
 	const widgetID = "canvas_engine_patch"

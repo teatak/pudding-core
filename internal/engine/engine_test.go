@@ -1166,7 +1166,7 @@ func TestComputerToolApprovalGrantsSessionApp(t *testing.T) {
 	}
 	restarted := New(ms, event.NewHub(), mapResolver{}, ms)
 	risk := tool.ToolRisk{Class: tool.RiskClassRead, Scope: "computer"}
-	if _, required, err := restarted.toolCallApprovalRequired(ctx, sessionID, risk, map[string]any{"appID": "com.example.Calculator"}); err != nil || required {
+	if required, err := restarted.sessionApprovalRequiredForTest(ctx, sessionID, risk, map[string]any{"appID": "com.example.Calculator"}); err != nil || required {
 		t.Fatalf("restarted engine must reuse the persisted session app grant: required=%v err=%v", required, err)
 	}
 }
@@ -2516,10 +2516,9 @@ func TestCodeCapabilityNoopReturnsAlreadyAvailableForAuthorizedProject(t *testin
 	eng := New(ms, hub, mapResolver{}, ms)
 	ctx := context.Background()
 	project := &store.Project{
-		ID:           "proj_code_available",
-		Name:         "code available",
-		RootDirs:     []string{t.TempDir()},
-		ApprovalMode: store.ApprovalAuto,
+		ID:       "proj_code_available",
+		Name:     "code available",
+		RootDirs: []string{t.TempDir()},
 	}
 	if err := ms.CreateProject(ctx, project); err != nil {
 		t.Fatal(err)
@@ -2576,10 +2575,9 @@ func TestCodeCapabilityAdditionalDirectoryStillRequiresApproval(t *testing.T) {
 	eng := New(ms, hub, mapResolver{}, ms)
 	ctx := context.Background()
 	project := &store.Project{
-		ID:           "proj_code_existing",
-		Name:         "code existing",
-		RootDirs:     []string{t.TempDir()},
-		ApprovalMode: store.ApprovalAuto,
+		ID:       "proj_code_existing",
+		Name:     "code existing",
+		RootDirs: []string{t.TempDir()},
 	}
 	if err := ms.CreateProject(ctx, project); err != nil {
 		t.Fatal(err)
@@ -2857,10 +2855,9 @@ func TestProjectAskApprovalRequiresFileWriteApproval(t *testing.T) {
 	hub := event.NewHub()
 	dir := t.TempDir()
 	project := &store.Project{
-		ID:           "proj_write_approval",
-		Name:         "write approval",
-		RootDirs:     []string{dir},
-		ApprovalMode: store.ApprovalAsk,
+		ID:       "proj_write_approval",
+		Name:     "write approval",
+		RootDirs: []string{dir},
 	}
 	if err := ms.CreateProject(context.Background(), project); err != nil {
 		t.Fatal(err)
@@ -2873,7 +2870,7 @@ func TestProjectAskApprovalRequiresFileWriteApproval(t *testing.T) {
 	eng := New(ms, hub, mapResolver{"project": client}, ms, WithTools(runner), WithPlugins(&mutablePluginSource{defs: plugin.BuiltinDefinitions()}))
 	ctx := context.Background()
 	sid := "sess_project_file_write_approval"
-	if err := ms.CreateSession(ctx, &store.Session{
+	if err := ms.CreateSession(ctx, &store.Session{ApprovalMode: store.ApprovalAsk,
 		ID:         sid,
 		Title:      "project",
 		Provider:   "project",
@@ -2951,10 +2948,9 @@ func testPatchApprovalCarriesDiffAndAppliesAfterApproval(t *testing.T, unified b
 		t.Fatal(err)
 	}
 	project := &store.Project{
-		ID:           "proj_patch_approval",
-		Name:         "patch approval",
-		RootDirs:     []string{dir},
-		ApprovalMode: store.ApprovalAsk,
+		ID:       "proj_patch_approval",
+		Name:     "patch approval",
+		RootDirs: []string{dir},
 	}
 	if err := ms.CreateProject(ctx, project); err != nil {
 		t.Fatal(err)
@@ -2963,7 +2959,7 @@ func testPatchApprovalCarriesDiffAndAppliesAfterApproval(t *testing.T, unified b
 	eng := New(ms, hub, mapResolver{"patch": client}, ms, WithTools(tool.NewBuiltinRunner()), WithPlugins(&mutablePluginSource{defs: plugin.BuiltinDefinitions()}))
 	defer eng.Stop()
 	sid := "sess_patch_approval"
-	if err := ms.CreateSession(ctx, &store.Session{
+	if err := ms.CreateSession(ctx, &store.Session{ApprovalMode: store.ApprovalAsk,
 		ID: sid, Title: "patch", Provider: "patch", Model: "patch-model",
 		ActiveMode: store.ModeCode, ModeLease: store.ModeLeaseSession, ProjectID: project.ID,
 	}); err != nil {
@@ -3053,7 +3049,7 @@ func TestGitCommitApprovalCarriesStagedDiffAndCommitsAfterApproval(t *testing.T)
 	}
 	runEngineGitTest(t, dir, "add", "notes.txt")
 	project := &store.Project{
-		ID: "proj_git_commit", Name: "git commit", RootDirs: []string{dir}, ApprovalMode: store.ApprovalAsk,
+		ID: "proj_git_commit", Name: "git commit", RootDirs: []string{dir},
 	}
 	if err := ms.CreateProject(ctx, project); err != nil {
 		t.Fatal(err)
@@ -3062,7 +3058,7 @@ func TestGitCommitApprovalCarriesStagedDiffAndCommitsAfterApproval(t *testing.T)
 	eng := New(ms, hub, mapResolver{"git": client}, ms, WithTools(tool.NewBuiltinRunner()), WithPlugins(&mutablePluginSource{defs: plugin.BuiltinDefinitions()}))
 	defer eng.Stop()
 	sid := "sess_git_commit"
-	if err := ms.CreateSession(ctx, &store.Session{
+	if err := ms.CreateSession(ctx, &store.Session{ApprovalMode: store.ApprovalAsk,
 		ID: sid, Title: "git", Provider: "git", Model: "git-model",
 		ActiveMode: store.ModeCode, ModeLease: store.ModeLeaseSession, ProjectID: project.ID,
 	}); err != nil {
@@ -3110,14 +3106,13 @@ func TestGitCommitApprovalCarriesStagedDiffAndCommitsAfterApproval(t *testing.T)
 	}
 }
 
-func TestProjectApprovalModesClassifyCommands(t *testing.T) {
+func TestSessionApprovalModesClassifyCommands(t *testing.T) {
 	ctx := context.Background()
 	ms := storetest.New(t)
 	project := &store.Project{
-		ID:           "proj_command_policy",
-		Name:         "command policy",
-		RootDirs:     []string{t.TempDir()},
-		ApprovalMode: store.ApprovalAuto,
+		ID:       "proj_command_policy",
+		Name:     "command policy",
+		RootDirs: []string{t.TempDir()},
 	}
 	if err := ms.CreateProject(ctx, project); err != nil {
 		t.Fatal(err)
@@ -3135,29 +3130,29 @@ func TestProjectApprovalModesClassifyCommands(t *testing.T) {
 	computerRead := tool.ToolRisk{Class: tool.RiskClassRead, Scope: "computer"}
 	computerWrite := tool.ToolRisk{Class: tool.RiskClassWrite, Scope: "computer"}
 
-	if _, required, err := eng.toolCallApprovalRequired(ctx, sid, readRisk, nil); err != nil || required {
+	if required, err := eng.sessionApprovalRequiredForTest(ctx, sid, readRisk, nil); err != nil || required {
 		t.Fatalf("auto should allow read tools: required=%v err=%v", required, err)
 	}
-	if _, required, err := eng.toolCallApprovalRequired(ctx, sid, lowRisk, nil); err != nil || required {
+	if required, err := eng.sessionApprovalRequiredForTest(ctx, sid, lowRisk, nil); err != nil || required {
 		t.Fatalf("auto should allow low-risk command: required=%v err=%v", required, err)
 	}
-	if _, required, err := eng.toolCallApprovalRequired(ctx, sid, projectWrite, nil); err != nil || required {
+	if required, err := eng.sessionApprovalRequiredForTest(ctx, sid, projectWrite, nil); err != nil || required {
 		t.Fatalf("auto should allow low-risk project write: required=%v err=%v", required, err)
 	}
-	if _, required, err := eng.toolCallApprovalRequired(ctx, sid, protectedWrite, nil); err != nil || !required {
+	if required, err := eng.sessionApprovalRequiredForTest(ctx, sid, protectedWrite, nil); err != nil || !required {
 		t.Fatalf("auto should ask for protected project write: required=%v err=%v", required, err)
 	}
-	if _, required, err := eng.toolCallApprovalRequired(ctx, sid, highRisk, nil); err != nil || !required {
+	if required, err := eng.sessionApprovalRequiredForTest(ctx, sid, highRisk, nil); err != nil || !required {
 		t.Fatalf("auto should ask for other commands: required=%v err=%v", required, err)
 	}
 	ask := store.ApprovalAsk
-	if _, err := ms.UpdateProject(ctx, project.ID, store.ProjectUpdate{ApprovalMode: &ask}); err != nil {
+	if _, err := ms.UpdateSession(ctx, sid, store.SessionUpdate{ApprovalMode: &ask}); err != nil {
 		t.Fatal(err)
 	}
-	if _, required, err := eng.toolCallApprovalRequired(ctx, sid, lowRisk, nil); err != nil || !required {
+	if required, err := eng.sessionApprovalRequiredForTest(ctx, sid, lowRisk, nil); err != nil || !required {
 		t.Fatalf("ask should require command approval: required=%v err=%v", required, err)
 	}
-	if _, required, err := eng.toolCallApprovalRequired(ctx, sid, readRisk, nil); err != nil || required {
+	if required, err := eng.sessionApprovalRequiredForTest(ctx, sid, readRisk, nil); err != nil || required {
 		t.Fatalf("ask should allow low-risk reads: required=%v err=%v", required, err)
 	}
 	for _, risk := range []tool.ToolRisk{
@@ -3167,11 +3162,11 @@ func TestProjectApprovalModesClassifyCommands(t *testing.T) {
 		{Class: tool.RiskClassDestructive},
 		{},
 	} {
-		if _, required, err := eng.toolCallApprovalRequired(ctx, sid, risk, nil); err != nil || !required {
+		if required, err := eng.sessionApprovalRequiredForTest(ctx, sid, risk, nil); err != nil || !required {
 			t.Fatalf("ask should still protect %+v: required=%v err=%v", risk, required, err)
 		}
 	}
-	if _, required, err := eng.toolCallApprovalRequired(ctx, sid, tool.ToolRisk{Class: tool.RiskClassRead, LowRisk: true, Scope: "computer"}, map[string]any{"appID": "com.example.Notes"}); err != nil || !required {
+	if required, err := eng.sessionApprovalRequiredForTest(ctx, sid, tool.ToolRisk{Class: tool.RiskClassRead, LowRisk: true, Scope: "computer"}, map[string]any{"appID": "com.example.Notes"}); err != nil || !required {
 		t.Fatalf("ask must not bypass Computer Use app consent for a low-risk read: required=%v err=%v", required, err)
 	}
 	for _, test := range []struct {
@@ -3196,48 +3191,48 @@ func TestProjectApprovalModesClassifyCommands(t *testing.T) {
 		if !ok {
 			t.Fatalf("tool %s was not classified", test.name)
 		}
-		if _, required, err := eng.toolCallApprovalRequired(ctx, sid, risk, nil); err != nil || required != test.ask {
+		if required, err := eng.sessionApprovalRequiredForTest(ctx, sid, risk, nil); err != nil || required != test.ask {
 			t.Fatalf("ask mode for %s: required=%v err=%v, want %v", test.name, required, err, test.ask)
 		}
 	}
 	full := store.ApprovalFull
-	if _, err := ms.UpdateProject(ctx, project.ID, store.ProjectUpdate{ApprovalMode: &full}); err != nil {
+	if _, err := ms.UpdateSession(ctx, sid, store.SessionUpdate{ApprovalMode: &full}); err != nil {
 		t.Fatal(err)
 	}
-	if _, required, err := eng.toolCallApprovalRequired(ctx, sid, highRisk, nil); err != nil || required {
+	if required, err := eng.sessionApprovalRequiredForTest(ctx, sid, highRisk, nil); err != nil || required {
 		t.Fatalf("full should allow command: required=%v err=%v", required, err)
 	}
 	computerDetails := map[string]any{"appID": "com.example.Calculator"}
-	if _, required, err := eng.toolCallApprovalRequired(ctx, sid, computerWrite, computerDetails); err != nil || !required {
+	if required, err := eng.sessionApprovalRequiredForTest(ctx, sid, computerWrite, computerDetails); err != nil || !required {
 		t.Fatalf("Computer Use writes must require approval in full mode: required=%v err=%v", required, err)
 	}
-	if _, required, err := eng.toolCallApprovalRequired(ctx, sid, computerRead, computerDetails); err != nil || !required {
+	if required, err := eng.sessionApprovalRequiredForTest(ctx, sid, computerRead, computerDetails); err != nil || !required {
 		t.Fatalf("Computer Use observations must require approval in full mode: required=%v err=%v", required, err)
 	}
 	if err := ms.GrantComputerApp(ctx, sid, "com.example.Calculator"); err != nil {
 		t.Fatal(err)
 	}
-	if _, required, err := eng.toolCallApprovalRequired(ctx, sid, computerRead, computerDetails); err != nil || required {
+	if required, err := eng.sessionApprovalRequiredForTest(ctx, sid, computerRead, computerDetails); err != nil || required {
 		t.Fatalf("approved Computer Use app should not ask again: required=%v err=%v", required, err)
 	}
-	if _, required, err := eng.toolCallApprovalRequired(ctx, sid, computerWrite, map[string]any{"appID": "com.example.Notes"}); err != nil || !required {
+	if required, err := eng.sessionApprovalRequiredForTest(ctx, sid, computerWrite, map[string]any{"appID": "com.example.Notes"}); err != nil || !required {
 		t.Fatalf("a different Computer Use app must require approval: required=%v err=%v", required, err)
 	}
 }
 
-func TestCommandSandboxModeFollowsProjectApprovalMode(t *testing.T) {
+func TestCommandSandboxModeFollowsSessionApprovalMode(t *testing.T) {
 	for _, test := range []struct {
-		name    string
-		project *store.Project
-		want    tool.CommandSandboxMode
+		name string
+		mode store.ApprovalMode
+		want tool.CommandSandboxMode
 	}{
 		{name: "no project", want: tool.CommandSandboxEnforce},
-		{name: "ask", project: &store.Project{ApprovalMode: store.ApprovalAsk}, want: tool.CommandSandboxEnforce},
-		{name: "auto", project: &store.Project{ApprovalMode: store.ApprovalAuto}, want: tool.CommandSandboxEnforce},
-		{name: "full", project: &store.Project{ApprovalMode: store.ApprovalFull}, want: tool.CommandSandboxBypass},
+		{name: "ask", mode: store.ApprovalAsk, want: tool.CommandSandboxEnforce},
+		{name: "auto", mode: store.ApprovalAuto, want: tool.CommandSandboxEnforce},
+		{name: "full", mode: store.ApprovalFull, want: tool.CommandSandboxBypass},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			if got := commandSandboxModeForProject(test.project); got != test.want {
+			if got := commandSandboxMode(test.mode); got != test.want {
 				t.Fatalf("sandbox mode = %q, want %q", got, test.want)
 			}
 		})
@@ -3285,16 +3280,15 @@ func TestExecuteAllowedCommandPropagatesProjectSandboxMode(t *testing.T) {
 			ms := storetest.New(t)
 			root := t.TempDir()
 			project := &store.Project{
-				ID:           "proj_sandbox_" + test.name,
-				Name:         "sandbox " + test.name,
-				RootDirs:     []string{root},
-				ApprovalMode: test.mode,
+				ID:       "proj_sandbox_" + test.name,
+				Name:     "sandbox " + test.name,
+				RootDirs: []string{root},
 			}
 			if err := ms.CreateProject(ctx, project); err != nil {
 				t.Fatal(err)
 			}
 			sessionID := "sess_sandbox_" + test.name
-			if err := ms.CreateSession(ctx, &store.Session{ID: sessionID, Provider: "mock", Model: "mock", ProjectID: project.ID}); err != nil {
+			if err := ms.CreateSession(ctx, &store.Session{ApprovalMode: test.mode, ID: sessionID, Provider: "mock", Model: "mock", ProjectID: project.ID}); err != nil {
 				t.Fatal(err)
 			}
 			calls := &recordingToolRunner{
@@ -3466,7 +3460,7 @@ func TestApprovedHostAccessCommandBypassesSandboxForExactInvocation(t *testing.T
 	ms := storetest.New(t)
 	hub := event.NewHub()
 	root := t.TempDir()
-	project := &store.Project{ID: "proj_brew", RootDirs: []string{root}, ApprovalMode: store.ApprovalAuto}
+	project := &store.Project{ID: "proj_brew", RootDirs: []string{root}}
 	if err := ms.CreateProject(ctx, project); err != nil {
 		t.Fatal(err)
 	}
@@ -3529,7 +3523,7 @@ func TestSandboxCommandReportsHostBoundaryWithoutApproval(t *testing.T) {
 	ms := storetest.New(t)
 	hub := event.NewHub()
 	root := t.TempDir()
-	project := &store.Project{ID: "proj_boundary", RootDirs: []string{root}, ApprovalMode: store.ApprovalAuto}
+	project := &store.Project{ID: "proj_boundary", RootDirs: []string{root}}
 	if err := ms.CreateProject(ctx, project); err != nil {
 		t.Fatal(err)
 	}
@@ -3570,7 +3564,7 @@ func TestApprovedDestructiveCommandRemainsSandboxed(t *testing.T) {
 	ms := storetest.New(t)
 	hub := event.NewHub()
 	root := t.TempDir()
-	project := &store.Project{ID: "proj_rm", RootDirs: []string{root}, ApprovalMode: store.ApprovalAuto}
+	project := &store.Project{ID: "proj_rm", RootDirs: []string{root}}
 	if err := ms.CreateProject(ctx, project); err != nil {
 		t.Fatal(err)
 	}

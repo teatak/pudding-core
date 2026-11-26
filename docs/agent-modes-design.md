@@ -11,13 +11,13 @@ Pudding 使用三档内部能力模式:
 chat < work < code
 ```
 
-模式表达 agent 当前可使用的能力；Project 表达共享目录、审批设置和会话归属。会话也可独立保存目录授权。
+模式表达 agent 当前可使用的能力；Project 表达共享目录和会话归属。会话独立保存审批模式和目录授权。
 两者不再复用同一个名称:
 
 - `ModeChat = "chat"`
 - `ModeWork = "work"`
 - `ModeCode = "code"`
-- `Session.projectID`、`Project.rootDirs`、`Project.approvalMode` 与工具
+- `Session.projectID`、`Project.rootDirs`、`Session.approvalMode` 与工具
   `scope:"project"` 保持不变。
 
 ## 2. 产品语义

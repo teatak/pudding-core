@@ -25,7 +25,7 @@ func TestScratchVerificationNeedsNoApprovalOrProjectDiff(t *testing.T) {
 	defer cancel()
 	homeDir, project := t.TempDir(), t.TempDir()
 	ms := storetest.New(t)
-	if err := ms.CreateProject(ctx, &store.Project{ID: "project", RootDirs: []string{project}, ApprovalMode: store.ApprovalAuto}); err != nil {
+	if err := ms.CreateProject(ctx, &store.Project{ID: "project", RootDirs: []string{project}}); err != nil {
 		t.Fatal(err)
 	}
 	if err := ms.CreateSession(ctx, &store.Session{ID: "session", Provider: "mock", Model: "mock", ActiveMode: store.ModeCode, ProjectID: "project"}); err != nil {

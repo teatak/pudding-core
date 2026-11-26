@@ -20,7 +20,7 @@ func TestWindowsSandboxRejectionPrecedesApprovalAndDispatch(t *testing.T) {
 	defer cancel()
 	ms := storetest.New(t)
 	root := t.TempDir()
-	if err := ms.CreateProject(ctx, &store.Project{ID: "p", RootDirs: []string{root}, ApprovalMode: store.ApprovalAuto}); err != nil {
+	if err := ms.CreateProject(ctx, &store.Project{ID: "p", RootDirs: []string{root}}); err != nil {
 		t.Fatal(err)
 	}
 	if err := ms.CreateSession(ctx, &store.Session{ID: "s", ProjectID: "p", Provider: "mock", Model: "mock", ActiveMode: store.ModeCode}); err != nil {

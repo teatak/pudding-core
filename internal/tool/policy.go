@@ -3,9 +3,13 @@ package tool
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
+
+	"mvdan.cc/sh/v3/syntax"
 )
 
 type RiskClass string
@@ -18,13 +22,14 @@ const (
 )
 
 type ToolRisk struct {
-	Class                RiskClass `json:"class"`
-	Operation            string    `json:"operation"`
-	Scope                string    `json:"scope"`
-	Paths                []string  `json:"paths,omitempty"`
-	Summary              string    `json:"summary"`
-	LowRisk              bool      `json:"lowRisk,omitempty"`
-	ApprovalReasons      []string  `json:"approvalReasons,omitempty"`
+	Class                RiskClass           `json:"class"`
+	Operation            string              `json:"operation"`
+	Scope                string              `json:"scope"`
+	Paths                []string            `json:"paths,omitempty"`
+	Summary              string              `json:"summary"`
+	LowRisk              bool                `json:"lowRisk,omitempty"`
+	ApprovalReasons      []string            `json:"approvalReasons,omitempty"`
+	ApprovalTriggers     map[string][]string `json:"-"`
 	hostAccessRequired   bool
 	requiredProjectPaths []string
 }
@@ -354,7 +359,8 @@ func classifyCommandCall(raw json.RawMessage, projectDirs []string, managedDirs 
 	// they never select cwd or authorize launching an executable.
 	operandDirs := normalizeProjectDirs(append(append([]string(nil), projectDirs...), managedDirs...))
 	commandArgvs := policyCommandArgvs(analysis.Commands)
-	for _, cmd := range append(analysis.Commands, analysis.wrappers...) {
+	subjects := make(map[*syntax.CallExpr]string)
+	for index, cmd := range append(analysis.Commands, analysis.wrappers...) {
 		argv := unwrapCommand(cmd.Argv)
 		if len(argv) == 0 || argv[0] == unknownPolicyWord {
 			continue
@@ -386,19 +392,31 @@ func classifyCommandCall(raw json.RawMessage, projectDirs []string, managedDirs 
 		if !executableAllowed && !isBareCommand(argv[0]) {
 			outsidePaths = append(outsidePaths, commandPathsOutsideProject([]string{argv[0]}, effectiveCWD, projectDirs)...)
 		}
-		commandLowRisk := executableAllowed && !commandRequiresApproval(argv) &&
-			len(outsidePaths) == 0 &&
-			!commandNeedsHostAccess(argv) &&
-			!strings.Contains(argv[0], "$")
+		sensitive := !executableAllowed || commandRequiresApproval(argv) || commandNeedsHostAccess(argv) || strings.Contains(argv[0], "$")
+		commandLowRisk := !sensitive && len(outsidePaths) == 0
 		risk.LowRisk = risk.LowRisk && commandLowRisk
+		subject := commandOperation
+		if len(analysis.Commands) > 1 && index < len(analysis.Commands) {
+			subject = fmt.Sprintf("#%d %s", index+1, commandOperation)
+		}
+		subjects[cmd.call] = subject
 		if !commandLowRisk {
 			risk.ApprovalReasons = append(risk.ApprovalReasons, "sensitive_command")
+			if isDestructiveCommand(commandOperation) {
+				risk.addCommandTrigger("destructive_command", subject)
+			} else if sensitive {
+				risk.addCommandTrigger("sensitive_command", subject)
+			}
+			if len(outsidePaths) > 0 {
+				risk.addCommandTrigger("outside_project", subject)
+			}
 		}
 		// A download exemption never approves a compound download-and-execute
 		// workflow. Review the complete command rather than only its HTTP segment.
 		if (commandOperation == "curl" || commandOperation == "wget") && !downloadCompanionsAreNonExecuting(commandArgvs) {
 			risk.LowRisk = false
 			risk.ApprovalReasons = append(risk.ApprovalReasons, "download_and_execute")
+			risk.addCommandTrigger("download_and_execute", subject)
 		}
 		risk.requiredProjectPaths = append(risk.requiredProjectPaths, outsidePaths...)
 		risk.hostAccessRequired = risk.hostAccessRequired || commandNeedsHostAccess(argv)
@@ -414,6 +432,7 @@ func classifyCommandCall(raw json.RawMessage, projectDirs []string, managedDirs 
 					analysis.Redirections = append(analysis.Redirections, shellPolicyRedirection{
 						Redirection: shellRedirection{Path: path},
 						CWD:         cmd.CWD,
+						call:        cmd.call,
 					})
 				}
 			}
@@ -424,13 +443,36 @@ func classifyCommandCall(raw json.RawMessage, projectDirs []string, managedDirs 
 		if outsidePaths := commandRedirectionsOutsideProject([]shellRedirection{redir.Redirection}, effectiveCWD, operandDirs); len(outsidePaths) > 0 {
 			risk.LowRisk = false
 			risk.requiredProjectPaths = append(risk.requiredProjectPaths, outsidePaths...)
+			subject := subjects[redir.call]
+			if subject == "" {
+				// A redirect on a block or by itself has no single command.
+				subject = redir.operator
+			}
+			risk.addCommandTrigger("outside_project", subject)
+		}
+	}
+	checkEnvironment := func(env map[string]string, pathPrefix string) {
+		for _, key := range slices.Sorted(maps.Keys(env)) {
+			value := env[key]
+			if key == "PATH" && args.Execution == CommandExecutionSandbox {
+				if pathPrefix != "" {
+					value = pathPrefix
+				}
+				if readOnlyToolchainPATH(value, operandDirs) {
+					continue
+				}
+			}
+			if commandEnvKeyRequiresApproval(key, value, projectDirs) {
+				risk.LowRisk = false
+				risk.ApprovalReasons = append(risk.ApprovalReasons, "custom_environment")
+				if validCommandEnvKey(key) {
+					risk.addCommandTrigger("custom_environment", key)
+				}
+			}
 		}
 	}
 	for _, environment := range analysis.Environments {
-		if commandEnvironmentRequiresApprovalForProject(environment.Env, projectDirs) {
-			risk.LowRisk = false
-			risk.ApprovalReasons = append(risk.ApprovalReasons, "custom_environment")
-		}
+		checkEnvironment(environment.Env, environment.pathPrefix)
 		effectiveCWD := resolvePolicyCWD(args.CWD, environment.CWD)
 		if paths := commandEnvironmentOutsideProjectPaths(environment.Env, effectiveCWD, operandDirs); len(paths) > 0 {
 			risk.LowRisk = false
@@ -439,10 +481,7 @@ func classifyCommandCall(raw json.RawMessage, projectDirs []string, managedDirs 
 	}
 	if len(args.Env) > 0 {
 		risk.Summary = "Run project command with custom environment: " + compactShellCommand(args.Command)
-		if commandEnvironmentRequiresApprovalForProject(args.Env, projectDirs) {
-			risk.LowRisk = false
-			risk.ApprovalReasons = append(risk.ApprovalReasons, "custom_environment")
-		}
+		checkEnvironment(args.Env, "")
 		if outsidePaths := commandEnvironmentOutsideProjectPaths(args.Env, args.CWD, operandDirs); len(outsidePaths) > 0 {
 			risk.requiredProjectPaths = append(risk.requiredProjectPaths, outsidePaths...)
 		}
@@ -470,6 +509,16 @@ func classifyCommandCall(raw json.RawMessage, projectDirs []string, managedDirs 
 	}
 	risk.ApprovalReasons = compactRiskPaths(risk.ApprovalReasons...)
 	return risk, true
+}
+
+// Only the program name, variable name or redirection operator is sent to the card.
+func (risk *ToolRisk) addCommandTrigger(reason, name string) {
+	if risk.ApprovalTriggers == nil {
+		risk.ApprovalTriggers = make(map[string][]string)
+	}
+	if !slices.Contains(risk.ApprovalTriggers[reason], name) {
+		risk.ApprovalTriggers[reason] = append(risk.ApprovalTriggers[reason], name)
+	}
 }
 
 // No POSIX safety inference applies to PowerShell. Windows host commands are

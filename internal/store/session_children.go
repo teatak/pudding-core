@@ -13,6 +13,7 @@ func PrepareChildSession(parent, child *Session) error {
 		return ErrInvalidSessionRelation
 	}
 	child.ProjectID = parent.ProjectID
+	child.ApprovalMode = parent.ApprovalMode
 	if err := NormalizeSessionProviderModel(child); err != nil {
 		return err
 	}

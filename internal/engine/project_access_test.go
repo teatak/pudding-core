@@ -133,10 +133,10 @@ func TestCommandDirectoryAndRiskUseOneApproval(t *testing.T) {
 			root, extra := t.TempDir(), t.TempDir()
 			root, _ = filepath.EvalSymlinks(root)
 			extra, _ = filepath.EvalSymlinks(extra)
-			if err := ms.CreateProject(ctx, &store.Project{ID: "p", RootDirs: []string{root}, ApprovalMode: store.ApprovalAsk}); err != nil {
+			if err := ms.CreateProject(ctx, &store.Project{ID: "p", RootDirs: []string{root}}); err != nil {
 				t.Fatal(err)
 			}
-			if err := ms.CreateSession(ctx, &store.Session{ID: "s", Provider: "mock", Model: "mock", ProjectID: "p", ActiveMode: store.ModeCode}); err != nil {
+			if err := ms.CreateSession(ctx, &store.Session{ApprovalMode: store.ApprovalAsk, ID: "s", Provider: "mock", Model: "mock", ProjectID: "p", ActiveMode: store.ModeCode}); err != nil {
 				t.Fatal(err)
 			}
 			calls := &recordingToolRunner{defs: tool.BuiltinDefinitions(), result: tool.Result{Ok: true}}
@@ -160,6 +160,7 @@ func TestCommandDirectoryAndRiskUseOneApproval(t *testing.T) {
 				AdditionalProjectDirs []string                  `json:"additionalProjectDirs"`
 				DirectoryScope        string                    `json:"directoryScope"`
 				SessionGrant          *tool.CommandSessionGrant `json:"sessionGrant"`
+				Triggers              map[string][]string       `json:"commandApprovalTriggers"`
 			}
 			if err := json.Unmarshal(ev.Payload, &details); err != nil {
 				t.Fatal(err)
@@ -169,6 +170,9 @@ func TestCommandDirectoryAndRiskUseOneApproval(t *testing.T) {
 			}
 			if details.SessionGrant == nil || details.SessionGrant.Kind != "sandbox_command" {
 				t.Fatalf("combined approval lost session reuse: %s", ev.Payload)
+			}
+			if names := details.Triggers["outside_project"]; len(names) != 1 || names[0] != "cat" {
+				t.Fatalf("approval did not identify the command accessing the directory: %s", ev.Payload)
 			}
 			switch action {
 			case "revoke":
@@ -349,7 +353,7 @@ func TestCombinedDirectoryGrantInvalidation(t *testing.T) {
 			root, extra := t.TempDir(), t.TempDir()
 			extra, _ = filepath.EvalSymlinks(extra)
 			for _, id := range []string{"p", "other"} {
-				if err := ms.CreateProject(ctx, &store.Project{ID: id, RootDirs: []string{root}, ApprovalMode: store.ApprovalAuto}); err != nil {
+				if err := ms.CreateProject(ctx, &store.Project{ID: id, RootDirs: []string{root}}); err != nil {
 					t.Fatal(err)
 				}
 			}

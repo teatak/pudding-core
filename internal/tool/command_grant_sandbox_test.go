@@ -69,7 +69,11 @@ func TestSandboxCommandGrantBoundaries(t *testing.T) {
 		{"external libs", "cat file.txt", map[string]string{"PYTHONPATH": t.TempDir()}, false},
 		{"empty libs", "cat file.txt", map[string]string{"PYTHONPATH": ""}, false},
 		{"implicit current dir", "cat file.txt", map[string]string{"PYTHONPATH": root + ":"}, false},
-		{"inline env", "LANG=C cat file.txt", nil, false},
+		{"inline env", "LANG=C cat file.txt", nil, true},
+		{"dynamic inline env", "LANG=$LC_ALL cat file.txt", nil, false},
+		{"shell-local env", "APP_PROFILE=dev cat file.txt", nil, true},
+		{"shadowed sensitive value", "LANG=C cat file.txt", map[string]string{"LANG": "-unsafe"}, false},
+		{"case collision", "LANG=C cat file.txt", map[string]string{"lang": "other"}, false},
 		{"negation", "! cat file.txt", nil, false},
 		{"glob", "cat *.txt", nil, false},
 		{"tilde", "cat ~/file.txt", nil, false},
@@ -164,9 +168,55 @@ func TestCommandGrantUsesBoundInvocation(t *testing.T) {
 
 func TestChromeGrantRejectsUnboundShellSemantics(t *testing.T) {
 	for _, command := range []string{"LANG=C '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' --headless", "! cat file", "(cat file)", "cat file | cat"} {
-		if literalGrantCommand(command) != nil {
+		if argv, _, _ := chromeGrantCommand(command, nil); argv != nil {
 			t.Fatalf("accepted shell semantics: %s", command)
 		}
+	}
+}
+
+func TestCommandGrantReplaysInlineEnvironment(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX grants")
+	}
+	root := t.TempDir()
+	bin := t.TempDir()
+	t.Setenv("PATH", bin+":/usr/bin:/bin")
+	if err := os.WriteFile(filepath.Join(bin, "node"), []byte("#!/bin/sh\nif [ \"$1\" = temp ]; then printf '%s' \"$TMPDIR\"; else printf '%s|%s' \"$LANG\" \"$CI\"; fi\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	makeCall := func(command string, env map[string]string) Call {
+		raw, _ := json.Marshal(map[string]any{"scope": "project", "command": command, "env": env})
+		return Call{Name: CommandRun, Args: raw, ProjectDirs: []string{root}}
+	}
+	inline := makeCall("LANG=C CI='build job' node", map[string]string{"LANG": "old"})
+	equivalent := makeCall("node", map[string]string{"LANG": "C", "CI": "build job"})
+	inline.CommandGrant = CommandSessionGrantForCall(inline)
+	structured := CommandSessionGrantForCall(equivalent)
+	if inline.CommandGrant == nil || structured == nil || inline.CommandGrant.Key != structured.Key {
+		t.Fatal("equivalent process settings must share the same grant")
+	}
+	different := CommandSessionGrantForCall(makeCall("LANG=C CI=no node", nil))
+	if different == nil || different.Key == structured.Key {
+		t.Fatal("different process settings must have distinct grants")
+	}
+	runner := NewBuiltinRunner()
+	t.Cleanup(func() { _ = runner.Close() })
+	runner.setCommandRunner(&recordingCommandRunner{sandboxed: true})
+	result := runner.Call(context.Background(), inline)
+	if !result.Ok || decodeCommandPayload(t, result).Stdout != "C|build job" {
+		t.Fatal(result.Content)
+	}
+	// Shell-local overrides still take effect after the sandbox has prepared
+	// TMPDIR. Their lease cannot be reused for a pre-sandbox env override.
+	local := makeCall("TMPDIR=after-sandbox node temp", nil)
+	before := CommandSessionGrantForCall(makeCall("node temp", map[string]string{"TMPDIR": "after-sandbox"}))
+	local.CommandGrant = CommandSessionGrantForCall(local)
+	if local.CommandGrant == nil || before == nil || before.Key == local.CommandGrant.Key {
+		t.Fatal("different execution environments must keep separate grants")
+	}
+	result = runner.Call(context.Background(), local)
+	if !result.Ok || decodeCommandPayload(t, result).Stdout != "after-sandbox" {
+		t.Fatal(result.Content)
 	}
 }
 

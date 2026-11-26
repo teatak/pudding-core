@@ -85,10 +85,10 @@ func TestCrossScopeCopyApprovalAndUndo(t *testing.T) {
 			defer cancel()
 			root := t.TempDir()
 			ms, hub := storetest.New(t), event.NewHub()
-			if err := ms.CreateProject(ctx, &store.Project{ID: "project", Name: "copy", RootDirs: []string{root}, ApprovalMode: scenario.mode}); err != nil {
+			if err := ms.CreateProject(ctx, &store.Project{ID: "project", Name: "copy", RootDirs: []string{root}}); err != nil {
 				t.Fatal(err)
 			}
-			if err := ms.CreateSession(ctx, &store.Session{ID: "session", Provider: "mock", Model: "mock", ProjectID: "project", ActiveMode: store.ModeCode, ModeLease: store.ModeLeaseSession}); err != nil {
+			if err := ms.CreateSession(ctx, &store.Session{ApprovalMode: scenario.mode, ID: "session", Provider: "mock", Model: "mock", ProjectID: "project", ActiveMode: store.ModeCode, ModeLease: store.ModeLeaseSession}); err != nil {
 				t.Fatal(err)
 			}
 			if _, err := ms.BeginTurn(ctx, store.BeginTurnInput{SessionID: "session", TurnID: "turn", UserMessageID: "user", ClientMessageID: "client", UserText: "save temp file"}); err != nil {
@@ -197,10 +197,10 @@ func TestFileCopyExternalAccessApproval(t *testing.T) {
 			defer cancel()
 			root, external := t.TempDir(), t.TempDir()
 			ms, hub := storetest.New(t), event.NewHub()
-			if err := ms.CreateProject(ctx, &store.Project{ID: "project", Name: "copy", RootDirs: []string{root}, ApprovalMode: tc.mode}); err != nil {
+			if err := ms.CreateProject(ctx, &store.Project{ID: "project", Name: "copy", RootDirs: []string{root}}); err != nil {
 				t.Fatal(err)
 			}
-			if err := ms.CreateSession(ctx, &store.Session{ID: "session", Provider: "mock", Model: "mock", ProjectID: "project", ActiveMode: store.ModeCode, ModeLease: store.ModeLeaseSession}); err != nil {
+			if err := ms.CreateSession(ctx, &store.Session{ApprovalMode: tc.mode, ID: "session", Provider: "mock", Model: "mock", ProjectID: "project", ActiveMode: store.ModeCode, ModeLease: store.ModeLeaseSession}); err != nil {
 				t.Fatal(err)
 			}
 			if _, err := ms.BeginTurn(ctx, store.BeginTurnInput{SessionID: "session", TurnID: "turn", UserMessageID: "user", ClientMessageID: "client", UserText: "copy"}); err != nil {

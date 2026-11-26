@@ -3667,7 +3667,7 @@ func TestCreateSessionCarriesProviderAndModel(t *testing.T) {
 		t.Fatalf("provider lost on read: %+v", got)
 	}
 	project := decodeJSON[store.Project](t, req(t, http.MethodPost, srv.URL+"/projects", map[string]any{
-		"name": "demo", "rootDirs": []string{t.TempDir()}, "approvalMode": "auto",
+		"name": "demo", "rootDirs": []string{t.TempDir()},
 	}))
 	projectSession := decodeJSON[store.Session](t, req(t, http.MethodPost, srv.URL+"/sessions", map[string]string{
 		"title": "project", "provider": "gem", "model": "m1", "projectID": project.ID,
@@ -3762,7 +3762,7 @@ func TestCloneSessionAtMessageCopiesPrefixAndAttachment(t *testing.T) {
 func TestPatchSessionProjectBindingPromotesCodeMode(t *testing.T) {
 	srv, _ := newTestServer(t)
 	project := decodeJSON[store.Project](t, req(t, http.MethodPost, srv.URL+"/projects", map[string]any{
-		"name": "demo", "rootDirs": []string{t.TempDir()}, "approvalMode": "auto",
+		"name": "demo", "rootDirs": []string{t.TempDir()},
 	}))
 	sess := decodeJSON[store.Session](t, req(t, http.MethodPost, srv.URL+"/sessions", map[string]string{
 		"title": "chat", "provider": "gem", "model": "m1",

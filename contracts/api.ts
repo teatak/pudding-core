@@ -39,7 +39,11 @@ export type AssistantAppearance = z.infer<typeof assistantAppearance>;
 export type AssistantSnapshot = z.infer<typeof assistantSnapshot>;
 export type SaveAssistantInput = z.infer<typeof saveAssistantRequest>;
 
+export const approvalMode = z.enum(["ask", "auto", "full"]);
+export type ApprovalMode = z.infer<typeof approvalMode>;
+
 const createSessionFields = z.object({
+  approvalMode: approvalMode.optional(),
   clientRequestID: z.string().regex(/^[A-Za-z0-9_-]{1,200}$/).optional(),
   title: z.string().optional(),
   projectID: z.string().optional(),
@@ -84,6 +88,7 @@ export const createScheduledTaskRequest = z.object({
 export const patchScheduledTaskRequest = z.object({ revision: z.number(), name: z.string().optional(), prompt: z.string().optional(), schedule: taskSchedule.optional(), enabled: z.boolean().optional() });
 
 export const session = z.object({
+  approvalMode,
   assistantTaskActive: z.boolean().optional(),
   assistantSessionID: z.string().optional(),
   id: z.string(),
@@ -132,14 +137,11 @@ export const computerAppGrant = z.object({ appID: z.string(), createdAt: z.strin
 export type ComputerAppGrant = z.infer<typeof computerAppGrant>;
 export const listComputerAppGrantsResponse = z.object({ grants: z.array(computerAppGrant) });
 
-export const approvalMode = z.enum(["ask", "auto", "full"]);
-export type ApprovalMode = z.infer<typeof approvalMode>;
 
 export const project = z.object({
   id: z.string(),
   name: z.string(),
   rootDirs: z.array(z.string()),
-  approvalMode,
   createdAt: z.string(),
   updatedAt: z.string(),
   lastActivityAt: z.string(),
@@ -154,13 +156,11 @@ export const createProjectRequest = z.object({
   clientRequestID: z.string().regex(/^[A-Za-z0-9_-]{1,200}$/).optional(),
   name: z.string().optional(),
   rootDirs: z.array(z.string()),
-  approvalMode: approvalMode.optional(),
 });
 
 export const patchProjectRequest = z.object({
   name: z.string().optional(),
   rootDirs: z.array(z.string()).optional(),
-  approvalMode: approvalMode.optional(),
 });
 
 export const mergeProjectRequest = z.object({
@@ -477,17 +477,6 @@ export const localAgentCatalog = z.object({
 });
 export type LocalAgentModel = z.infer<typeof localAgentModel>;
 export type LocalAgentCatalog = z.infer<typeof localAgentCatalog>;
-
-export const localAgentQuota = z.object({
-  groups: z.array(z.object({
-    name: z.string(),
-    windows: z.array(z.object({
-      window: z.enum(["5h", "weekly"]),
-      remainingFraction: z.number().min(0).max(1),
-      resetAt: z.iso.datetime({ offset: true }).optional(),
-    })),
-  })),
-});
 
 export const providerModelLimits = z.object({
   maxOutputTokens: z.number().optional(),

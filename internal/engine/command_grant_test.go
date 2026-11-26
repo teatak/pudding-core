@@ -44,7 +44,7 @@ func testHeadlessScreenshotSessionApproval(t *testing.T, template bool) {
 		t.Fatal(err)
 	}
 	for _, id := range []string{"project", "other-project"} {
-		if err := ms.CreateProject(ctx, &store.Project{ID: id, RootDirs: []string{root}, ApprovalMode: store.ApprovalAuto}); err != nil {
+		if err := ms.CreateProject(ctx, &store.Project{ID: id, RootDirs: []string{root}}); err != nil {
 			t.Fatal(err)
 		}
 	}

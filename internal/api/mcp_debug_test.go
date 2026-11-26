@@ -899,12 +899,12 @@ func TestExternalMCPForegroundCommandLifecycle(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "build.sh"), []byte("printf 'compiling\\n'\nsleep 1\nprintf 'missing manifest\\n' >&2\nexit 7\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	project := &store.Project{ID: "build-project", Name: "Build", RootDirs: []string{root}, ApprovalMode: store.ApprovalFull}
+	project := &store.Project{ID: "build-project", Name: "Build", RootDirs: []string{root}}
 	if err := fixture.store.CreateProject(ctx, project); err != nil {
 		t.Fatal(err)
 	}
 	const sessionID = "build-session"
-	if err := fixture.store.CreateSession(ctx, &store.Session{ID: sessionID, Provider: "mock", Model: "mock-model",
+	if err := fixture.store.CreateSession(ctx, &store.Session{ApprovalMode: store.ApprovalFull, ID: sessionID, Provider: "mock", Model: "mock-model",
 		ProjectID: project.ID, ActiveMode: store.ModeCode, ModeLease: store.ModeLeaseSession}); err != nil {
 		t.Fatal(err)
 	}

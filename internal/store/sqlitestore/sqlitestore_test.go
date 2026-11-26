@@ -67,10 +67,9 @@ func TestSessionProjectPersists(t *testing.T) {
 	ctx := context.Background()
 	root := filepath.Join(t.TempDir(), "project")
 	if err := st.CreateProject(ctx, &store.Project{
-		ID:           "proj_project",
-		Name:         "project",
-		RootDirs:     []string{root, root + "/.", "relative"},
-		ApprovalMode: store.ApprovalAuto,
+		ID:       "proj_project",
+		Name:     "project",
+		RootDirs: []string{root, root + "/.", "relative"},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -172,9 +171,8 @@ func TestProjectWithoutDirectoriesPersists(t *testing.T) {
 	st, _ := openTestStore(t)
 	ctx := context.Background()
 	project := &store.Project{
-		ID:           "proj_empty",
-		Name:         "Empty project",
-		ApprovalMode: store.ApprovalAuto,
+		ID:   "proj_empty",
+		Name: "Empty project",
 	}
 	if err := st.CreateProject(ctx, project); err != nil {
 		t.Fatal(err)
@@ -566,10 +564,9 @@ func TestArchiveSessionLifecycle(t *testing.T) {
 	st, _ := openTestStore(t)
 	ctx := context.Background()
 	if err := st.CreateProject(ctx, &store.Project{
-		ID:           "proj_archive",
-		Name:         "Archive Project",
-		RootDirs:     []string{t.TempDir()},
-		ApprovalMode: store.ApprovalAuto,
+		ID:       "proj_archive",
+		Name:     "Archive Project",
+		RootDirs: []string{t.TempDir()},
 	}); err != nil {
 		t.Fatal(err)
 	}

@@ -92,7 +92,6 @@ type Engine struct {
 	localMu             sync.Mutex
 	localAgents         map[string]*localAgentRuntime
 	localAgentPaths     []string
-	localQuota          localAgentQuotaCache
 	localHostEndpoint   string
 	localHosts          map[string]*localAgentHost
 	widgetRuns          widgetRuns
@@ -2438,7 +2437,7 @@ func (e *Engine) executeAllowedTool(ctx context.Context, sessionID, turnID strin
 	}
 	call.ProjectDirs = projectDirs
 	call.Mode = store.NormalizeAgentMode(mode)
-	call.CommandSandbox = commandSandboxModeForProject(nil)
+	call.CommandSandbox = tool.CommandSandboxEnforce
 	var result tool.Result
 	var commandState *commandApprovalState
 	var commandAccess *tool.CommandProjectAccess
@@ -2447,12 +2446,14 @@ func (e *Engine) executeAllowedTool(ctx context.Context, sessionID, turnID strin
 		return tool.Result{CallID: call.CallID, Name: call.Name, Ok: false, Content: err.Error()}
 	}
 	if classified {
+		policy, err := e.sessionToolPolicy(ctx, sessionID)
+		if err != nil {
+			return tool.ApprovalDetailsFailure(call, err)
+		}
+		project := policy.project
+		call.CommandSandbox = commandSandboxMode(policy.mode)
 		if call.Name == tool.CommandRun {
-			project, policyErr := e.projectForToolCallPolicy(ctx, sessionID)
-			if policyErr != nil {
-				return tool.ApprovalDetailsFailure(call, policyErr)
-			}
-			if commandSandboxModeForProject(project) == tool.CommandSandboxEnforce {
+			if call.CommandSandbox == tool.CommandSandboxEnforce {
 				commandAccess, call, err = tool.PrepareCommandProjectAccess(call, risk, e.attachmentHome)
 			}
 			if err != nil {
@@ -2476,17 +2477,16 @@ func (e *Engine) executeAllowedTool(ctx context.Context, sessionID, turnID strin
 			approvalDetails["directoryScope"] = "call"
 		}
 		risk = refineToolRisk(call.Name, risk, approvalDetails)
-		project, required, err := e.toolCallApprovalRequired(ctx, sessionID, risk, approvalDetails)
+		required, err := e.toolCallApprovalRequired(ctx, sessionID, policy.mode, risk, approvalDetails)
 		if commandAccess != nil {
 			required = true
 		}
-		call.CommandSandbox = commandSandboxModeForProject(project)
 		if commandAccess != nil {
 			call.CommandSandbox = tool.CommandSandboxEnforce
 		}
 		call.CommandStateKey = commandSandboxStateKey(project, sessionID)
 		if call.Name == tool.CommandRun && err == nil && required {
-			commandState = e.commandApprovalState(sessionID, project, projectDirs)
+			commandState = e.commandApprovalState(sessionID, policy, projectDirs)
 		}
 		if approvalDetailsErr != nil {
 			result = tool.ApprovalDetailsFailure(call, approvalDetailsErr)

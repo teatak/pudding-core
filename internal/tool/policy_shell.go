@@ -14,16 +14,20 @@ const unknownPolicyWord = "\x00"
 type shellPolicyCommand struct {
 	Argv []string
 	CWD  string
+	call *syntax.CallExpr
 }
 
 type shellPolicyRedirection struct {
 	Redirection shellRedirection
 	CWD         string
+	call        *syntax.CallExpr
+	operator    string
 }
 
 type shellPolicyEnvironment struct {
-	Env map[string]string
-	CWD string
+	Env        map[string]string
+	CWD        string
+	pathPrefix string
 }
 
 type commandPolicyAnalysis struct {
@@ -73,7 +77,70 @@ func analyzeCommandPolicyAt(command, initialCWD string, depth int) (commandPolic
 		}
 		analysis.Commands = commands
 	}
+	for _, environment := range analysis.Environments {
+		if environment.pathPrefix != "" {
+			if !inheritsCommandPATH(file) {
+				for i := range analysis.Environments {
+					analysis.Environments[i].pathPrefix = ""
+				}
+			}
+			break
+		}
+	}
 	return analysis, nil
+}
+
+// Limit the inherited suffix exemption to simple command lists. A shell that
+// sources another script, unsets PATH, or computes an assignment may have a
+// different PATH (including an empty entry for the working directory).
+func inheritsCommandPATH(file *syntax.File) bool {
+	known := true
+	syntax.Walk(file, func(node syntax.Node) bool {
+		switch n := node.(type) {
+		case *syntax.Stmt:
+			switch n.Cmd.(type) {
+			case *syntax.CallExpr, *syntax.BinaryCmd, *syntax.Block, *syntax.Subshell:
+			default:
+				known = false
+			}
+		case *syntax.CallExpr:
+			if len(n.Args) == 0 {
+				known = false
+				break
+			}
+			name := literalGrantWords(n.Args[:1])
+			if len(name) == 0 {
+				known = false
+				break
+			}
+			switch name[0] {
+			case ".", "source", "alias", "builtin", "command", "eval", "exec", "export", "getopts", "read", "readonly", "set", "trap", "unset", "let", "mapfile", "readarray", "typeset", "declare", "local":
+				known = false
+			case "printf":
+				known = known && (len(n.Args) == 1 || printfHasFormatOperand(n.Args[1]))
+			}
+		case *syntax.ParamExp:
+			if plainParameterName(n) == "" {
+				known = false
+			}
+		case *syntax.ArithmExp:
+			known = false
+		}
+		return known
+	})
+	return known
+}
+
+func printfHasFormatOperand(word *syntax.Word) bool {
+	// A quoted format beginning with ordinary text stays one operand, even
+	// when it contains printf escapes such as "%s\n".
+	if quoted, ok := word.Parts[0].(*syntax.DblQuoted); ok && !quoted.Dollar && len(quoted.Parts) > 0 {
+		if lit, ok := quoted.Parts[0].(*syntax.Lit); ok && lit.Value != "" && lit.Value[0] != '-' && lit.Value[0] != '\\' {
+			return true
+		}
+	}
+	args := literalGrantWords([]*syntax.Word{word})
+	return len(args) == 1 && (args[0] == "--" || !strings.HasPrefix(args[0], "-"))
 }
 
 // walkPolicyNode 仅沿着顺序执行、`&&`、代码块、子 shell 与分支传播静态工作目录；
@@ -90,13 +157,8 @@ func walkPolicyNode(node syntax.Node, cwd string, allowCWDUpdate bool, out *comm
 		}
 		return current
 	case *syntax.Stmt:
+		collectPolicyRedirections(node, cwd, out)
 		for _, redir := range node.Redirs {
-			if redirect, ok := staticShellRedirection(redir); ok && redirect.Path != "" {
-				out.Redirections = append(out.Redirections, shellPolicyRedirection{
-					Redirection: redirect,
-					CWD:         cwd,
-				})
-			}
 			if redir.Word != nil {
 				walkNestedPolicyNodes(redir.Word, cwd, out)
 			}
@@ -193,16 +255,22 @@ func walkNestedPolicyNodes(node syntax.Node, cwd string, out *commandPolicyAnaly
 		switch sub := sub.(type) {
 		case *syntax.CallExpr:
 			collectPolicyCall(sub, cwd, out)
-		case *syntax.Redirect:
-			if redirect, ok := staticShellRedirection(sub); ok && redirect.Path != "" {
-				out.Redirections = append(out.Redirections, shellPolicyRedirection{
-					Redirection: redirect,
-					CWD:         cwd,
-				})
-			}
+		case *syntax.Stmt:
+			collectPolicyRedirections(sub, cwd, out)
 		}
 		return true
 	})
+}
+
+func collectPolicyRedirections(stmt *syntax.Stmt, cwd string, out *commandPolicyAnalysis) {
+	call, _ := stmt.Cmd.(*syntax.CallExpr)
+	for _, redir := range stmt.Redirs {
+		if redirect, ok := staticShellRedirection(redir); ok && redirect.Path != "" {
+			out.Redirections = append(out.Redirections, shellPolicyRedirection{
+				Redirection: redirect, CWD: cwd, call: call, operator: redir.Op.String(),
+			})
+		}
+	}
 }
 
 func collectPolicyCall(call *syntax.CallExpr, cwd string, out *commandPolicyAnalysis) []string {
@@ -215,23 +283,61 @@ func collectPolicyCall(call *syntax.CallExpr, cwd string, out *commandPolicyAnal
 		argv[index] = value
 	}
 	if len(argv) > 0 {
-		out.Commands = append(out.Commands, shellPolicyCommand{Argv: argv, CWD: cwd})
+		out.Commands = append(out.Commands, shellPolicyCommand{Argv: argv, CWD: cwd, call: call})
 	}
 	for _, assign := range call.Assigns {
 		if assign.Name != nil {
 			value, ok := staticShellWord(assign.Value)
+			var prefix string
 			if !ok {
 				value = unknownPolicyWord
+				if assign.Name.Value == "PATH" {
+					if dirs, valid := inheritedPATHPrefix(assign.Value); valid {
+						prefix = dirs
+					}
+				}
 			}
 			// Keep each occurrence: later assignments cannot erase an
 			// earlier explicit permission request or risky environment.
 			out.Environments = append(out.Environments, shellPolicyEnvironment{
-				Env: map[string]string{assign.Name.Value: value},
-				CWD: cwd,
+				Env:        map[string]string{assign.Name.Value: value},
+				CWD:        cwd,
+				pathPrefix: prefix,
 			})
 		}
 	}
 	return argv
+}
+
+// Inspect only the added directories. The shell retains the inherited PATH
+// at execution; a literal dollar sign or any other expansion is not equivalent.
+func inheritedPATHPrefix(word *syntax.Word) (string, bool) {
+	if word == nil {
+		return "", false
+	}
+	parts := word.Parts
+	if len(parts) == 1 {
+		if quoted, ok := parts[0].(*syntax.DblQuoted); ok && !quoted.Dollar {
+			parts = quoted.Parts
+		}
+	}
+	if len(parts) != 2 {
+		return "", false
+	}
+	prefix, ok := staticShellWord(&syntax.Word{Parts: parts[:1]})
+	tail := parts[1]
+	if quoted, ok := tail.(*syntax.DblQuoted); ok && !quoted.Dollar && len(quoted.Parts) == 1 {
+		tail = quoted.Parts[0]
+	}
+	parameter, expanded := tail.(*syntax.ParamExp)
+	if !ok || !expanded || plainParameterName(parameter) != "PATH" || strings.ContainsAny(prefix, "$\\") {
+		return "", false
+	}
+	dirs, separated := strings.CutSuffix(prefix, ":")
+	if !separated || dirs == "" {
+		return "", false
+	}
+	return dirs, true
 }
 
 func nextPolicyCWD(cwd string, unwrapped []string) (string, bool) {

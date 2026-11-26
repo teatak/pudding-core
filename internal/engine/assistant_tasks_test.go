@@ -216,12 +216,12 @@ func TestAssistantTaskDispatchCapabilityScope(t *testing.T) {
 			projectID := ""
 			if tc.project {
 				projectID = "project"
-				if err := db.CreateProject(ctx, &store.Project{ID: projectID, Name: "Project", RootDirs: []string{t.TempDir()}, ApprovalMode: tc.approval}); err != nil {
+				if err := db.CreateProject(ctx, &store.Project{ID: projectID, Name: "Project", RootDirs: []string{t.TempDir()}}); err != nil {
 					t.Fatal(err)
 				}
 			}
 			if tc.existing != "" {
-				if err := db.CreateSession(ctx, &store.Session{ID: "existing", Provider: "capture", Model: "test", ProjectID: projectID, ActiveMode: tc.existing, ModeLease: lease}); err != nil {
+				if err := db.CreateSession(ctx, &store.Session{ApprovalMode: tc.approval, ID: "existing", Provider: "capture", Model: "test", ProjectID: projectID, ActiveMode: tc.existing, ModeLease: lease}); err != nil {
 					t.Fatal(err)
 				}
 				args["session_id"] = "existing"
@@ -264,11 +264,12 @@ func TestAssistantTaskDispatchCapabilityScope(t *testing.T) {
 			if err != nil || session.ProjectID != projectID || session.ActiveMode != tc.want || session.ModeLease != lease {
 				t.Fatal("assigned session project or capability changed", session, err)
 			}
-			if tc.project {
-				project, err := db.GetProject(ctx, projectID)
-				if err != nil || project.ApprovalMode != store.NormalizeApprovalMode(tc.approval) {
-					t.Fatal("dispatch changed project approval policy", project, err)
-				}
+			expectedApproval := store.ApprovalAuto
+			if tc.existing != "" && tc.approval != "" {
+				expectedApproval = tc.approval
+			}
+			if session.ApprovalMode != expectedApproval {
+				t.Fatalf("worker approval = %s, want %s", session.ApprovalMode, expectedApproval)
 			}
 			requests := client.snapshot()
 			if len(requests) != 1 {

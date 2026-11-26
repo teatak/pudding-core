@@ -40,12 +40,12 @@ func TestStructuredGitWorkflowApprovalModes(t *testing.T) {
 			}
 			ms := storetest.New(t)
 			hub := event.NewHub()
-			project := &store.Project{ID: "proj_git", RootDirs: []string{root}, ApprovalMode: mode}
+			project := &store.Project{ID: "proj_git", RootDirs: []string{root}}
 			if err := ms.CreateProject(ctx, project); err != nil {
 				t.Fatal(err)
 			}
 			const sid = "sess_git"
-			if err := ms.CreateSession(ctx, &store.Session{
+			if err := ms.CreateSession(ctx, &store.Session{ApprovalMode: mode,
 				ID: sid, Provider: "test", Model: "test", ActiveMode: store.ModeCode, ProjectID: project.ID,
 			}); err != nil {
 				t.Fatal(err)

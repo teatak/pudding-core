@@ -133,9 +133,9 @@ const messageSelectColumns = `id,session_id,turn_id,role,kind,text,parts,turn_in
 
 const messageSelectColumnsAliasM = `m.id,m.session_id,m.turn_id,m.role,m.kind,m.text,m.parts,m.turn_index,m.metadata,m.client_message_id,m.interrupted,m.created_at`
 
-const projectSelectColumns = `id,name,root_dirs,approval_mode,created_at,updated_at,last_activity_at`
+const projectSelectColumns = `id,name,root_dirs,created_at,updated_at,last_activity_at`
 
-const sessionSelectColumnsAliasS = `s.id,s.title,s.provider,s.model,s.reasoning_effort,s.reasoning_model_key,s.active_mode,s.mode_lease,s.project_id,s.loaded_plugin_ids,s.pinned,s.pinned_order,s.created_at,s.updated_at,s.last_activity_at,s.archived_at,EXISTS(SELECT 1 FROM turns t WHERE t.session_id=s.id AND t.status='running')`
+const sessionSelectColumnsAliasS = `s.id,s.title,s.provider,s.model,s.reasoning_effort,s.reasoning_model_key,s.approval_mode,s.active_mode,s.mode_lease,s.project_id,s.loaded_plugin_ids,s.pinned,s.pinned_order,s.created_at,s.updated_at,s.last_activity_at,s.archived_at,EXISTS(SELECT 1 FROM turns t WHERE t.session_id=s.id AND t.status='running')`
 
 const sqlInBatchSize = 500
 
@@ -192,7 +192,7 @@ func (s *Store) CreateProject(ctx context.Context, project *store.Project, reque
 		Name     string
 		Roots    []string
 		Approval store.ApprovalMode
-	}{project.Name, project.RootDirs, project.ApprovalMode}, requestIDs)
+	}{project.Name, project.RootDirs, store.ApprovalAuto}, requestIDs)
 	if err != nil {
 		return err
 	}
@@ -206,8 +206,8 @@ func (s *Store) CreateProject(ctx context.Context, project *store.Project, reque
 		now := time.Now()
 		project.CreatedAt, project.UpdatedAt, project.LastActivityAt = now, now, now
 		_, err := tx.ExecContext(ctx,
-			`INSERT INTO projects(`+projectSelectColumns+`) VALUES(?,?,?,?,?,?,?)`,
-			project.ID, project.Name, encodeStringSlice(project.RootDirs), project.ApprovalMode, unixMS(now), unixMS(now), unixMS(now),
+			`INSERT INTO projects(`+projectSelectColumns+`) VALUES(?,?,?,?,?,?)`,
+			project.ID, project.Name, encodeStringSlice(project.RootDirs), unixMS(now), unixMS(now), unixMS(now),
 		)
 		if err != nil {
 			return err
@@ -259,13 +259,10 @@ func (s *Store) UpdateProject(ctx context.Context, id string, upd store.ProjectU
 				project.Name = projectNameFromDirs(project.RootDirs)
 			}
 		}
-		if upd.ApprovalMode != nil {
-			project.ApprovalMode = *upd.ApprovalMode
-		}
 		project.UpdatedAt = time.Now()
 		if _, err := tx.ExecContext(ctx,
-			`UPDATE projects SET name=?, root_dirs=?, approval_mode=?, updated_at=? WHERE id=?`,
-			project.Name, encodeStringSlice(project.RootDirs), project.ApprovalMode, unixMS(project.UpdatedAt), id,
+			`UPDATE projects SET name=?, root_dirs=?, updated_at=? WHERE id=?`,
+			project.Name, encodeStringSlice(project.RootDirs), unixMS(project.UpdatedAt), id,
 		); err != nil {
 			return err
 		}
@@ -295,11 +292,16 @@ func (s *Store) MergeProjects(ctx context.Context, targetID, sourceID string, up
 			keys = []string{option.ClientRequestID}
 		}
 	}
+	// Existing merge receipts include a null approvalMode in their request hash.
+	type receiptUpdate struct {
+		store.ProjectUpdate
+		LegacyApprovalMode *store.ApprovalMode `json:"approvalMode"`
+	}
 	key, hash, err := projectRequest("merge", struct {
 		Target, Source     string
-		Update             store.ProjectUpdate
+		Update             receiptUpdate
 		TargetAt, SourceAt *time.Time
-	}{targetID, sourceID, upd, option.ExpectedTargetUpdatedAt, option.ExpectedSourceUpdatedAt}, keys)
+	}{targetID, sourceID, receiptUpdate{ProjectUpdate: upd}, option.ExpectedTargetUpdatedAt, option.ExpectedSourceUpdatedAt}, keys)
 	if err != nil {
 		return nil, err
 	}
@@ -332,16 +334,13 @@ func (s *Store) MergeProjects(ctx context.Context, targetID, sourceID string, up
 		if target.Name == "" {
 			target.Name = projectNameFromDirs(target.RootDirs)
 		}
-		if upd.ApprovalMode != nil {
-			target.ApprovalMode = *upd.ApprovalMode
-		}
 		target.UpdatedAt = time.Now()
 		if source.LastActivityAt.After(target.LastActivityAt) {
 			target.LastActivityAt = source.LastActivityAt
 		}
 		if _, err := tx.ExecContext(ctx,
-			`UPDATE projects SET name=?, root_dirs=?, approval_mode=?, updated_at=?, last_activity_at=? WHERE id=?`,
-			target.Name, encodeStringSlice(target.RootDirs), target.ApprovalMode, unixMS(target.UpdatedAt), unixMS(target.LastActivityAt), targetID,
+			`UPDATE projects SET name=?, root_dirs=?, updated_at=?, last_activity_at=? WHERE id=?`,
+			target.Name, encodeStringSlice(target.RootDirs), unixMS(target.UpdatedAt), unixMS(target.LastActivityAt), targetID,
 		); err != nil {
 			return err
 		}
@@ -395,8 +394,8 @@ func createSessionTx(ctx context.Context, tx *sql.Tx, sess *store.Session) error
 	now := time.Now()
 	sess.CreatedAt, sess.UpdatedAt, sess.LastActivityAt = now, now, now
 	_, err := tx.ExecContext(ctx,
-		`INSERT INTO sessions(id,title,provider,model,reasoning_effort,reasoning_model_key,active_mode,mode_lease,project_id,loaded_plugin_ids,pinned,pinned_order,created_at,updated_at,last_activity_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-		sess.ID, sess.Title, sess.Provider, sess.Model, sess.ReasoningEffort, sess.ReasoningModelKey, sess.ActiveMode, sess.ModeLease, sess.ProjectID, encodeStringList(sess.LoadedPluginIDs), boolInt(sess.Pinned), sess.PinnedOrder, unixMS(now), unixMS(now), unixMS(now),
+		`INSERT INTO sessions(id,title,provider,model,reasoning_effort,reasoning_model_key,approval_mode,active_mode,mode_lease,project_id,loaded_plugin_ids,pinned,pinned_order,created_at,updated_at,last_activity_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		sess.ID, sess.Title, sess.Provider, sess.Model, sess.ReasoningEffort, sess.ReasoningModelKey, sess.ApprovalMode, sess.ActiveMode, sess.ModeLease, sess.ProjectID, encodeStringList(sess.LoadedPluginIDs), boolInt(sess.Pinned), sess.PinnedOrder, unixMS(now), unixMS(now), unixMS(now),
 	)
 	if err != nil {
 		return err
@@ -454,6 +453,7 @@ func (s *Store) CloneSession(ctx context.Context, in store.CloneSessionInput) (*
 		now := time.Now()
 		target := *source
 		target.ID = in.TargetSessionID
+		target.ApprovalMode = store.ApprovalAuto
 		target.Title = store.CloneSessionTitle(source.Title, in.TitleSuffix)
 		target.LoadedPluginIDs = append([]string(nil), source.LoadedPluginIDs...)
 		target.CreatedAt = now
@@ -465,8 +465,8 @@ func (s *Store) CloneSession(ctx context.Context, in store.CloneSessionInput) (*
 		target.Running = false
 		target.BackgroundProcessCount = 0
 		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO sessions(id,title,provider,model,reasoning_effort,reasoning_model_key,active_mode,mode_lease,project_id,loaded_plugin_ids,pinned,pinned_order,created_at,updated_at,last_activity_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-			target.ID, target.Title, target.Provider, target.Model, target.ReasoningEffort, target.ReasoningModelKey, target.ActiveMode, target.ModeLease, target.ProjectID, encodeStringList(target.LoadedPluginIDs), 0, 0, unixMS(now), unixMS(now), unixMS(now),
+			`INSERT INTO sessions(id,title,provider,model,reasoning_effort,reasoning_model_key,approval_mode,active_mode,mode_lease,project_id,loaded_plugin_ids,pinned,pinned_order,created_at,updated_at,last_activity_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+			target.ID, target.Title, target.Provider, target.Model, target.ReasoningEffort, target.ReasoningModelKey, target.ApprovalMode, target.ActiveMode, target.ModeLease, target.ProjectID, encodeStringList(target.LoadedPluginIDs), 0, 0, unixMS(now), unixMS(now), unixMS(now),
 		); err != nil {
 			return err
 		}
@@ -587,6 +587,19 @@ func (s *Store) UpdateSession(ctx context.Context, id string, upd store.SessionU
 		if err != nil {
 			return err
 		}
+		if upd.ApprovalMode != nil {
+			parentID, err := parentSessionIDTx(ctx, tx, id)
+			if err != nil {
+				return err
+			}
+			if parentID != "" {
+				return store.ErrInvalidSessionRelation
+			}
+			sess.ApprovalMode = *upd.ApprovalMode
+			if _, err := tx.ExecContext(ctx, "UPDATE sessions SET approval_mode=? WHERE id IN (SELECT child_session_id FROM session_children WHERE parent_session_id=?)", sess.ApprovalMode, id); err != nil {
+				return err
+			}
+		}
 		if upd.Title != nil {
 			sess.Title = *upd.Title
 		}
@@ -643,8 +656,8 @@ func (s *Store) UpdateSession(ctx context.Context, id string, upd store.SessionU
 		}
 		sess.UpdatedAt = time.Now()
 		_, err = tx.ExecContext(ctx,
-			`UPDATE sessions SET title=?, provider=?, model=?, reasoning_effort=?, reasoning_model_key=?, active_mode=?, mode_lease=?, project_id=?, loaded_plugin_ids=?, pinned=?, pinned_order=?, updated_at=? WHERE id=?`,
-			sess.Title, sess.Provider, sess.Model, sess.ReasoningEffort, sess.ReasoningModelKey, sess.ActiveMode, sess.ModeLease, sess.ProjectID, encodeStringList(sess.LoadedPluginIDs), boolInt(sess.Pinned), sess.PinnedOrder, unixMS(sess.UpdatedAt), id,
+			`UPDATE sessions SET title=?, provider=?, model=?, reasoning_effort=?, reasoning_model_key=?, approval_mode=?, active_mode=?, mode_lease=?, project_id=?, loaded_plugin_ids=?, pinned=?, pinned_order=?, updated_at=? WHERE id=?`,
+			sess.Title, sess.Provider, sess.Model, sess.ReasoningEffort, sess.ReasoningModelKey, sess.ApprovalMode, sess.ActiveMode, sess.ModeLease, sess.ProjectID, encodeStringList(sess.LoadedPluginIDs), boolInt(sess.Pinned), sess.PinnedOrder, unixMS(sess.UpdatedAt), id,
 		)
 		if err != nil {
 			return err
@@ -3033,6 +3046,7 @@ func scanSession(row messageScanner) (*store.Session, error) {
 		&sess.Model,
 		&sess.ReasoningEffort,
 		&sess.ReasoningModelKey,
+		&sess.ApprovalMode,
 		&sess.ActiveMode,
 		&sess.ModeLease,
 		&sess.ProjectID,
@@ -3068,11 +3082,10 @@ func scanProject(row messageScanner) (*store.Project, error) {
 	var project store.Project
 	var rootDirs string
 	var created, updated, lastActivity int64
-	if err := row.Scan(&project.ID, &project.Name, &rootDirs, &project.ApprovalMode, &created, &updated, &lastActivity); err != nil {
+	if err := row.Scan(&project.ID, &project.Name, &rootDirs, &created, &updated, &lastActivity); err != nil {
 		return nil, err
 	}
 	project.RootDirs = store.NormalizeProjectDirs(decodeStringSlice(rootDirs))
-	project.ApprovalMode = store.NormalizeApprovalMode(project.ApprovalMode)
 	project.CreatedAt, project.UpdatedAt = timeFromMS(created), timeFromMS(updated)
 	project.LastActivityAt = timeFromMS(lastActivity)
 	return &project, nil

@@ -9,6 +9,7 @@ CREATE TABLE IF NOT EXISTS sessions (
     model      TEXT    NOT NULL,
     reasoning_effort TEXT NOT NULL DEFAULT '',
     reasoning_model_key TEXT NOT NULL DEFAULT '',
+    approval_mode TEXT NOT NULL DEFAULT 'auto',
     active_mode TEXT   NOT NULL DEFAULT 'chat',
     mode_lease  TEXT   NOT NULL DEFAULT 'none',
     project_id TEXT NOT NULL DEFAULT '',
@@ -69,7 +70,7 @@ CREATE TABLE IF NOT EXISTS projects (
     id            TEXT PRIMARY KEY,
     name          TEXT    NOT NULL DEFAULT '',
     root_dirs     TEXT    NOT NULL DEFAULT '[]',
-    approval_mode TEXT    NOT NULL DEFAULT 'auto',
+    approval_mode TEXT    NOT NULL DEFAULT 'auto', -- legacy project column, retired in v69
     created_at    INTEGER NOT NULL,
     updated_at    INTEGER NOT NULL,
     last_activity_at INTEGER NOT NULL DEFAULT 0

@@ -10,6 +10,7 @@ import (
 	"github.com/teatak/pudding-core/internal/event"
 	"github.com/teatak/pudding-core/internal/provider/mock"
 	"github.com/teatak/pudding-core/internal/provider/registry"
+	"github.com/teatak/pudding-core/internal/store"
 	"github.com/teatak/pudding-core/internal/store/storetest"
 	"github.com/teatak/pudding-core/internal/tool"
 )
@@ -21,7 +22,7 @@ func TestCommandReuseDiagnosticsExplainAndSurviveRevocation(t *testing.T) {
 	}
 	eng := New(ms, event.NewHub(), registry.Static(mock.New()), ms)
 	defer eng.Stop()
-	state := eng.commandApprovalState("one", nil, []string{t.TempDir()})
+	state := eng.commandApprovalState("one", sessionToolPolicy{mode: store.ApprovalAuto}, []string{t.TempDir()})
 	original := tool.CommandGrantIdentity{Program: "program", Environment: "env", Context: "scope", Executable: "exe", Arguments: "args"}
 	state.identities["approved"] = original
 	state.grants["approved"] = nil
@@ -46,7 +47,7 @@ func TestCommandReuseDiagnosticsExplainAndSurviveRevocation(t *testing.T) {
 		eng.recordCommandReuseMiss("one", got)
 	}
 	eng.RevokeCommandApprovals("one")
-	state = eng.commandApprovalState("one", nil, []string{t.TempDir()})
+	state = eng.commandApprovalState("one", sessionToolPolicy{mode: store.ApprovalAuto}, []string{t.TempDir()})
 	eng.mu.Lock()
 	reason := eng.commandReuseMissReasonLocked("one", state, original)
 	eng.mu.Unlock()
@@ -75,7 +76,7 @@ func TestCommandApprovalDiagnosticsOptInAndClear(t *testing.T) {
 	ms := storetest.New(t)
 	eng := New(ms, event.NewHub(), registry.Static(mock.New()), ms)
 	defer eng.Stop()
-	state := eng.commandApprovalState("one", nil, []string{t.TempDir()})
+	state := eng.commandApprovalState("one", sessionToolPolicy{mode: store.ApprovalAuto}, []string{t.TempDir()})
 	state.grants["approved"] = nil
 	eng.recordCommandReuseMiss("one", "arguments_changed")
 	eng.RevokeCommandApprovals("other")

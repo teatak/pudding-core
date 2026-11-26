@@ -15,15 +15,16 @@ func TestDirectToolForegroundCommandFinishesBeforeTurn(t *testing.T) {
 	ctx := context.Background()
 	runner := tool.NewBuiltinRunner(tool.WithHomeDir(t.TempDir()))
 	eng, db := newDirectToolEngine(t, WithTools(runner))
-	if err := db.CreateProject(ctx, &store.Project{ID: "command-project", RootDirs: []string{t.TempDir()}, ApprovalMode: store.ApprovalFull}); err != nil {
+	if err := db.CreateProject(ctx, &store.Project{ID: "command-project", RootDirs: []string{t.TempDir()}}); err != nil {
 		t.Fatal(err)
 	}
 	session, err := eng.DebugSession(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
+	full := store.ApprovalFull
 	projectID := "command-project"
-	if _, err := db.UpdateSession(ctx, session.ID, store.SessionUpdate{ProjectID: &projectID}); err != nil {
+	if _, err := db.UpdateSession(ctx, session.ID, store.SessionUpdate{ApprovalMode: &full, ProjectID: &projectID}); err != nil {
 		t.Fatal(err)
 	}
 	// yield_ms=0 is a normal command option. The shell performs finite work;
@@ -31,10 +32,10 @@ func TestDirectToolForegroundCommandFinishesBeforeTurn(t *testing.T) {
 	args := json.RawMessage(`{"scope":"project","command":"printf mcp-early; i=0; while [ \"$i\" -lt 20000 ]; do i=$((i+1)); done; printf mcp-late","yield_ms":0}`)
 	result, err := eng.CallTool(ctx, session.ID, store.ModeCode, tool.CommandRun, args)
 	var output struct {
-		Running   bool `json:"running"`
-		Yielded   bool `json:"yielded"`
-		Cancelled bool `json:"cancelled"`
-		ExitCode  *int `json:"exitCode"`
+		Running   bool   `json:"running"`
+		Yielded   bool   `json:"yielded"`
+		Cancelled bool   `json:"cancelled"`
+		ExitCode  *int   `json:"exitCode"`
 		Stdout    string `json:"stdout"`
 	}
 	if err != nil || !result.Ok || json.Unmarshal([]byte(result.Content), &output) != nil || output.Running || output.Yielded || output.Cancelled || output.ExitCode == nil || *output.ExitCode != 0 || output.Stdout != "mcp-earlymcp-late" {

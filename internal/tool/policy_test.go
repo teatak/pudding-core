@@ -592,10 +592,10 @@ func TestClassifyCommandTracksLogicalCWDAndNormalizesOutsidePaths(t *testing.T) 
 	}
 
 	for _, test := range []struct {
-		name           string
-		command        string
-		wantLowRisk    bool
-		wantCustomEnv  bool
+		name          string
+		command       string
+		wantLowRisk   bool
+		wantCustomEnv bool
 	}{
 		{
 			name:        "relative cd with sibling script",
@@ -608,9 +608,13 @@ func TestClassifyCommandTracksLogicalCWDAndNormalizesOutsidePaths(t *testing.T) 
 			wantLowRisk: true,
 		},
 		{
-			name:          "sh -c cd plus homebrew PATH assignment",
-			command:       `sh -c 'cd web && PATH="/opt/homebrew/bin:$PATH" node --test test/a.test.ts && node ../scripts/web-build.cjs --typecheck'`,
-			wantLowRisk:   false,
+			name:        "sh -c cd plus system toolchain PATH prefix",
+			command:     `sh -c 'cd web && PATH="/usr/bin:$PATH" node --test test/a.test.ts && node ../scripts/web-build.cjs --typecheck'`,
+			wantLowRisk: true,
+		},
+		{
+			name:          "sh -c cd plus dynamic PATH prefix",
+			command:       `sh -c 'cd web && PATH="$TOOLS:$PATH" node --test test/a.test.ts'`,
 			wantCustomEnv: true,
 		},
 		{

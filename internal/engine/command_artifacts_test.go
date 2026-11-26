@@ -40,7 +40,7 @@ func TestSessionArtifactCommandUsesExistingAuthority(t *testing.T) {
 			homeDir, projectDir := t.TempDir(), t.TempDir()
 			ms := storetest.New(t)
 			if projectID != "" {
-				if err := ms.CreateProject(ctx, &store.Project{ID: projectID, RootDirs: []string{projectDir}, ApprovalMode: store.ApprovalAuto}); err != nil {
+				if err := ms.CreateProject(ctx, &store.Project{ID: projectID, RootDirs: []string{projectDir}}); err != nil {
 					t.Fatal(err)
 				}
 			}

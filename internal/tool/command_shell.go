@@ -230,14 +230,18 @@ func isSafeBuiltinParameter(name string) bool {
 	}
 }
 
-func staticSandboxParameter(parameter *syntax.ParamExp) (string, bool) {
+func plainParameterName(parameter *syntax.ParamExp) string {
 	if parameter == nil || parameter.Param == nil ||
 		parameter.Flags != nil || parameter.Excl || parameter.Length || parameter.Width || parameter.IsSet ||
 		parameter.NestedParam != nil || parameter.Index != nil || len(parameter.Modifiers) > 0 ||
 		parameter.Slice != nil || parameter.Repl != nil || parameter.Names != 0 || parameter.Exp != nil {
-		return "", false
+		return ""
 	}
-	name := parameter.Param.Value
+	return parameter.Param.Value
+}
+
+func staticSandboxParameter(parameter *syntax.ParamExp) (string, bool) {
+	name := plainParameterName(parameter)
 	if isSafeBuiltinParameter(name) || sandboxManagedPath("$"+name) {
 		return "$" + name, true
 	}

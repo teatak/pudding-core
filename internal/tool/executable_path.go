@@ -34,13 +34,8 @@ func mergedExecutablePATH(current string) string {
 	return strings.Join(dirs, string(os.PathListSeparator))
 }
 
-func commonExecutableDirs() []string {
-	// Windows tools are discovered through the host PATH. Unix defaults are
-	// drive-relative paths there, not trusted absolute executable locations.
-	if runtime.GOOS == "windows" {
-		return nil
-	}
-	dirs := []string{
+func systemExecutableDirs() []string {
+	return []string{
 		"/opt/homebrew/bin",
 		"/opt/homebrew/sbin",
 		"/usr/local/bin",
@@ -50,6 +45,15 @@ func commonExecutableDirs() []string {
 		"/usr/sbin",
 		"/sbin",
 	}
+}
+
+func commonExecutableDirs() []string {
+	// Windows tools are discovered through the host PATH. Unix defaults are
+	// drive-relative paths there, not trusted absolute executable locations.
+	if runtime.GOOS == "windows" {
+		return nil
+	}
+	dirs := systemExecutableDirs()
 	homeDir, err := os.UserHomeDir()
 	if err != nil || strings.TrimSpace(homeDir) == "" {
 		return dirs

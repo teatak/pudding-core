@@ -19,7 +19,7 @@ import (
 const (
 	baselineSchemaVersion      = 1
 	currentSchemaLayoutVersion = 8
-	currentSchemaVersion       = 68
+	currentSchemaVersion       = 69
 )
 
 var (
@@ -35,6 +35,15 @@ type schemaMigration func(*sql.Tx) error
 // Unpublished Studio migrations 27–29 are consolidated into destination 30.
 // Unpublished Studio migrations 33–46 are consolidated into destination 47.
 var schemaMigrations = map[int]schemaMigration{
+	69: func(tx *sql.Tx) error {
+		if err := addTableColumnIfMissing(tx, "sessions", "approval_mode", "TEXT NOT NULL DEFAULT 'auto'"); err != nil {
+			return err
+		}
+		_, err := tx.Exec(`UPDATE sessions SET approval_mode=projects.approval_mode FROM projects WHERE sessions.project_id=projects.id AND projects.approval_mode!='auto';
+			UPDATE sessions SET approval_mode=p.approval_mode FROM session_children c JOIN sessions p ON p.id=c.parent_session_id WHERE sessions.id=c.child_session_id AND sessions.approval_mode!=p.approval_mode;
+			UPDATE projects SET approval_mode='auto' WHERE approval_mode!='auto';`)
+		return err
+	},
 	68: func(tx *sql.Tx) error { _, err := tx.Exec(store.LocalAgentSchema); return err },
 	// v66 was an unpublished experiment that classified conversations by source.
 	67: func(tx *sql.Tx) error {
@@ -661,6 +670,11 @@ func prepareSchemaWithHome(db *sql.DB, path, sourceHome string) error {
 					return err
 				}
 				version = currentSchemaVersion
+			} else if err := validateUnifiedSessionSchema(db, schemaV68Contract); err == nil {
+				if err := setSchemaVersion(db, 68); err != nil {
+					return err
+				}
+				version = 68
 			} else if err := validateSchemaWithRetiredColumns(db, schemaV63Contract); err == nil {
 				if err := setSchemaVersion(db, 63); err != nil {
 					return err
@@ -1067,12 +1081,19 @@ var schemaV63Contract = func() schemaContract {
 	return out
 }()
 
-var currentSchemaContract = func() schemaContract {
+var schemaV68Contract = func() schemaContract {
 	out := extendSchemaContract(schemaV63Contract, map[string][]string{
 		"local_agent_sessions":    {"session_id", "state"},
 		"external_agent_bindings": {"id", "session_id", "runtime_id", "agent_name", "agent_title", "agent_icon", "invite_hash", "expires_at", "credential_hash"},
 	}, "external_agent_session")
 	out.forbiddenTables = schemaV63Contract.forbiddenTables
+	return out
+}()
+
+var currentSchemaContract = func() schemaContract {
+	out := extendSchemaContract(schemaV68Contract, nil)
+	out.forbiddenTables = schemaV68Contract.forbiddenTables
+	out.tables["sessions"] = append(out.tables["sessions"], "approval_mode")
 	return out
 }()
 
@@ -1094,6 +1115,10 @@ type schemaReader interface {
 }
 
 func validateCurrentSchema(db schemaReader) error {
+	return validateUnifiedSessionSchema(db, currentSchemaContract)
+}
+
+func validateUnifiedSessionSchema(db schemaReader, contract schemaContract) error {
 	columns, err := tableColumns(db, "sessions")
 	if err != nil {
 		return err
@@ -1101,7 +1126,7 @@ func validateCurrentSchema(db schemaReader) error {
 	if _, exists := columns["kind"]; exists {
 		return fmt.Errorf("retired column sessions.kind remains")
 	}
-	return validateSchemaWithRetiredColumns(db, currentSchemaContract)
+	return validateSchemaWithRetiredColumns(db, contract)
 }
 
 func validateSchemaWithRetiredColumns(db schemaReader, contract schemaContract) error {

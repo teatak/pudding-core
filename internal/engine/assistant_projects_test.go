@@ -120,11 +120,11 @@ func TestAssistantProjectCreateLookupAndDispatch(t *testing.T) {
 	case <-ctx.Done():
 		t.Fatal(ctx.Err())
 	}
-	if created.Project.ApprovalMode != store.ApprovalAuto || len(created.Project.RootDirs) != 1 || created.Project.RootDirs[0] != resolvedRoot {
+	if len(created.Project.RootDirs) != 1 || created.Project.RootDirs[0] != resolvedRoot {
 		t.Fatalf("unexpected project permissions: %+v", created.Project)
 	}
 	listed := assistantProjectList(t, ctx, eng, sid, resolvedRoot)
-	if len(listed) != 1 || listed[0].ID != created.Project.ID || listed[0].ApprovalMode != store.ApprovalAuto {
+	if len(listed) != 1 || listed[0].ID != created.Project.ID {
 		t.Fatalf("directory lookup lost created project or Auto policy: %+v", listed)
 	}
 	parent, err := db.GetSession(ctx, sid)
@@ -145,9 +145,8 @@ func TestAssistantProjectCreateLookupAndDispatch(t *testing.T) {
 	if err != nil || worker.ProjectID != created.Project.ID || worker.ActiveMode != store.ModeCode || worker.ModeLease != store.ModeLeaseSession {
 		t.Fatalf("dispatch must use the ordinary project Code default: %+v, %v", worker, err)
 	}
-	project, err := db.GetProject(ctx, created.Project.ID)
-	if err != nil || project.ApprovalMode != store.ApprovalAuto {
-		t.Fatalf("dispatch changed project approval policy: %+v, %v", project, err)
+	if worker.ApprovalMode != store.ApprovalAuto {
+		t.Fatalf("new worker approval mode = %v", worker.ApprovalMode)
 	}
 }
 

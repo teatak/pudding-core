@@ -365,7 +365,6 @@ func (s *Server) Handler(token string, static http.Handler) http.Handler {
 	app.Route("/tools/web").GET(s.getWebTools).PATCH(s.patchWebTools).PUT(s.patchWebTools)
 	app.Route("/desktop/about").GET(s.desktopAbout)
 	app.Route("/desktop/local-agent-catalog").GET(s.localAgentCatalog)
-	app.Route("/desktop/local-agent-quota").GET(s.localAgentQuota)
 	app.Route("/desktop/save-file").POST(s.desktopSaveFile)
 	app.Route("/desktop/reveal-file").POST(s.desktopRevealFile)
 	app.Route("/mcp/browser-sessions").GET(s.listBrowserMCPSessions)
@@ -480,12 +479,13 @@ func requestBaseURL(r *http.Request) string {
 }
 
 type createSessionReq struct {
-	ClientRequestID *string `json:"clientRequestID"`
-	ExternalAgent   bool    `json:"externalAgent"`
-	Title           string  `json:"title"`
-	Provider        string  `json:"provider"`
-	Model           string  `json:"model"`
-	ProjectID       string  `json:"projectID"`
+	ApprovalMode    store.ApprovalMode `json:"approvalMode"`
+	ClientRequestID *string            `json:"clientRequestID"`
+	ExternalAgent   bool               `json:"externalAgent"`
+	Title           string             `json:"title"`
+	Provider        string             `json:"provider"`
+	Model           string             `json:"model"`
+	ProjectID       string             `json:"projectID"`
 }
 
 func (s *Server) createSession(c *cart.Context) error {
@@ -493,6 +493,10 @@ func (s *Server) createSession(c *cart.Context) error {
 	// body 可为空(EOF);非空但坏 JSON 必须拒绝,否则会静默建出空会话。
 	if err := decode(c, &req); err != nil && !errors.Is(err, io.EOF) {
 		return badRequest(c, "invalid json body")
+	}
+	if req.ApprovalMode != "" && !engine.IsDesktopRequest(c.Request.Context()) {
+		c.JSON(http.StatusForbidden, map[string]string{"error": "approval_mode_desktop_required"})
+		return nil
 	}
 	req.Provider = strings.TrimSpace(req.Provider)
 	if acp.IsProvider(req.Provider) && !engine.IsDesktopRequest(c.Request.Context()) {
@@ -515,7 +519,7 @@ func (s *Server) createSession(c *cart.Context) error {
 			return badRequest(c, "invalid_client_request_id")
 		}
 	}
-	sess := &store.Session{ID: store.NewID("sess"), Title: req.Title, Provider: req.Provider, Model: req.Model, ProjectID: req.ProjectID}
+	sess := &store.Session{ID: store.NewID("sess"), Title: req.Title, Provider: req.Provider, Model: req.Model, ProjectID: req.ProjectID, ApprovalMode: req.ApprovalMode}
 	var err error
 	if req.ClientRequestID != nil {
 		sess, err = s.store.CreateSessionOnce(c.Request.Context(), *req.ClientRequestID, sess)
@@ -531,22 +535,22 @@ func (s *Server) createSession(c *cart.Context) error {
 }
 
 type createProjectReq struct {
-	ClientRequestID *string            `json:"clientRequestID"`
-	Name            string             `json:"name"`
-	RootDirs        []string           `json:"rootDirs"`
-	ApprovalMode    store.ApprovalMode `json:"approvalMode"`
+	ClientRequestID *string  `json:"clientRequestID"`
+	Name            string   `json:"name"`
+	RootDirs        []string `json:"rootDirs"`
 }
 
 func (s *Server) createProject(c *cart.Context) error {
 	var req createProjectReq
-	if err := decode(c, &req); err != nil {
+	decoder := json.NewDecoder(c.Request.Body)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&req); err != nil {
 		return badRequest(c, "invalid json body")
 	}
 	project := &store.Project{
-		ID:           store.NewID("proj"),
-		Name:         req.Name,
-		RootDirs:     req.RootDirs,
-		ApprovalMode: req.ApprovalMode,
+		ID:       store.NewID("proj"),
+		Name:     req.Name,
+		RootDirs: req.RootDirs,
 	}
 	var keys []string
 	if req.ClientRequestID != nil {
@@ -581,17 +585,17 @@ func (s *Server) getProject(c *cart.Context) error {
 func (s *Server) patchProject(c *cart.Context) error {
 	id, _ := c.Param("id")
 	var upd store.ProjectUpdate
-	if err := decode(c, &upd); err != nil {
+	decoder := json.NewDecoder(c.Request.Body)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&upd); err != nil {
 		return badRequest(c, "invalid json body")
 	}
 	project, err := s.store.UpdateProject(c.Request.Context(), id, upd)
 	if err != nil {
 		return s.fail(c, err)
 	}
-	if upd.RootDirs != nil || upd.ApprovalMode != nil {
-		s.engine.RevokeProjectCommandApprovals(id)
-	}
 	if upd.RootDirs != nil {
+		s.engine.RevokeProjectCommandApprovals(id)
 		if err := s.revokeProjectBrowserFileAccess(c.Request.Context(), project.ID); err != nil {
 			return s.browserError(c, err)
 		}
@@ -765,6 +769,10 @@ func (s *Server) patchSession(c *cart.Context) error {
 	if err := decode(c, &upd); err != nil {
 		return badRequest(c, "invalid json body")
 	}
+	if upd.ApprovalMode != nil && !engine.IsDesktopRequest(c.Request.Context()) {
+		c.JSON(http.StatusForbidden, map[string]string{"error": "approval_mode_desktop_required"})
+		return nil
+	}
 	if upd.Provider != nil {
 		provider := strings.TrimSpace(*upd.Provider)
 		if provider == "" {
@@ -797,6 +805,16 @@ func (s *Server) patchSession(c *cart.Context) error {
 	sess, err := s.store.UpdateSession(c.Request.Context(), id, upd)
 	if err != nil {
 		return s.fail(c, err)
+	}
+	if upd.ApprovalMode != nil {
+		s.engine.InvalidateSessionCommandApprovals(id)
+		children, err := s.store.ListChildSessions(c.Request.Context(), id)
+		if err != nil {
+			return s.fail(c, err)
+		}
+		for _, child := range children {
+			s.engine.InvalidateSessionCommandApprovals(child.ID)
+		}
 	}
 	if projectChanged || (upd.ActiveMode != nil && *upd.ActiveMode != store.ModeCode) {
 		s.engine.RevokeCommandApprovals(id)

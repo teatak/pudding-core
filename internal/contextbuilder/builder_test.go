@@ -116,7 +116,7 @@ func TestBuildInjectsRootProjectInstructionsForCodeMode(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "nested", "AGENTS.md"), []byte("nested guidance\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := ms.CreateProject(ctx, &store.Project{ID: "p1", Name: "Project", RootDirs: []string{root}, ApprovalMode: store.ApprovalAuto}); err != nil {
+	if err := ms.CreateProject(ctx, &store.Project{ID: "p1", Name: "Project", RootDirs: []string{root}}); err != nil {
 		t.Fatal(err)
 	}
 	if err := ms.CreateSession(ctx, &store.Session{ID: "s1", Provider: "mock", Model: "mock", ProjectID: "p1"}); err != nil {
@@ -190,7 +190,7 @@ func TestBuildInjectsEveryProjectDirectoryWithoutInstructionFiles(t *testing.T) 
 	ctx := context.Background()
 	firstRoot := t.TempDir()
 	secondRoot := t.TempDir()
-	if err := ms.CreateProject(ctx, &store.Project{ID: "p1", Name: "Multi-root", RootDirs: []string{firstRoot, secondRoot}, ApprovalMode: store.ApprovalAuto}); err != nil {
+	if err := ms.CreateProject(ctx, &store.Project{ID: "p1", Name: "Multi-root", RootDirs: []string{firstRoot, secondRoot}}); err != nil {
 		t.Fatal(err)
 	}
 	if err := ms.CreateSession(ctx, &store.Session{ID: "s1", Provider: "mock", Model: "mock", ProjectID: "p1"}); err != nil {

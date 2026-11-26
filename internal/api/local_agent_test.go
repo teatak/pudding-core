@@ -35,7 +35,6 @@ func TestLocalAgentRemoteBoundary(t *testing.T) {
 	}
 	for _, test := range []struct{ method, path, body string }{
 		{"GET", "/desktop/local-agent-catalog", ""},
-		{"GET", "/desktop/local-agent-quota?refresh=1", ""},
 		{"POST", "/sessions", `{"provider":"local_agent:antigravity","model":"flash"}`},
 		{"PATCH", "/sessions/local", `{"provider":"local_agent:antigravity"}`},
 		{"POST", "/sessions/local/submit", `{"clientMessageID":"remote","text":"hello"}`},
