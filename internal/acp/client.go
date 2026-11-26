@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -24,11 +25,30 @@ func IsProvider(name string) bool { return strings.HasPrefix(strings.TrimSpace(n
 // Candidates prefers the standalone installation, then PATH, then the app copy.
 func Candidates() []string {
 	home, _ := os.UserHomeDir()
-	paths := []string{filepath.Join(home, ".local", "bin", "agy")}
-	if p, err := exec.LookPath("agy"); err == nil {
-		paths = append(paths, p)
+	path, err := exec.LookPath("agy")
+	if err != nil {
+		path = ""
 	}
-	paths = append(paths, filepath.Join(home, ".gemini", "bin", "agy"))
+	return candidateExecutables(runtime.GOOS, home, os.Getenv("LOCALAPPDATA"), path)
+}
+
+func candidateExecutables(goos, home, localAppData, pathExecutable string) []string {
+	var paths []string
+	name := "agy"
+	if goos == "windows" {
+		name = "agy.exe"
+		if localAppData != "" {
+			paths = append(paths, filepath.Join(localAppData, "agy", "bin", name))
+		}
+	} else if home != "" {
+		paths = append(paths, filepath.Join(home, ".local", "bin", name))
+	}
+	if pathExecutable != "" {
+		paths = append(paths, pathExecutable)
+	}
+	if home != "" {
+		paths = append(paths, filepath.Join(home, ".gemini", "bin", name))
+	}
 	seen := map[string]bool{}
 	var out []string
 	for _, p := range paths {
@@ -177,7 +197,7 @@ type promptHandlers struct {
 func Open(ctx context.Context, paths []string, cwd string) (*Client, error) {
 	var failures []error
 	if len(paths) == 0 {
-		return nil, errors.New("Antigravity CLI not found; install agy or use the app's ~/.gemini/bin/agy")
+		return nil, errors.New("Antigravity CLI not found; install agy or add its directory to PATH")
 	}
 	for _, p := range paths {
 		attempt, cancel := context.WithTimeout(ctx, 10*time.Second)
