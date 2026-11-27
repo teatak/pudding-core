@@ -16,6 +16,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"testing"
@@ -166,7 +167,7 @@ func TestLocalAgentConversation(t *testing.T) {
 		t.Fatalf("model-specific options: %+v", catalog.Models)
 	}
 	unchanged, _ := ms.GetLocalAgentState(ctx, "acp")
-	if *unchanged != *state {
+	if !reflect.DeepEqual(unchanged, state) {
 		t.Fatal("catalog changed active conversation")
 	}
 	entries, _ := os.ReadDir(filepath.Join(home, "local-agents"))
@@ -260,6 +261,15 @@ func TestLocalAgentConversation(t *testing.T) {
 	}
 	e.Stop()
 	e.Wait()
+	// The agent still has the guides delivered before the daemon restart.
+	saved, err := ms.GetLocalAgentState(ctx, "acp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	saved.GuideDigests = map[string]string{"plugin_skill:sample": "delivered-version"}
+	if err := ms.PutLocalAgentState(ctx, saved); err != nil {
+		t.Fatal(err)
+	}
 	e = makeEngine()
 	second := submit("second", "again")
 	e.Wait()
@@ -273,8 +283,8 @@ func TestLocalAgentConversation(t *testing.T) {
 		t.Fatalf("acknowledged history sent again: %s", text)
 	}
 	state, _ = ms.GetLocalAgentState(ctx, "acp")
-	if state.AgentSessionID != originalID {
-		t.Fatal("restored a different agent session")
+	if state.AgentSessionID != originalID || !reflect.DeepEqual(state.GuideDigests, saved.GuideDigests) {
+		t.Fatal("restoring the agent session lost its identity or delivered guides")
 	}
 	messages, _ := ms.ListMessages(ctx, "acp", 0)
 	for _, m := range messages {
@@ -400,7 +410,7 @@ func TestLocalAgentConversation(t *testing.T) {
 		t.Fatal("new context configuration failure lost earlier history")
 	}
 	state, _ = ms.GetLocalAgentState(ctx, "acp")
-	if state.AgentSessionID == originalID || state.CWD != project.RootDirs[0] || state.LastTurnID != confirmedTurn.ID {
+	if state.AgentSessionID == originalID || state.CWD != project.RootDirs[0] || state.LastTurnID != confirmedTurn.ID || len(state.GuideDigests) != 0 {
 		t.Fatalf("new directory state: %+v", state)
 	}
 	log, _ := os.ReadFile(filepath.Join(state.CWD, "rpc.log"))
