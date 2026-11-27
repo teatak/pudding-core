@@ -33,14 +33,16 @@ type LocalHostTurn struct {
 	active       *activeTurn
 	state        externalTurn
 	parts        *turnPartAccumulator
-	wg           sync.WaitGroup
-	guideMu      sync.Mutex
-	guideDigests map[string]string
+	wg               sync.WaitGroup
+	guideMu          sync.Mutex
+	guideDigests     map[string]string
+	projectRulesSent bool
+	lastProjectRules string
 }
 
 // Resolve live instructions before the model runs, so refreshing them does not
 // require a catalog round trip. Tool discovery and schemas remain on demand.
-func (e *Engine) localHostPrompt(ctx context.Context, turn *LocalHostTurn, secret, hostName string) (string, error) {
+func (e *Engine) localHostPrompt(ctx context.Context, turn *LocalHostTurn, hostName string) (string, error) {
 	sess, err := e.store.GetSession(ctx, turn.SessionID)
 	if err != nil {
 		return "", err
@@ -60,7 +62,7 @@ func (e *Engine) localHostPrompt(ctx context.Context, turn *LocalHostTurn, secre
 	if len(guides) > 0 {
 		contextPayload["instructions"] = guides
 	}
-	if e.SyncLocalHostProjectRules(secret, rules) {
+	if turn.SyncProjectRules(rules) {
 		contextPayload["projectInstructions"] = rules
 	}
 	current, err := json.Marshal(contextPayload)
@@ -113,20 +115,37 @@ func (t *LocalHostTurn) FilterGuides(guides map[string]json.RawMessage, full boo
 	return nil
 }
 
-// SyncLocalHostProjectRules 记录本地宿主连接已下发的最新项目规则，并返回内容是否发生变化。
-func (e *Engine) SyncLocalHostProjectRules(secret, rules string) bool {
+// SyncProjectRules 记录本轮本地宿主已下发的最新项目规则，并返回内容是否发生变化。
+func (t *LocalHostTurn) SyncProjectRules(rules string) bool {
+	t.guideMu.Lock()
+	defer t.guideMu.Unlock()
+	if t.projectRulesSent && t.lastProjectRules == rules {
+		return false
+	}
+	t.projectRulesSent = true
+	t.lastProjectRules = rules
+	return true
+}
+
+func (e *Engine) localHostProjectRulesSnapshot(secret string) (bool, string) {
 	e.localMu.Lock()
 	defer e.localMu.Unlock()
 	host := e.localHosts[secret]
 	if host == nil {
-		return true
+		return false, ""
 	}
-	if host.projectRulesSent && host.lastProjectRules == rules {
-		return false
+	return host.projectRulesSent, host.lastProjectRules
+}
+
+func (e *Engine) commitLocalHostProjectRules(secret string, turn *LocalHostTurn) {
+	e.localMu.Lock()
+	defer e.localMu.Unlock()
+	host := e.localHosts[secret]
+	if host == nil {
+		return
 	}
-	host.projectRulesSent = true
-	host.lastProjectRules = rules
-	return true
+	host.projectRulesSent = turn.projectRulesSent
+	host.lastProjectRules = turn.lastProjectRules
 }
 
 func (e *Engine) SetLocalHostEndpoint(endpoint string) { e.localHostEndpoint = endpoint }

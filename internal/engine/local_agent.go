@@ -460,9 +460,13 @@ func (e *Engine) streamLocalTurn(ctx context.Context, id, turnID string, resolve
 	var outputMu sync.Mutex
 	promptCtx, stop := context.WithCancel(ctx)
 	defer stop()
-	hostTurn := &LocalHostTurn{SessionID: id, TurnID: turnID, Context: promptCtx, mu: &outputMu, active: active, parts: parts, guideDigests: maps.Clone(r.state.GuideDigests)}
+	projectRulesSent, lastProjectRules := e.localHostProjectRulesSnapshot(r.hostSecret)
+	hostTurn := &LocalHostTurn{
+		SessionID: id, TurnID: turnID, Context: promptCtx, mu: &outputMu, active: active, parts: parts,
+		guideDigests: maps.Clone(r.state.GuideDigests), projectRulesSent: projectRulesSent, lastProjectRules: lastProjectRules,
+	}
 	if r.hostSecret != "" {
-		hostPrompt, err := e.localHostPrompt(ctx, hostTurn, r.hostSecret, r.hostName)
+		hostPrompt, err := e.localHostPrompt(ctx, hostTurn, r.hostName)
 		if err != nil {
 			return failed(err)
 		}
@@ -636,6 +640,7 @@ func (e *Engine) streamLocalTurn(ctx context.Context, id, turnID string, resolve
 		r.state.LastTurnID = turnID
 	}
 	if err == nil || (promptSent && ctx.Err() != nil) {
+		e.commitLocalHostProjectRules(r.hostSecret, hostTurn)
 		r.state.GuideDigests = hostTurn.guideDigests
 	}
 	if saveErr := e.store.PutLocalAgentState(context.Background(), r.state); saveErr != nil {

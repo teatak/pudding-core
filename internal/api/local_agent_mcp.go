@@ -134,7 +134,7 @@ func (s *Server) localHostCall(ctx context.Context, secret, name string, args js
 			return nil, err
 		}
 		if rules, ok := catalog["projectInstructions"].(string); ok {
-			changed := s.engine.SyncLocalHostProjectRules(secret, rules)
+			changed := turn.SyncProjectRules(rules)
 			if len(queries) > 0 && !changed {
 				delete(catalog, "projectInstructions")
 			}
@@ -173,7 +173,7 @@ func (s *Server) localHostCall(ctx context.Context, secret, name string, args js
 	if err := turn.FilterGuides(out.Instructions, false); err != nil {
 		return nil, err
 	}
-	if out.ProjectInstructions != nil && !s.engine.SyncLocalHostProjectRules(secret, *out.ProjectInstructions) {
+	if out.ProjectInstructions != nil && !turn.SyncProjectRules(*out.ProjectInstructions) {
 		out.ProjectInstructions = nil
 	}
 	if len(out.Instructions) > 0 || out.ProjectInstructions != nil {
