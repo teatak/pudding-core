@@ -97,8 +97,8 @@ func (e *Engine) cooledSummaryPressure(ctx context.Context, sessionID string, re
 	return summaryInputPressure(resolved, all, factor, canReadHistory)
 }
 
-// Compact still reads the L1 history. Keep 10% of the window available so
-// delaying Compact through cooling cannot silently exhaust its summary input.
+// Compact still reads the L1 history. Check its summary budget before
+// postponing compaction through cooling.
 func summaryInputPressure(resolved *resolvedModel, all []*store.Message, factor float64, canReadHistory bool) (bool, error) {
 	effective := contextbuilder.EffectiveMessages(all)
 	history, err := compactHistoryText(effective, effective, compactColdTurns(effective, canReadHistory))
@@ -119,6 +119,6 @@ func summaryInputPressure(resolved *resolvedModel, all []*store.Message, factor 
 	if err != nil {
 		return false, err
 	}
-	input := calibratedTokenEstimate(estimate.Total(), factor)
-	return input+compactInputMargin(input) >= resolved.config.ContextWindow*90/100, nil
+	input := max(compactInputTokens(req, estimate.Total()), calibratedTokenEstimate(estimate.Total(), factor))
+	return input+compactMinOutputTokens >= compactRequestBudget(resolved.config.ContextWindow), nil
 }

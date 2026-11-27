@@ -236,7 +236,7 @@ func (s *Server) agentCommand(c *cart.Context) error {
 		if err != nil {
 			return s.failAgent(c, err)
 		}
-		out, err := s.agentToolReply(ctx, sess, in.TurnID, reply)
+		out, err := s.agentToolReply(ctx, sess, in.TurnID, reply, nil)
 		if err != nil {
 			return s.failAgent(c, err)
 		}
@@ -258,7 +258,7 @@ func (s *Server) agentCommand(c *cart.Context) error {
 	return nil
 }
 
-func (s *Server) agentToolReply(ctx context.Context, sess *store.Session, turnID string, reply engine.ExternalToolReply) (any, error) {
+func (s *Server) agentToolReply(ctx context.Context, sess *store.Session, turnID string, reply engine.ExternalToolReply, local *engine.LocalHostTurn) (any, error) {
 	var err error
 	result := reply.Result
 	if ref, ok := tool.ReferencedSkill(result.Name, result.Ok, result.Content); ok {
@@ -270,7 +270,21 @@ func (s *Server) agentToolReply(ctx context.Context, sess *store.Session, turnID
 		if err != nil {
 			return nil, err
 		}
-		// The primary result already carries this guide. SkillRefs is a per-reply copy.
+		if local != nil && result.Ok {
+			// A fresh load and an explicit read both need their document immediately.
+			var load struct{ NewlyLoaded bool }
+			if err := json.Unmarshal([]byte(reply.Result.Content), &load); err != nil {
+				return nil, err
+			}
+			include, err := local.IncludeGuide(ref.Key(), json.RawMessage(result.Content), load.NewlyLoaded || result.Name == tool.SkillRead)
+			if err != nil {
+				return nil, err
+			}
+			if !include {
+				result.Content = reply.Result.Content
+			}
+		}
+		// The primary result already handles this guide. SkillRefs is a per-reply copy.
 		delete(reply.SkillRefs, ref.Key())
 	}
 	out, err := s.externalMCPToolResult(sess.ID, result)

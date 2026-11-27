@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/teatak/pudding-core/internal/config"
+	"github.com/teatak/pudding-core/internal/event"
 	"github.com/teatak/pudding-core/internal/provider"
 	"github.com/teatak/pudding-core/internal/provider/mock"
 	"github.com/teatak/pudding-core/internal/provider/registry"
@@ -377,7 +378,7 @@ func TestCompactOversizedMultiTurnUsesRollingBatches(t *testing.T) {
 	eng.resolver = registry.Static(compactClientFunc(func(ctx context.Context, req provider.Request) (<-chan provider.Chunk, error) {
 		input := requestInputTokens(req)
 		output, _ := req.Config.MaxOutputTokens()
-		if output <= 0 || input+output > req.Config.ContextWindow {
+		if output <= 0 || compactInputTokens(req, input)+output > req.Config.ContextWindow*80/100 {
 			t.Errorf("rolling batch request exceeded window: input=%d output=%d window=%d", input, output, req.Config.ContextWindow)
 		}
 		requests = append(requests, req)
@@ -434,13 +435,13 @@ func TestCompactOversizedMultiTurnUsesRollingBatches(t *testing.T) {
 			appendEngineTestTurn(t, smallMS, smallSID, fmt.Sprintf("old-%d", i), fmt.Sprintf("OLD_%d %s", i, strings.Repeat("x", 4000)), "ok")
 		}
 		for i := 1; i <= 2; i++ {
-			appendEngineTestTurn(t, smallMS, smallSID, fmt.Sprintf("tail-%d", i), fmt.Sprintf("RETAIN_TAIL_FACT_%d %s", i, strings.Repeat("r", 12000)), "ok")
+			appendEngineTestTurn(t, smallMS, smallSID, fmt.Sprintf("tail-%d", i), fmt.Sprintf("RETAIN_TAIL_FACT_%d %s", i, strings.Repeat("r", 10000)), "ok")
 		}
 		var smallReqs []provider.Request
 		smallEng.resolver = registry.Static(compactClientFunc(func(ctx context.Context, req provider.Request) (<-chan provider.Chunk, error) {
 			input := requestInputTokens(req)
 			output, _ := req.Config.MaxOutputTokens()
-			if output <= 0 || input+output > req.Config.ContextWindow {
+			if output <= 0 || compactInputTokens(req, input)+output > req.Config.ContextWindow*80/100 {
 				t.Errorf("small-window rolling batch exceeded window: input=%d output=%d window=%d", input, output, req.Config.ContextWindow)
 			}
 			smallReqs = append(smallReqs, req)
@@ -542,13 +543,13 @@ func TestCompactOversizedMultiTurnUsesRollingBatches(t *testing.T) {
 	})
 }
 
-// Both second messages fit alone in an 8K window. The first partial made the
-// original final request either overflow or leave only four output tokens.
+// Each second message fits alone. Adding the first partial either exceeds the
+// summary budget or leaves only four output tokens.
 func TestCompactHandoffWithNearWindowMessage(t *testing.T) {
 	for _, tc := range []struct {
-		name string
-		size int
-	}{{"carry_exceeds_window", 29551}, {"carry_leaves_four_tokens", 28939}} {
+		name            string
+		remainingOutput int
+	}{{"carry_exceeds_window", -100}, {"carry_leaves_four_tokens", 4}} {
 		t.Run(tc.name, func(t *testing.T) {
 			eng, db, _, sid := newTestEngine(t)
 			defer eng.Stop()
@@ -561,7 +562,18 @@ func TestCompactHandoffWithNearWindowMessage(t *testing.T) {
 			if _, err := db.UpdateSession(ctx, sid, store.SessionUpdate{Title: &title}); err != nil {
 				t.Fatal(err)
 			}
-			for i, text := range []string{strings.Repeat("a", 5000), strings.Repeat("b", tc.size)} {
+			const first = "first outcome @message(source1)"
+			const second = "second outcome @message(source2)"
+			firstPartial := first + strings.Repeat("k", 1000-len(first))
+			source := &store.Message{ID: "source2", Role: store.RoleUser}
+			probe := partialSummaryRecord(firstPartial) + compactMessageRecord(source, "bbbb", "summarize")
+			probeReq, err := compactSummaryRequest(&resolvedModel{protocol: "openai-compatible"}, probe, "", 512)
+			if err != nil {
+				t.Fatal(err)
+			}
+			probeInput := compactInputTokens(probeReq, requestInputTokens(probeReq))
+			size := 4 + 4*(compactRequestBudget(8192)-probeInput-tc.remainingOutput)
+			for i, text := range []string{strings.Repeat("a", 5000), strings.Repeat("b", size)} {
 				id := fmt.Sprintf("source%d", i+1)
 				if _, err := db.BeginTurn(ctx, store.BeginTurnInput{SessionID: sid, TurnID: id, UserMessageID: id, ClientMessageID: "external-mcp:agent:" + id, UserText: text}); err != nil {
 					t.Fatal(err)
@@ -570,12 +582,21 @@ func TestCompactHandoffWithNearWindowMessage(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			const first = "first outcome @message(source1)"
-			const second = "second outcome @message(source2)"
+			events, unsubscribe := eng.hub.Subscribe(sid)
+			defer unsubscribe()
+			var phases []string
 			var summaries, replies int
 			eng.resolver = registry.Static(compactClientFunc(func(_ context.Context, req provider.Request) (<-chan provider.Chunk, error) {
+				for len(events) > 0 {
+					if ev := <-events; ev.Kind == event.TurnCompaction {
+						phases = append(phases, ev.Phase)
+					}
+				}
 				text := "continued"
 				if req.System == compactSystemPrompt {
+					if len(phases) != 1 || phases[0] != "started" {
+						t.Errorf("summary batch %d: compaction transitions %v", summaries+1, phases)
+					}
 					summaries++
 					budget, _ := req.Config.MaxOutputTokens()
 					prompt := req.Messages[0].Text
@@ -584,7 +605,7 @@ func TestCompactHandoffWithNearWindowMessage(t *testing.T) {
 					}
 					switch {
 					case strings.Contains(prompt, strings.Repeat("a", 100)):
-						text = first + strings.Repeat("k", 1000-len(first))
+						text = firstPartial
 					case strings.Contains(prompt, strings.Repeat("b", 100)):
 						text = second
 					default:
@@ -595,6 +616,9 @@ func TestCompactHandoffWithNearWindowMessage(t *testing.T) {
 					}
 				} else {
 					replies++
+					if len(phases) != 2 || phases[1] != "finished" {
+						t.Errorf("normal reply: compaction transitions %v", phases)
+					}
 					messages, _ := json.Marshal(req.Messages)
 					for _, want := range []string{first, second, "continue this task"} {
 						if !strings.Contains(string(messages), want) {
@@ -720,7 +744,7 @@ func TestCompactRegressionSummaryRequestFitsContextWindow(t *testing.T) {
 		req := <-requests
 		n := requestInputTokens(req)
 		output, _ := req.Config.MaxOutputTokens()
-		if n <= 64000 || n+output+compactInputMargin(n) > req.Config.ContextWindow {
+		if n <= 64000 || compactInputTokens(req, n)+output > req.Config.ContextWindow*80/100 {
 			t.Fatalf("oversized summary request: %d", n)
 		}
 		if strings.Count(req.Messages[0].Text, "action=\"summarize\">") != 200 || strings.Count(req.Messages[0].Text, "action=\"retain\">") != 4 {

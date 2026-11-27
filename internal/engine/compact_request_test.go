@@ -67,7 +67,7 @@ func TestCompactRequestUsesActualRemainingWindow(t *testing.T) {
 			estimate, _ := contextbuilder.EstimateRequest(req, r.protocol)
 			want := compactMaxOutputTokens
 			if window > 0 {
-				want = min(want, window-estimate.Total()-compactInputMargin(estimate.Total()))
+				want = min(want, window*80/100-compactInputTokens(req, estimate.Total()))
 			}
 			output, _ := req.Config.MaxOutputTokens()
 			if output != want {
@@ -85,7 +85,7 @@ func TestCompactRequestUsesActualRemainingWindow(t *testing.T) {
 	history := strings.Repeat("HISTORY_CONTENT ", 500)
 	req, _ := compactSummaryRequest(r, history, "", 4096)
 	estimate, _ := contextbuilder.EstimateRequest(req, r.protocol)
-	r.config.ContextWindow = estimate.Total() + compactInputMargin(estimate.Total()) + 800
+	r.config.ContextWindow = ((compactInputTokens(req, estimate.Total())+800)*5 + 3) / 4
 	req, err := compactSummaryRequest(r, history, "", 4096)
 	if err != nil {
 		t.Fatal(err)
@@ -97,6 +97,21 @@ func TestCompactRequestUsesActualRemainingWindow(t *testing.T) {
 	r.config.ContextWindow = 200
 	if _, err := compactSummaryRequest(r, history, "", 4096); !errors.Is(err, ErrContextBudget) {
 		t.Fatalf("oversized request accepted: %v", err)
+	}
+}
+
+func TestCompactRequestAccountsForStructuredText(t *testing.T) {
+	r := &resolvedModel{model: "fixture", protocol: "openai-responses", config: provider.ModelConfig{ContextWindow: 4096}}
+	record := `{"id":"0123456789","args":[1,2,3]},`
+	history := strings.Repeat(record, 260)
+	// Same length, but prose-like ASCII and JSON used to receive exactly the
+	// same estimate. Only the latter should require batching here.
+	prose := strings.Repeat("a", len(history))
+	if _, err := compactSummaryRequest(r, prose, "", 256); err != nil {
+		t.Fatalf("plain text should fit: %v", err)
+	}
+	if _, err := compactSummaryRequest(r, history, "", 256); !errors.Is(err, ErrContextBudget) {
+		t.Fatalf("structured history must be split: %v", err)
 	}
 }
 

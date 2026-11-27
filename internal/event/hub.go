@@ -17,10 +17,15 @@ type Hub struct {
 	mu          sync.Mutex
 	subs        map[string]map[chan Event]struct{}
 	pageStreams map[string]*pageArgumentStream
+	compactions map[string]Event
 }
 
 func NewHub() *Hub {
-	return &Hub{subs: make(map[string]map[chan Event]struct{}), pageStreams: make(map[string]*pageArgumentStream)}
+	return &Hub{
+		subs:        make(map[string]map[chan Event]struct{}),
+		pageStreams: make(map[string]*pageArgumentStream),
+		compactions: make(map[string]Event),
+	}
 }
 
 const subscriberBuffer = 64
@@ -35,6 +40,9 @@ func (h *Hub) Subscribe(sessionID string) (<-chan Event, func()) {
 		h.subs[sessionID] = set
 	}
 	set[ch] = struct{}{}
+	if ev, ok := h.compactions[sessionID]; ok {
+		ch <- ev
+	}
 	h.prunePageStreams()
 	for _, stream := range h.pageStreams {
 		if stream.event.SessionID == sessionID && !stream.overflow {
@@ -58,6 +66,13 @@ func (h *Hub) Publish(ev Event) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.capturePageStream(ev)
+	if ev.Kind == TurnCompaction {
+		if ev.Phase == "started" {
+			h.compactions[ev.SessionID] = ev
+		} else {
+			delete(h.compactions, ev.SessionID)
+		}
+	}
 	for ch := range h.subs[ev.SessionID] {
 		select {
 		case ch <- ev:

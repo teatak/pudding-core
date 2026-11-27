@@ -330,8 +330,8 @@ func TestLocalAgentHostMCP(t *testing.T) {
 		business(tool.FileList, map[string]string{"scope": "project", "path": "."}),
 		hostText("pudding_tools", map[string]any{"query": tool.FileRead}),
 	} {
-		if strings.Contains(text, "HOST_RULE_V2") || strings.Contains(text, "projectInstructions") {
-			t.Fatalf("unchanged projectInstructions repeated: %s", text)
+		if strings.Contains(text, "HOST_RULE_V2") || strings.Contains(text, "projectInstructions") || strings.Contains(text, "HOST_SKILL_V2") {
+			t.Fatalf("unchanged instructions repeated: %s", text)
 		}
 	}
 	if text := hostText("pudding_tools", map[string]any{}); strings.Contains(text, "HOST_RULE_V1") || strings.Contains(text, "HOST_SKILL_V1") || !strings.Contains(text, "HOST_RULE_V2") || strings.Count(text, "HOST_SKILL_V2") != 1 {
@@ -341,7 +341,27 @@ func TestLocalAgentHostMCP(t *testing.T) {
 	if text := hostText("pudding_tools", query); strings.Contains(text, `"name":"builtin_skill_validate"`) {
 		t.Fatalf("unloaded plugin tool visible: %s", text)
 	}
-	business(tool.PluginLoad, map[string]string{"plugin_id": plugin.BuiltinSkillAuthoringID})
+	loadArgs := map[string]string{"plugin_id": plugin.BuiltinSkillAuthoringID}
+	var loaded struct{ Content string }
+	if err := json.Unmarshal([]byte(business(tool.PluginLoad, loadArgs)), &loaded); err != nil || loaded.Content == "" {
+		t.Fatalf("first load missing plugin document: %v", err)
+	}
+	for _, text := range []string{business(tool.PluginLoad, loadArgs), hostText("pudding_tools", query)} {
+		if strings.Contains(text, `"content":`) {
+			t.Fatalf("unchanged plugin document repeated: %s", text)
+		}
+	}
+	for range 2 {
+		var catalog struct {
+			Instructions map[string]struct{ Content string }
+		}
+		if err := json.Unmarshal([]byte(hostText("pudding_tools", map[string]any{})), &catalog); err != nil {
+			t.Fatal(err)
+		}
+		if catalog.Instructions[tool.PluginSkillReference+":"+plugin.BuiltinSkillAuthoringID].Content != loaded.Content {
+			t.Fatal("unfiltered catalog did not restore the complete loaded plugin document")
+		}
+	}
 	if text := hostText("pudding_tools", query); !strings.Contains(text, `"name":"builtin_skill_validate"`) || !strings.Contains(text, "inputSchema") {
 		t.Fatalf("loaded plugin tool unavailable: %s", text)
 	}
@@ -373,7 +393,7 @@ func TestLocalAgentHostMCP(t *testing.T) {
 	if _, err := eng.Submit(ctx, engine.SubmitInput{SessionID: "host", ClientMessageID: "next", Text: "hold"}); err != nil {
 		t.Fatal(err)
 	}
-	if text := promptText(2); !strings.Contains(text, "HOST_RULE_V3") || strings.Count(text, "HOST_SKILL_V3") != 1 || strings.Contains(text, "HOST_RULE_V2") || strings.Contains(text, "HOST_SKILL_V2") || !strings.Contains(text, plugin.BuiltinSkillAuthoringID) {
+	if text := promptText(2); !strings.Contains(text, "HOST_RULE_V3") || strings.Count(text, "HOST_SKILL_V3") != 1 || strings.Contains(text, "HOST_RULE_V2") || strings.Contains(text, "HOST_SKILL_V2") || !strings.Contains(text, plugin.BuiltinSkillAuthoringID) || strings.Contains(text, tool.PluginSkillReference+":"+plugin.BuiltinSkillAuthoringID) {
 		t.Fatalf("next prompt must refresh rules, selected Skills and loaded plugins: %s", text)
 	}
 	deadline = time.Now().Add(3 * time.Second)

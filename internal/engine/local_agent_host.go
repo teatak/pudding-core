@@ -3,6 +3,8 @@ package engine
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -24,24 +26,26 @@ type localAgentHost struct {
 	lastProjectRules string         // protected by Engine.localMu
 }
 type LocalHostTurn struct {
-	SessionID string
-	TurnID    string
-	Context   context.Context
-	mu        *sync.Mutex // serializes canonical output with ACP updates
-	active    *activeTurn
-	state     externalTurn
-	parts     *turnPartAccumulator
-	wg        sync.WaitGroup
+	SessionID    string
+	TurnID       string
+	Context      context.Context
+	mu           *sync.Mutex // serializes canonical output with ACP updates
+	active       *activeTurn
+	state        externalTurn
+	parts        *turnPartAccumulator
+	wg           sync.WaitGroup
+	guideMu      sync.Mutex
+	guideDigests map[string]string
 }
 
 // Resolve live instructions before the model runs, so refreshing them does not
 // require a catalog round trip. Tool discovery and schemas remain on demand.
-func (e *Engine) localHostPrompt(ctx context.Context, sessionID, turnID, secret, hostName string) (string, error) {
-	sess, err := e.store.GetSession(ctx, sessionID)
+func (e *Engine) localHostPrompt(ctx context.Context, turn *LocalHostTurn, secret, hostName string) (string, error) {
+	sess, err := e.store.GetSession(ctx, turn.SessionID)
 	if err != nil {
 		return "", err
 	}
-	rules, err := e.ExternalProjectRules(ctx, sess, turnID)
+	rules, err := e.ExternalProjectRules(ctx, sess, turn.TurnID)
 	if err != nil {
 		return "", err
 	}
@@ -49,9 +53,12 @@ func (e *Engine) localHostPrompt(ctx context.Context, sessionID, turnID, secret,
 	if err != nil {
 		return "", err
 	}
-	contextPayload := map[string]any{
-		"mode":         sess.ActiveMode,
-		"instructions": guides,
+	contextPayload := map[string]any{"mode": sess.ActiveMode, "loadedPlugins": sess.LoadedPluginIDs}
+	if err := turn.FilterGuides(guides, false); err != nil {
+		return "", err
+	}
+	if len(guides) > 0 {
+		contextPayload["instructions"] = guides
 	}
 	if e.SyncLocalHostProjectRules(secret, rules) {
 		contextPayload["projectInstructions"] = rules
@@ -60,7 +67,50 @@ func (e *Engine) localHostPrompt(ctx context.Context, sessionID, turnID, secret,
 	if err != nil {
 		return "", err
 	}
-	return fmt.Sprintf("You are running inside Pudding. Use the %s MCP server for file, command, browser, widget and plugin operations so changes, approvals and results appear in this conversation. Current projectInstructions are supplied initially and whenever they change (omitted when unchanged); selected Skill/plugin instructions are supplied below and replace earlier snapshots, including any old instruction to call pudding_tools at the start of every turn. Do not call tools for greetings or other requests that need no tools. Use pudding_tools only when you need to discover a tool, plugin or Skill, or lack a tool's exact inputSchema; call pudding_tools with no query after context compaction to recover the catalog and latest rules. Reuse schemas already in context across calls and turns; query again if a tool is unavailable or its arguments are rejected. Call pudding_call directly when you already know the required schema. Pudding manages connection and Turn IDs; do not connect/begin/end manually. Read refreshed instructions in tool results. Use native tools only when Pudding cannot provide the needed operation, and explain that fallback. Other configured MCP servers may expose older Pudding tools requiring binding IDs; do not use them for this conversation.\n\nCurrent Pudding context:\n%s", hostName, current), nil
+	return fmt.Sprintf("You are running inside Pudding. Use the %s MCP server for file, command, browser, widget and plugin operations so changes, approvals and results appear in this conversation. Current projectInstructions are supplied initially and whenever they change (omitted when unchanged); Skill and plugin instructions are supplied on first use and when changed. Keep earlier instructions for active plugins when omitted. Do not call tools for greetings or other requests that need no tools. Use pudding_tools only when you need to discover a tool, plugin or Skill, or lack a tool's exact inputSchema; call pudding_tools with no query after context compaction to recover the catalog and latest rules. Reuse schemas already in context across calls and turns; query again if a tool is unavailable or its arguments are rejected. Call pudding_call directly when you already know the required schema. Pudding manages connection and Turn IDs; do not connect/begin/end manually. Read refreshed instructions in tool results. Use native tools only when Pudding cannot provide the needed operation, and explain that fallback. Other configured MCP servers may expose older Pudding tools requiring binding IDs; do not use them for this conversation.\n\nCurrent Pudding context:\n%s", hostName, current), nil
+}
+
+// IncludeGuide compares the selected document, not the load operation's status or account metadata.
+func (t *LocalHostTurn) IncludeGuide(key string, payload json.RawMessage, full bool) (bool, error) {
+	var guide struct {
+		Reference               tool.SkillReference
+		Content                 *string
+		Name, Description, Path string
+	}
+	if err := json.Unmarshal(payload, &guide); err != nil {
+		return false, err
+	}
+	t.guideMu.Lock()
+	defer t.guideMu.Unlock()
+	if guide.Content == nil {
+		delete(t.guideDigests, key)
+		return true, nil // Preserve unloaded, unavailable and permission status.
+	}
+	body, err := json.Marshal(guide)
+	if err != nil {
+		return false, err
+	}
+	hash := sha256.Sum256(body)
+	digest := hex.EncodeToString(hash[:])
+	changed := t.guideDigests[key] != digest
+	if t.guideDigests == nil {
+		t.guideDigests = make(map[string]string)
+	}
+	t.guideDigests[key] = digest
+	return full || changed, nil
+}
+
+func (t *LocalHostTurn) FilterGuides(guides map[string]json.RawMessage, full bool) error {
+	for key, payload := range guides {
+		include, err := t.IncludeGuide(key, payload, full)
+		if err != nil {
+			return err
+		}
+		if !include {
+			delete(guides, key)
+		}
+	}
+	return nil
 }
 
 // SyncLocalHostProjectRules 记录本地宿主连接已下发的最新项目规则，并返回内容是否发生变化。

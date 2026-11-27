@@ -15,6 +15,7 @@ const (
 	TurnStarted               Kind = "turn.started"
 	TurnDelta                 Kind = "turn.delta"
 	TurnTool                  Kind = "turn.tool"
+	TurnCompaction            Kind = "turn.compaction"
 	TurnCompacted             Kind = "turn.compacted"
 	TurnCompleted             Kind = "turn.completed"
 	TurnFailed                Kind = "turn.failed"
@@ -43,6 +44,7 @@ const (
 //	turn.delta     turnID, part, delta      (不落库,无 seq)
 //	turn.tool      turnID, callID, name, phase, argsDelta/stream/content/ok/summaryKind/summaryCount/attachments (不落库,无 seq)
 //	turn.completed seq, turnID, assistantMessageID
+//	turn.compaction turnID, phase (started|finished, transient across all summary batches)
 //	turn.compacted seq, turnID, assistantMessageID (summary committed; turn stays running)
 //	turn.failed    seq, turnID, error       (有部分输出时附 assistantMessageID + interrupted)
 //	turn.cancelled seq, turnID              (有部分输出时附 assistantMessageID + interrupted)
@@ -116,6 +118,7 @@ type Attachment struct {
 func (e Event) Persistent() bool {
 	return e.Kind != TurnDelta &&
 		e.Kind != TurnTool &&
+		e.Kind != TurnCompaction &&
 		e.Kind != ApprovalRequested &&
 		e.Kind != ApprovalResolved &&
 		e.Kind != ProcessStarted &&

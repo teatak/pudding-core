@@ -14,6 +14,7 @@ import (
 	"github.com/teatak/pudding-core/internal/acp"
 	"github.com/teatak/pudding-core/internal/config"
 	"github.com/teatak/pudding-core/internal/contextbuilder"
+	"github.com/teatak/pudding-core/internal/event"
 	"github.com/teatak/pudding-core/internal/provider"
 	"github.com/teatak/pudding-core/internal/store"
 	"github.com/teatak/pudding-core/internal/tool"
@@ -199,6 +200,12 @@ func (e *Engine) compact(ctx context.Context, in CompactInput, resolved *resolve
 	}
 	if summaryTokens <= 0 {
 		return nil, ErrContextBudget
+	}
+	if automatic && runningTurnID != "" {
+		progress := event.Event{Kind: event.TurnCompaction, SessionID: sessionID, TurnID: runningTurnID, Phase: "started"}
+		e.hub.Publish(progress)
+		progress.Phase = "finished"
+		defer e.hub.Publish(progress)
 	}
 	summary, err := e.summarizeCompactHistory(ctx, sessionID, resolved, client, effective, cold, strings.TrimSpace(in.Hint), summaryTokens, tool.HasDefinition(defs, tool.HistoryGetMessage))
 	if err != nil {
@@ -391,7 +398,7 @@ func (e *Engine) generateCompactSummary(ctx context.Context, sessionID string, r
 	if err != nil {
 		return "", err
 	}
-	estimatedInputTokens := estimate.Total()
+	estimatedInputTokens := compactInputTokens(req, estimate.Total())
 	if err := limitRequestOutput(&req, resolved.protocol, estimatedInputTokens); err != nil {
 		return "", err
 	}
@@ -420,7 +427,8 @@ func (e *Engine) generateCompactSummary(ctx context.Context, sessionID string, r
 	var out strings.Builder
 	var usage provider.UsageInfo
 	defer func() {
-		e.recordUsage(context.Background(), sessionID, resolved.providerName, resolved.model, estimatedInputTokens, usage, 1)
+		// Normal requests calibrate against the unadjusted wire estimate.
+		e.recordUsage(context.Background(), sessionID, resolved.providerName, resolved.model, estimate.Total(), usage, 1)
 	}()
 	for {
 		select {

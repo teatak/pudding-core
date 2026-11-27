@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -235,6 +236,9 @@ func (e *Engine) prepareLocal(ctx context.Context, id, turnID string, resolved *
 		state := store.LocalAgentState{SessionID: id, AgentSessionID: session.SessionID, Executable: c.Path, CWD: cfg.CWD, Image: c.Init.Capabilities.Prompt.Image, Audio: c.Init.Capabilities.Prompt.Audio, EmbeddedContext: c.Init.Capabilities.Prompt.EmbeddedContext}
 		if r.state != nil && agentID != "" {
 			state.LastTurnID = r.state.LastTurnID
+			if session.SessionID == agentID {
+				state.GuideDigests = r.state.GuideDigests
+			}
 			state.ContextUsed = r.state.ContextUsed
 			state.ContextSize = r.state.ContextSize
 		}
@@ -453,15 +457,18 @@ func (e *Engine) streamLocalTurn(ctx context.Context, id, turnID string, resolve
 		return failed(err)
 	}
 	prompt = append(history, prompt...)
+	var outputMu sync.Mutex
+	promptCtx, stop := context.WithCancel(ctx)
+	defer stop()
+	hostTurn := &LocalHostTurn{SessionID: id, TurnID: turnID, Context: promptCtx, mu: &outputMu, active: active, parts: parts, guideDigests: maps.Clone(r.state.GuideDigests)}
 	if r.hostSecret != "" {
-		hostPrompt, err := e.localHostPrompt(ctx, id, turnID, r.hostSecret, r.hostName)
+		hostPrompt, err := e.localHostPrompt(ctx, hostTurn, r.hostSecret, r.hostName)
 		if err != nil {
 			return failed(err)
 		}
 		prompt = append([]acp.Content{{Type: "text", Text: hostPrompt}}, prompt...)
 	}
 	var outputErr error
-	var outputMu sync.Mutex
 	calls := map[string]tool.Call{}
 	callOrder := []string{}
 	finished := map[string]bool{}
@@ -474,12 +481,11 @@ func (e *Engine) streamLocalTurn(ctx context.Context, id, turnID string, resolve
 		finished[call.CallID] = true
 		return e.completeToolCall(id, turnID, nil, parts, call, result)
 	}
-	promptCtx, stop := context.WithCancel(ctx)
-	defer stop()
-	hostTurn := &LocalHostTurn{SessionID: id, TurnID: turnID, Context: promptCtx, mu: &outputMu, active: active, parts: parts}
 	e.startLocalHost(r.hostSecret, hostTurn)
+	promptSent := false
 	result, err := r.client.Prompt(promptCtx, r.state.AgentSessionID, prompt, acp.Handlers{
 		Ready: func() {
+			promptSent = true
 			active.mu.Lock()
 			defer active.mu.Unlock()
 			if promptCtx.Err() == nil {
@@ -628,6 +634,9 @@ func (e *Engine) streamLocalTurn(ctx context.Context, id, turnID string, resolve
 	// those turns in the next prompt as labelled history, never as fresh actions.
 	if err == nil {
 		r.state.LastTurnID = turnID
+	}
+	if err == nil || (promptSent && ctx.Err() != nil) {
+		r.state.GuideDigests = hostTurn.guideDigests
 	}
 	if saveErr := e.store.PutLocalAgentState(context.Background(), r.state); saveErr != nil {
 		return failed(saveErr)

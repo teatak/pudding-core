@@ -44,6 +44,7 @@ func systemExecutableDirs() []string {
 		"/bin",
 		"/usr/sbin",
 		"/sbin",
+		"/usr/local/go/bin",
 	}
 }
 

@@ -388,14 +388,11 @@ func TestCoolingUsesCalibratedCandidate(t *testing.T) {
 
 func TestCoolingStillChecksCanonicalSummaryBudget(t *testing.T) {
 	// Canonical history must dominate the fixed prompt/tool overhead so its
-	// summary reaches 90% while the cooled ordinary request stays below 80%.
+	// summary reaches its budget while the cooled ordinary request stays below 80%.
 	// Small history made both requests exceed their thresholds as prompts grew,
 	// which no longer isolated the canonical-summary pressure path.
 	e, db, resolved, req := coolingFixtureWithHistorySize(t, 32)
 	ctx := context.Background()
-	if changed, err := e.prepareContextRequest(ctx, "sess_1", "current", resolved, store.ModeCode, &req, true); err != nil || !changed {
-		t.Fatalf("initial cooling: %v %v", changed, err)
-	}
 	all, err := db.ListMessages(ctx, "sess_1", 0)
 	if err != nil {
 		t.Fatal(err)
@@ -404,12 +401,25 @@ func TestCoolingStillChecksCanonicalSummaryBudget(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	summaryReq, err := compactSummaryRequest(resolved, history, "", compactSummaryMaxTokens)
+	probe := *resolved
+	probe.config.ContextWindow = 0
+	summaryReq, err := compactSummaryRequest(&probe, history, "", compactSummaryMaxTokens)
 	if err != nil {
 		t.Fatal(err)
 	}
-	input := requestInputTokens(summaryReq)
-	resolved.config.ContextWindow = (input + compactInputMargin(input)) * 100 / 90
+	input := compactInputTokens(summaryReq, requestInputTokens(summaryReq))
+	pressureWindow := (input + compactMinOutputTokens) * 100 / 80
+	resolved.config.ContextWindow = pressureWindow + 2048
+	req.Config = resolved.config
+	if changed, err := e.prepareContextRequest(ctx, "sess_1", "current", resolved, store.ModeCode, &req, true); err != nil || !changed {
+		t.Fatalf("initial cooling: %v %v", changed, err)
+	}
+	state, err := db.ContextCooling(ctx, "sess_1")
+	if err != nil || state.ThroughTurnID == "" {
+		t.Fatalf("expected cooled history before tightening the budget: %+v %v", state, err)
+	}
+	// Cross the boundary even after the summary prompt shrinks its output target.
+	resolved.config.ContextWindow = pressureWindow - 128
 	cooled, err := e.builder.BuildForProviderWithTools(ctx, "sess_1", "mock", "mock-model", "code", req.Tools, resolved.config)
 	if err != nil {
 		t.Fatal(err)
@@ -425,7 +435,7 @@ func TestCoolingStillChecksCanonicalSummaryBudget(t *testing.T) {
 	if err != nil || !changed {
 		t.Fatalf("canonical budget did not trigger Compact: %v %v", changed, err)
 	}
-	state, err := db.ContextCooling(ctx, "sess_1")
+	state, err = db.ContextCooling(ctx, "sess_1")
 	if err != nil || state.ThroughTurnID != "" {
 		t.Fatalf("Compact did not reset cooling: %+v %v", state, err)
 	}

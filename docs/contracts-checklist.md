@@ -15,6 +15,7 @@
 | `turn.delta` | — | — | `part(text/thought)`, `delta` |
 | `turn.tool` | — | — | `callID`, `name`, `phase`, `argsDelta?`, `stream?`, `content?`, `ok?`, `summaryKind?`, `summaryCount?`, `attachments?`;`phase=output` 的 stdout/stderr 只进前端 overlay,最终以 message.parts 兜底 |
 | `turn.completed` | ✓ | ✓ | `assistantMessageID` |
+| `turn.compaction` | — | — | `turnID`, `phase(started/finished)`，覆盖当前轮的整次自动压缩，含全部摘要分批；压缩期间订阅可收到当前状态 |
 | `turn.compacted` | ✓ | ✓ | `assistantMessageID`；摘要属于当前 turn，保持 running，刷新 canonical turn |
 | `turn.failed` | ✓ | ✓ | `error`;有半截输出时 `assistantMessageID` + `interrupted` |
 | `collaboration.changed` | ✓ | ✓ | 父会话子任务集合或结果变更；按父 sessionID 重新读取快照 |

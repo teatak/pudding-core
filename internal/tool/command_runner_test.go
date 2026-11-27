@@ -29,6 +29,9 @@ func TestCommandEnvironmentIncludesDesktopToolchainPaths(t *testing.T) {
 	if len(parts) == 0 || parts[0] != os.Getenv("PATH") {
 		t.Fatalf("original PATH must remain first: %q", pathValue)
 	}
+	if runtime.GOOS != "windows" && !slices.Contains(parts, "/usr/local/go/bin") {
+		t.Fatalf("PATH is missing the standard Go install directory: %q", pathValue)
+	}
 	for _, want := range commonExecutableDirs() {
 		if !slices.Contains(parts, want) {
 			t.Fatalf("PATH %q does not contain %q", pathValue, want)

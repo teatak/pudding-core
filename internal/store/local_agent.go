@@ -9,13 +9,14 @@ type LocalAgentState struct {
 	AgentSessionID string `json:"agentSessionID"`
 	Executable     string `json:"executable"`
 	CWD            string `json:"cwd"`
-	// Last successfully acknowledged prompt in this agent context.
-	LastTurnID      string `json:"lastTurnID"`
-	ContextUsed     int    `json:"contextUsed"`
-	ContextSize     int    `json:"contextSize"`
-	Image           bool   `json:"image"`
-	Audio           bool   `json:"audio"`
-	EmbeddedContext bool   `json:"embeddedContext"`
+	// Versions of instructions delivered to this ACP session.
+	GuideDigests    map[string]string `json:"guideDigests,omitempty"`
+	LastTurnID      string            `json:"lastTurnID"`
+	ContextUsed     int               `json:"contextUsed"`
+	ContextSize     int               `json:"contextSize"`
+	Image           bool              `json:"image"`
+	Audio           bool              `json:"audio"`
+	EmbeddedContext bool              `json:"embeddedContext"`
 }
 
 // LocalAgentContext records why this turn uses a newly created ACP context.

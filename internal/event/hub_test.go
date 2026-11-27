@@ -56,6 +56,31 @@ func TestHubCancelClosesAndRemovesSubscriber(t *testing.T) {
 	hub.Publish(Event{SessionID: "session", Seq: 1})
 }
 
+func TestSubscribeDuringCompaction(t *testing.T) {
+	h := NewHub()
+	ev := Event{Kind: TurnCompaction, SessionID: "s", TurnID: "t", Phase: "started"}
+	h.Publish(ev)
+	ch, cancel := h.Subscribe("s")
+	defer cancel()
+	select {
+	case snapshot := <-ch:
+		if snapshot.TurnID != ev.TurnID || snapshot.Kind != ev.Kind || snapshot.Phase != ev.Phase || snapshot.Persistent() {
+			t.Fatalf("unexpected compaction snapshot: %+v", snapshot)
+		}
+	default:
+		t.Fatal("missing active compaction")
+	}
+	ev.Phase = "finished"
+	h.Publish(ev)
+	ch, cancelLater := h.Subscribe("s")
+	defer cancelLater()
+	select {
+	case snapshot := <-ch:
+		t.Fatalf("finished compaction replayed: %+v", snapshot)
+	default:
+	}
+}
+
 func TestPageArgumentSnapshotsJoinReconnectAndTermination(t *testing.T) {
 	h := NewHub()
 	ev := Event{Kind: TurnTool, SessionID: "s", TurnID: "t", CallID: "c", Name: "builtin_page_edit", Phase: "streaming_args", ArgsDelta: `{"replacement":"`}

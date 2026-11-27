@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"unicode"
 
 	"github.com/teatak/pudding-core/internal/contextbuilder"
 	"github.com/teatak/pudding-core/internal/provider"
@@ -185,16 +186,14 @@ func (e *Engine) summarizeCompactBatches(
 			}
 			continue
 		}
-		if end == len(remaining) && hasRetain && end > 1 {
-			// Split once more if carrying a short summary would make room for
-			// retained corrections in the final request.
-			probe := rollingBatchHistory(partialSummaryRecord(strings.Repeat("x ", probeTokens*2)), nil, effective, sourceIDs, true, coldTurns)
-			if _, ok := fitRequest(probe, target, compactMinOutputTokens); ok {
-				end = max(1, end/2)
-			}
-		}
 		if end == len(remaining) {
-			return generate(rollingBatchHistory(rolling, remaining, effective, sourceIDs, false, coldTurns), target)
+			// Summarize the last sources first if their partial can make room
+			// for retained corrections in the final request.
+			probe := rollingBatchHistory(partialSummaryRecord(strings.Repeat("x ", probeTokens*2)), nil, effective, sourceIDs, true, coldTurns)
+			if _, ok := fitRequest(probe, target, compactMinOutputTokens); !hasRetain || !ok {
+				return generate(rollingBatchHistory(rolling, remaining, effective, sourceIDs, false, coldTurns), target)
+			}
+			end = max(1, end/2)
 		}
 		if aligned := alignChunkToTurnBoundary(remaining, end); aligned > 0 {
 			end = aligned
@@ -289,11 +288,11 @@ func compactSummaryRequest(resolved *resolvedModel, history, hint string, target
 		}
 		output := outputLimit
 		if window := req.Config.ContextWindow; window > 0 {
-			input := estimate.Total()
-			margin := compactInputMargin(input)
-			output = min(output, window-input-margin)
+			input := compactInputTokens(req, estimate.Total())
+			budget := compactRequestBudget(window)
+			output = min(output, budget-input)
 			if output < compactMinOutputTokens {
-				return provider.Request{}, fmt.Errorf("%w: estimated summary input %d + margin %d leaves fewer than %d summary output tokens in window %d", ErrContextBudget, input, margin, compactMinOutputTokens, window)
+				return provider.Request{}, fmt.Errorf("%w: estimated summary input %d leaves fewer than %d output tokens in summary budget %d (window %d)", ErrContextBudget, input, compactMinOutputTokens, budget, window)
 			}
 		}
 		if output < compactMinOutputTokens {
@@ -310,9 +309,30 @@ func compactSummaryRequest(resolved *resolvedModel, history, hint string, target
 	}
 }
 
-// This is an estimation allowance, not an exact tokenizer guarantee. Keep it
-// proportional to the actual summary input rather than the model's window.
-func compactInputMargin(input int) int { return max(256, (input+49)/50) }
+// Leave one fifth of a known window unused, including when the provider
+// reserves the entire requested output allowance.
+func compactRequestBudget(window int) int { return window - (window+4)/5 }
+
+// The wire estimate counts four ASCII characters per token. In summary prompts,
+// IDs, code and serialized tool data split more densely than prose. Budget two
+// ASCII digits or punctuation/symbol characters per token. Summary messages
+// are plain text; Text and Parts contain the same prompt.
+func compactInputTokens(req provider.Request, wireTokens int) int {
+	structuredChars := func(text string) int {
+		n := 0
+		for _, r := range text {
+			if r <= unicode.MaxASCII && (unicode.IsDigit(r) || unicode.IsPunct(r) || unicode.IsSymbol(r)) {
+				n++
+			}
+		}
+		return n
+	}
+	n := structuredChars(req.System)
+	for _, m := range req.Messages {
+		n += structuredChars(m.Text)
+	}
+	return wireTokens + (n+3)/4
+}
 
 func compactSummaryConfig(base provider.ModelConfig, output int) provider.ModelConfig {
 	cfg := base
