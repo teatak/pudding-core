@@ -31,7 +31,7 @@ func TestRemoteAPIStartupAuthDirectClaimAndRevoke(t *testing.T) {
 	}
 	scope := store.RemoteScope{Mode: "lan", Origin: "http://192.168.1.10:18443"}
 	initial := decodeJSON[store.RemoteAccess](t, req(t, http.MethodGet, server.URL+"/remote/access", nil))
-	if initial.DesktopID == "" || initial.Devices == nil || initial.Pairings == nil {
+	if initial.DesktopID == "" || !initial.LANHostname || initial.Devices == nil || initial.Pairings == nil {
 		t.Fatal(initial)
 	}
 	create := req(t, http.MethodPost, server.URL+"/remote/pairings", scope)
@@ -172,7 +172,7 @@ func TestRemoteEventsAreCanonicalMutationInvalidations(t *testing.T) {
 	}
 }
 
-func TestRemoteAPILANHTTPIPv4OriginBoundary(t *testing.T) {
+func TestRemoteAPILANHTTPOriginBoundary(t *testing.T) {
 	st := storetest.New(t)
 	server := httptest.NewServer(New(nil, st, st, nil).Handler(testToken, nil))
 	defer server.Close()
@@ -193,6 +193,17 @@ func TestRemoteAPILANHTTPIPv4OriginBoundary(t *testing.T) {
 	response.Body.Close()
 	if response.StatusCode != http.StatusCreated {
 		t.Fatalf("loopback HTTP pairing status=%d", response.StatusCode)
+	}
+	host := store.RemoteScope{Mode: "lan", Origin: "http://my-mac.local:18443"}
+	code := decodeJSON[store.RemotePairingCode](t, req(t, http.MethodPost, server.URL+"/remote/pairings", host))
+	claim := decodeJSON[store.RemotePairingClaim](t, req(t, http.MethodPost, server.URL+"/remote/pairings/request", store.RemotePairingRequest{
+		RemoteScope: host, Code: code.Code, DeviceName: "Phone",
+	}))
+	auth := decodeJSON[store.RemoteAuthorization](t, req(t, http.MethodPost, server.URL+"/remote/authorize", store.RemoteAuthorizeInput{
+		RemoteScope: host, Token: claim.Token,
+	}))
+	if auth.DesktopID == "" || auth.Device.Origin != host.Origin {
+		t.Fatal("hostname pairing did not authorize the same address", auth.Device.Origin)
 	}
 }
 

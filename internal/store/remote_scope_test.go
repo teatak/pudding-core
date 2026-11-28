@@ -10,6 +10,7 @@ func TestRemoteScopeLANHTTPAndRelayHTTPS(t *testing.T) {
 		{Mode: "lan", Origin: "http://192.168.1.10:18443"},
 		{Mode: "lan", Origin: "http://127.0.0.1:18443"},
 		{Mode: "lan", Origin: "http://192.168.1.10"},
+		{Mode: "lan", Origin: "http://my-mac.local:18443"},
 		{Mode: "relay", Origin: "https://phone.example.com"},
 	} {
 		t.Run(scope.Mode+"_"+scope.Origin, func(t *testing.T) {
@@ -21,6 +22,9 @@ func TestRemoteScopeLANHTTPAndRelayHTTPS(t *testing.T) {
 	for _, scope := range []RemoteScope{
 		{Mode: "lan", Origin: "https://192.168.1.10:18443"},
 		{Mode: "lan", Origin: "http://localhost:18443"},
+		{Mode: "lan", Origin: "http://my-mac.example:18443"},
+		{Mode: "lan", Origin: "http://sub.my-mac.local:18443"},
+		{Mode: "lan", Origin: "http://-invalid.local:18443"},
 		{Mode: "lan", Origin: "http://[::1]:18443"},
 		{Mode: "lan", Origin: "http://[::ffff:127.0.0.1]:18443"},
 		{Mode: "lan", Origin: "http://192.168.1.999:18443"},

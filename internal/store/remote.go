@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/netip"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -14,6 +15,9 @@ var ErrRemoteUnauthorized = errors.New("store: remote credential unavailable or 
 
 const RemotePairingLifetime = 5 * time.Minute
 const RemoteDeviceLifetime = 30 * 24 * time.Hour
+
+// Bonjour LocalHostName is one DNS label followed by .local.
+var bonjourHostname = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.local$`)
 
 // RemoteScope identifies one browser host registration. Gateway injects these
 // fields; a credential issued for LAN can never authorize a relay origin.
@@ -30,7 +34,8 @@ func (s RemoteScope) Validate() error {
 	switch s.Mode {
 	case "lan":
 		address, err := netip.ParseAddr(u.Hostname())
-		if u.Scheme != "http" || err != nil || !address.Is4() {
+		localName := !strings.HasPrefix(u.Host, "[") && bonjourHostname.MatchString(u.Hostname())
+		if u.Scheme != "http" || ((err != nil || !address.Is4()) && !localName) {
 			return ErrInvalidRemote
 		}
 	case "relay":
@@ -56,9 +61,10 @@ type RemotePairing struct {
 	ExpiresAt time.Time `json:"expiresAt"`
 }
 type RemoteAccess struct {
-	DesktopID string          `json:"desktopID"`
-	Devices   []RemoteDevice  `json:"devices"`
-	Pairings  []RemotePairing `json:"pairings"`
+	LANHostname bool            `json:"lanHostname"`
+	DesktopID   string          `json:"desktopID"`
+	Devices     []RemoteDevice  `json:"devices"`
+	Pairings    []RemotePairing `json:"pairings"`
 }
 type RemotePairingCode struct {
 	ID        string    `json:"id"`

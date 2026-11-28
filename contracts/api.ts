@@ -1542,7 +1542,7 @@ export const remotePairing = remoteScope.extend({
   id: z.string(), expiresAt: z.string(),
 });
 export const remoteAccess = z.object({
-  desktopID: z.string(), devices: z.array(remoteDevice), pairings: z.array(remotePairing),
+  desktopID: z.string(), lanHostname: z.boolean().optional(), devices: z.array(remoteDevice), pairings: z.array(remotePairing),
 });
 export const remotePairingCode = z.object({ id: z.string(), code: z.string(), expiresAt: z.string() });
 export const remotePairingRequest = remoteScope.extend({ code: z.string(), deviceName: z.string() });

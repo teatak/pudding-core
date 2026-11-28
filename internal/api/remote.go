@@ -38,6 +38,7 @@ func (s *Server) remoteAccess(c *cart.Context) error {
 	if err != nil {
 		return s.remoteFail(c, err)
 	}
+	out.LANHostname = true
 	c.JSON(http.StatusOK, out)
 	return nil
 }
